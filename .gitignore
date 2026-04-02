@@ -1,0 +1,39 @@
+.env
+__pycache__/
+*.pyc
+
+# Data files (too large / generated / sensitive)
+data/odds_cache.json
+data/dashboard.db
+data/bets.db
+data/*.bz2
+*.xlsx
+*.xlsm
+*.csv
+*.zip
+
+# Notebooks
+*.ipynb
+
+# PDFs and docs
+*.pdf
+*.odt
+
+# Logs
+logs/
+
+# IDE / editor
+.claude/
+.vscode/
+*.swp
+
+# Generated models
+models/
+
+# Checkpoints
+Checkpoints for Test/
+
+# Misc
+codebase/
+Dixon Coles Paper/
+New Project Data/
