@@ -52,6 +52,113 @@ BTTS_DEFAULT_CONFIG = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# BTTS OOF prediction cache — Phase 3 ROI validator input
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def precompute_btts_season(train_df, test_df, features, dc_kwargs=None):
+    """Train BTTS models once and return raw predictions + metadata.
+
+    Counterpart of ``backtest.precompute_season`` for the BTTS market. Same
+    return shape, so the generic OOF generator can consume both uniformly.
+
+    Produces XGB + LGB + DC + LR raw predictions for P(BTTS=Yes) on the
+    test season, plus per-model logit-shift calibration params and the
+    recent-season base rate. No bet selection happens here — that's the
+    validator's job.
+
+    Args:
+        train_df: Training set (all seasons strictly before the test season).
+        test_df:  Test season, with BTTSY/BTTSN odds columns already merged.
+        features: BTTS feature column names.
+        dc_kwargs: Dixon-Coles constructor kwargs (typically tuned upstream).
+
+    Returns:
+        dict with xgb_raw / lgb_raw / lr_raw / dc_raw arrays, per-model
+        calibration shifts, base_rate, per-fixture match_data, and season.
+    """
+    y_train = ((train_df["Home_Goals"] > 0)
+               & (train_df["Away_Goals"] > 0)).astype(int).values
+    y_test = ((test_df["Home_Goals"] > 0)
+              & (test_df["Away_Goals"] > 0)).astype(int).values
+
+    X_train = train_df[features].values
+    train_seasons = sorted(train_df["SeasonIndex"].unique())
+    last_season = train_seasons[-1]
+    es_val_mask = train_df["SeasonIndex"] == last_season
+    es_train_mask = ~es_val_mask
+
+    X_es_train = train_df.loc[es_train_mask, features].values
+    y_es_train = ((train_df.loc[es_train_mask, "Home_Goals"] > 0)
+                  & (train_df.loc[es_train_mask, "Away_Goals"] > 0)).astype(int).values
+    X_es_val = train_df.loc[es_val_mask, features].values
+    y_es_val = ((train_df.loc[es_val_mask, "Home_Goals"] > 0)
+                & (train_df.loc[es_val_mask, "Away_Goals"] > 0)).astype(int).values
+    if len(X_es_train) < 100 or len(X_es_val) < 50:
+        n_val = min(380, len(train_df) // 5)
+        X_es_train, y_es_train = X_train[:-n_val], y_train[:-n_val]
+        X_es_val, y_es_val = X_train[-n_val:], y_train[-n_val:]
+
+    if dc_kwargs is None:
+        dc_kwargs = {}
+
+    # --- Train 4 base models (BTTS target, BTTS-tuned hyperparams) ---
+    xgb_m = train_xgb_btts(X_es_train, y_es_train, X_es_val, y_es_val)
+    lgb_m = train_lgb_btts(X_es_train, y_es_train, X_es_val, y_es_val,
+                           feature_names=features)
+    lr_m, lr_scaler = train_logreg(X_train, y_train)
+    dc_m = DixonColesPredictor(**dc_kwargs)
+    dc_m.fit(train_df)
+
+    # --- Raw predictions on the test set ---
+    X_test = test_df[features].values
+    xgb_raw = xgb_m.predict_proba(X_test)[:, 1]
+    lgb_raw = lgb_m.predict_proba(pd.DataFrame(X_test, columns=features))[:, 1]
+    lr_raw = _lr_predict(lr_m, lr_scaler, X_test)
+    dc_raw = dc_m.predict_proba_btts_df(test_df)
+
+    # --- Base rate + calibration ---
+    recent_s = sorted(train_seasons)[-2:]
+    recent_mask = train_df["SeasonIndex"].isin(recent_s)
+    if recent_mask.sum() >= 100:
+        recent_train = train_df.loc[recent_mask]
+        base_rate = ((recent_train["Home_Goals"] > 0)
+                     & (recent_train["Away_Goals"] > 0)).mean()
+    else:
+        base_rate = y_train.mean()
+
+    _, xgb_shift = _calibrate(xgb_raw, base_rate)
+    _, lgb_shift = _calibrate(lgb_raw, base_rate)
+    _, lr_shift = _calibrate(lr_raw, base_rate)
+    _, dc_shift = _calibrate(dc_raw, base_rate)
+
+    # --- Per-fixture metadata (BTTSY/BTTSN merged upstream) ---
+    test_sorted = test_df.sort_values("Date").reset_index(drop=True)
+    sorted_positions = test_df.reset_index(drop=True).sort_values(
+        "Date").index.tolist()
+    match_data = []
+    for match_num, (_, row) in enumerate(test_sorted.iterrows()):
+        pred_idx = sorted_positions[match_num]
+        match_data.append({
+            "pred_idx": pred_idx,
+            "actual": int(y_test[pred_idx]),
+            "odds_yes": row.get("BTTSY", np.nan),
+            "odds_no": row.get("BTTSN", np.nan),
+            "season": row.get("SeasonIndex", 0),
+            "home": row.get("Home_Team", ""),
+            "away": row.get("Away_Team", ""),
+            "date": row.get("Date", ""),
+        })
+
+    return {
+        "xgb_raw": xgb_raw, "lgb_raw": lgb_raw, "lr_raw": lr_raw, "dc_raw": dc_raw,
+        "xgb_shift": xgb_shift, "lgb_shift": lgb_shift,
+        "lr_shift": lr_shift, "dc_shift": dc_shift,
+        "base_rate": base_rate, "match_data": match_data,
+        "season": test_df["SeasonIndex"].iloc[0] if len(test_df) > 0 else 0,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Core BTTS backtest engine
 # ═══════════════════════════════════════════════════════════════════════════════
 

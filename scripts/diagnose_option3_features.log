@@ -1,0 +1,212 @@
+
+######################################################################
+#  Option 3 Step 4: feature-addition A/B
+#  Variant A = pre-Option-3 features
+#  Variant B = current (with 2a corner efficiency + 2b set-play
+#             xG ratio + 2c _3 rolling windows)
+######################################################################
+
+[pipeline] Loading PL...
+Loading data...
+Dataset: 9801 rows, 80 columns
+Class balance: Over 2.5 = 51.4%
+Computing rest days...
+Computing fixture congestion features...
+Computing discipline features (cards, fouls)...
+Fetching weather features...
+  Existing weather cache: 9801 entries
+  Weather cache is up to date.
+  Weather features merged: 9801/9801 matches
+Computing match context features (relegation/title/euro proximity)...
+Adding derived features...
+Computing rolling xG features...
+Adding player availability features...
+Adding FPL pre-season strength features...
+  FPL strength features: 2280/9801 matches have data
+Adding squad strength features...
+  Squad features merged: 679 matches (seasons 24-25)
+Computing advanced features (Elo, Poisson, rates)...
+Computing BTTS-specific features...
+Computing corners-specific features...
+  Corner features: 9481/9801 matches have data
+Computing shot-level features...
+  Shot-level features: 3713/9801 matches have data
+Computing roster features (xGChain, xGBuildup, xA)...
+  Roster features: 3719/9801 matches have data
+Computing tactical features (PPDA, deep completions)...
+  Tactical features: 3724/9801 matches have data
+Computing detailed match features (2024-25)...
+  Detailed match features: 350/9801 matches have data
+Using 182 O/U features, 117 BTTS features, 69 Corners features
+Initializing promoted team features...
+  Filled 450 feature values for promoted teams
+Train: 3800 | Val: 380 | Test: 301
+Train seasons: 14-23
+Val seasons: 24-24
+Test seasons: 25-25
+Remaining NaNs in train features: 44716
+[pipeline] PL: 9801 rows
+
+======================================================================
+  PL / ou25
+======================================================================
+  pre-Option-3:  166 features
+  post-Option-3: 182 features (+16)
+
+  [A] PRE-Option-3 (stripped)
+       [A] S19: n_feat=166 AUC=0.6151 Brier=0.2405
+       [A] S20: n_feat=166 AUC=0.5447 Brier=0.2487
+       [A] S21: n_feat=166 AUC=0.6042 Brier=0.2417
+       [A] S22: n_feat=166 AUC=0.6262 Brier=0.2404
+       [A] S23: n_feat=166 AUC=0.5280 Brier=0.2407
+       [A] S24: n_feat=166 AUC=0.5628 Brier=0.2440
+       [A] S25: n_feat=166 AUC=0.6075 Brier=0.2448
+
+  [B] POST-Option-3 (current)
+       [B] S19: n_feat=182 AUC=0.6224 Brier=0.2399
+       [B] S20: n_feat=182 AUC=0.5496 Brier=0.2483
+       [B] S21: n_feat=182 AUC=0.6014 Brier=0.2421
+       [B] S22: n_feat=182 AUC=0.6222 Brier=0.2405
+       [B] S23: n_feat=182 AUC=0.5270 Brier=0.2410
+       [B] S24: n_feat=182 AUC=0.5650 Brier=0.2440
+       [B] S25: n_feat=182 AUC=0.6081 Brier=0.2446
+
+======================================================================
+  PL / btts
+======================================================================
+  pre-Option-3:  109 features
+  post-Option-3: 117 features (+8)
+
+  [A] PRE-Option-3 (stripped)
+       [A] S19: n_feat=109 AUC=0.5377 Brier=0.2488
+       [A] S20: n_feat=109 AUC=0.5340 Brier=0.2496
+       [A] S21: n_feat=109 AUC=0.5716 Brier=0.2470
+       [A] S22: n_feat=109 AUC=0.5296 Brier=0.2492
+       [A] S23: n_feat=109 AUC=0.5293 Brier=0.2438
+       [A] S24: n_feat=109 AUC=0.5249 Brier=0.2457
+       [A] S25: n_feat=109 AUC=0.5713 Brier=0.2450
+
+  [B] POST-Option-3 (current)
+       [B] S19: n_feat=117 AUC=0.5450 Brier=0.2486
+       [B] S20: n_feat=117 AUC=0.5256 Brier=0.2500
+       [B] S21: n_feat=117 AUC=0.5828 Brier=0.2457
+       [B] S22: n_feat=117 AUC=0.5321 Brier=0.2493
+       [B] S23: n_feat=117 AUC=0.5327 Brier=0.2445
+       [B] S24: n_feat=117 AUC=0.5263 Brier=0.2456
+       [B] S25: n_feat=117 AUC=0.5695 Brier=0.2451
+
+[pipeline] Loading EFL...
+=== Championship Pipeline ===
+
+Loaded 13608 matches, 25 seasons
+Adding derived features...
+Adding congestion features...
+Adding discipline features...
+Adding half-time features...
+Computing advanced rolling features...
+Computing Elo ratings...
+Computing Poisson features...
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:561: RuntimeWarning: Mean of empty slice
+  df["Poisson_Consensus"] = np.nanmean(
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:577: RuntimeWarning: Mean of empty slice
+  df["Poisson_Consensus_15"] = np.nanmean(
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:584: RuntimeWarning: Mean of empty slice
+  df["Expected_TG_Consensus"] = np.nanmean(
+Computing team strength ratings...
+Adding context features...
+Initialising promoted team features...
+  Filled 53280 feature values for promoted teams
+
+Features available: 126 / 126
+O/U 1.5 features available: 126 / 126
+BTTS features available: 83 / 83
+Over 2.5 rate: 0.475
+Over 1.5 rate: 0.730
+BTTS rate: 0.517
+[pipeline] EFL: 13608 rows
+
+======================================================================
+  EFL / ou25
+======================================================================
+  pre-Option-3:  114 features
+  post-Option-3: 126 features (+12)
+
+  [A] PRE-Option-3 (stripped)
+       [A] S19: n_feat=114 AUC=0.5525 Brier=0.2487
+       [A] S20: n_feat=114 AUC=0.5114 Brier=0.2495
+       [A] S21: n_feat=114 AUC=0.5102 Brier=0.2498
+       [A] S22: n_feat=114 AUC=0.5229 Brier=0.2467
+       [A] S23: n_feat=114 AUC=0.5206 Brier=0.2519
+       [A] S24: n_feat=114 AUC=0.5658 Brier=0.2446
+
+  [B] POST-Option-3 (current)
+       [B] S19: n_feat=126 AUC=0.5505 Brier=0.2489
+       [B] S20: n_feat=126 AUC=0.5183 Brier=0.2491
+       [B] S21: n_feat=126 AUC=0.5000 Brier=0.2500
+       [B] S22: n_feat=126 AUC=0.5251 Brier=0.2466
+       [B] S23: n_feat=126 AUC=0.5164 Brier=0.2519
+       [B] S24: n_feat=126 AUC=0.5716 Brier=0.2443
+
+======================================================================
+  EFL / ou15
+======================================================================
+  pre-Option-3:  114 features
+  post-Option-3: 126 features (+12)
+
+  [A] PRE-Option-3 (stripped)
+       [A] S19: n_feat=114 AUC=0.5285 Brier=0.1943
+       [A] S20: n_feat=114 AUC=0.4882 Brier=0.2225
+       [A] S21: n_feat=114 AUC=0.5130 Brier=0.2022
+       [A] S22: n_feat=114 AUC=0.5627 Brier=0.2082
+       [A] S23: n_feat=114 AUC=0.4990 Brier=0.1892
+       [A] S24: n_feat=114 AUC=0.5241 Brier=0.2064
+
+  [B] POST-Option-3 (current)
+       [B] S19: n_feat=126 AUC=0.5279 Brier=0.1943
+       [B] S20: n_feat=126 AUC=0.4811 Brier=0.2227
+       [B] S21: n_feat=126 AUC=0.5177 Brier=0.2021
+       [B] S22: n_feat=126 AUC=0.5564 Brier=0.2083
+       [B] S23: n_feat=126 AUC=0.4940 Brier=0.1893
+       [B] S24: n_feat=126 AUC=0.5314 Brier=0.2062
+
+======================================================================
+  EFL / btts
+======================================================================
+  pre-Option-3:  77 features
+  post-Option-3: 83 features (+6)
+
+  [A] PRE-Option-3 (stripped)
+       [A] S19: n_feat=77 AUC=0.5039 Brier=0.2490
+       [A] S20: n_feat=77 AUC=0.4884 Brier=0.2543
+       [A] S21: n_feat=77 AUC=0.4896 Brier=0.2515
+       [A] S22: n_feat=77 AUC=0.5365 Brier=0.2492
+       [A] S23: n_feat=77 AUC=0.5259 Brier=0.2491
+       [A] S24: n_feat=77 AUC=0.5586 Brier=0.2466
+
+  [B] POST-Option-3 (current)
+       [B] S19: n_feat=83 AUC=0.5089 Brier=0.2489
+       [B] S20: n_feat=83 AUC=0.5062 Brier=0.2535
+       [B] S21: n_feat=83 AUC=0.4929 Brier=0.2513
+       [B] S22: n_feat=83 AUC=0.5385 Brier=0.2491
+       [B] S23: n_feat=83 AUC=0.5246 Brier=0.2491
+       [B] S24: n_feat=83 AUC=0.5598 Brier=0.2471
+
+######################################################################
+#  SUMMARY - Option 3 feature additions
+######################################################################
+
+  Combo             nFeat  AUC-pre  AUC-post      dAUC  Brier-pre  Brier-post    dBrier
+  PL/ou25        166->182   0.5841    0.5851   +0.0010     0.2429      0.2429   -0.0000
+  PL/btts        109->117   0.5426    0.5448   +0.0022     0.2470      0.2470   -0.0000
+  EFL/ou25       114->126   0.5306    0.5303   -0.0002     0.2485      0.2485   -0.0001
+  EFL/ou15       114->126   0.5193    0.5181   -0.0012     0.2038      0.2038   +0.0000
+  EFL/btts         77->83   0.5172    0.5218   +0.0047     0.2500      0.2498   -0.0001
+
+  Full results saved to: reports/diagnose_option3_features.txt
+
+######################################################################
+#  Interpretation:
+#    any market dAUC > +0.003     -> features help, keep them
+#    all markets |dAUC| <= 0.001  -> neutral, keep (no harm)
+#    any market dAUC < -0.002     -> feature adds hurt; consider revert
+######################################################################

@@ -1,0 +1,203 @@
+"""
+ESPN scores fetcher for match settlement.
+
+Uses ESPN's public scoreboard API (no API key required) to fetch
+completed match results for Premier League and Championship.
+
+Replaces football-data.org which required an API key and had
+frequent 403 errors.
+"""
+import logging
+from datetime import datetime, timedelta
+
+import requests
+
+from api.team_mapping import normalize
+
+logger = logging.getLogger(__name__)
+
+BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer"
+
+# ESPN league identifiers
+LEAGUE_IDS = {
+    "PL": "eng.1",
+    "EFL": "eng.2",
+    "ELC": "eng.2",  # alias used by settlement.py
+}
+
+# ESPN name → DB name (PL). DB uses "FC" suffix format.
+# normalize() from team_mapping handles most PL names, but ESPN
+# drops "FC" so we map explicitly where normalize() would fail.
+_ESPN_TO_PL: dict[str, str] = {
+    "AFC Bournemouth": "AFC Bournemouth",
+    "Arsenal": "Arsenal FC",
+    "Aston Villa": "Aston Villa FC",
+    "Brentford": "Brentford FC",
+    "Brighton & Hove Albion": "Brighton & Hove Albion FC",
+    "Burnley": "Burnley FC",
+    "Chelsea": "Chelsea FC",
+    "Crystal Palace": "Crystal Palace FC",
+    "Everton": "Everton FC",
+    "Fulham": "Fulham FC",
+    "Ipswich Town": "Ipswich Town FC",
+    "Leeds United": "Leeds United FC",
+    "Leicester City": "Leicester City FC",
+    "Liverpool": "Liverpool FC",
+    "Manchester City": "Manchester City FC",
+    "Manchester United": "Manchester United FC",
+    "Newcastle United": "Newcastle United FC",
+    "Nottingham Forest": "Nottingham Forest FC",
+    "Southampton": "Southampton FC",
+    "Sunderland": "Sunderland AFC",
+    "Tottenham Hotspur": "Tottenham Hotspur FC",
+    "West Ham United": "West Ham United FC",
+    "Wolverhampton Wanderers": "Wolverhampton Wanderers FC",
+}
+
+# ESPN name → DB name (Championship). DB uses short forms.
+_ESPN_TO_CHAMP: dict[str, str] = {
+    "Birmingham City": "Birmingham",
+    "Blackburn Rovers": "Blackburn",
+    "Bristol City": "Bristol City",
+    "Charlton Athletic": "Charlton",
+    "Coventry City": "Coventry",
+    "Derby County": "Derby",
+    "Hull City": "Hull",
+    "Ipswich Town": "Ipswich",
+    "Leicester City": "Leicester",
+    "Middlesbrough": "Middlesbrough",
+    "Millwall": "Millwall",
+    "Norwich City": "Norwich",
+    "Oxford United": "Oxford",
+    "Portsmouth": "Portsmouth",
+    "Preston North End": "Preston",
+    "Queens Park Rangers": "QPR",
+    "Sheffield United": "Sheffield United",
+    "Sheffield Wednesday": "Sheffield Weds",
+    "Southampton": "Southampton",
+    "Stoke City": "Stoke",
+    "Swansea City": "Swansea",
+    "Watford": "Watford",
+    "West Bromwich Albion": "West Brom",
+    "Wrexham": "Wrexham",
+    "Wrexham AFC": "Wrexham",
+}
+
+
+def _resolve_team(espn_name: str, competition: str) -> str:
+    """Map ESPN team name to the name used in the dashboard database.
+
+    Args:
+        espn_name: Team name from ESPN API.
+        competition: Competition code ('PL' or 'EFL'/'ELC').
+
+    Returns:
+        Database-compatible team name.
+    """
+    if competition in ("EFL", "ELC"):
+        mapped = _ESPN_TO_CHAMP.get(espn_name)
+        if mapped:
+            return mapped
+    else:
+        mapped = _ESPN_TO_PL.get(espn_name)
+        if mapped:
+            return mapped
+
+    # Fallback: try normalize()
+    return normalize(espn_name)
+
+
+def fetch_completed_matches(
+    days_back: int = 7,
+    competitions: list[str] | None = None,
+) -> list[dict]:
+    """Fetch recently completed matches from ESPN.
+
+    Queries each date in the lookback window for each competition.
+    No API key required.
+
+    Args:
+        days_back: How many days back to look for finished matches.
+        competitions: Competition codes to fetch. Defaults to ['PL', 'ELC'].
+
+    Returns:
+        List of dicts with home_team, away_team, home_goals, away_goals,
+        total_goals, date, competition.
+    """
+    if competitions is None:
+        competitions = ["PL", "ELC"]
+
+    results: list[dict] = []
+    seen: set[tuple] = set()  # deduplicate
+
+    for comp in competitions:
+        espn_league = LEAGUE_IDS.get(comp)
+        if not espn_league:
+            logger.warning("Unknown competition code: %s", comp)
+            continue
+
+        for day_offset in range(days_back + 1):
+            date = datetime.utcnow() - timedelta(days=day_offset)
+            date_str = date.strftime("%Y%m%d")
+
+            try:
+                url = f"{BASE_URL}/{espn_league}/scoreboard"
+                resp = requests.get(
+                    url, params={"dates": date_str}, timeout=10)
+                resp.raise_for_status()
+                data = resp.json()
+            except requests.RequestException as e:
+                logger.warning(
+                    "ESPN fetch failed for %s on %s: %s",
+                    comp, date_str, e,
+                )
+                continue
+
+            for event in data.get("events", []):
+                match_comp = event.get("competitions", [{}])[0]
+                status = match_comp.get("status", {}).get("type", {})
+
+                if not status.get("completed", False):
+                    continue
+
+                competitors = match_comp.get("competitors", [])
+                if len(competitors) < 2:
+                    continue
+
+                # ESPN: competitors[0] is always home
+                home_data = competitors[0]
+                away_data = competitors[1]
+
+                home_name = home_data["team"]["displayName"]
+                away_name = away_data["team"]["displayName"]
+
+                home_goals = int(home_data.get("score", 0))
+                away_goals = int(away_data.get("score", 0))
+
+                # Resolve to DB names
+                home_db = _resolve_team(home_name, comp)
+                away_db = _resolve_team(away_name, comp)
+
+                # Deduplicate (same match can appear on adjacent date queries)
+                dedup_key = (home_db, away_db, date_str)
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+
+                match_date = event.get("date", "")
+
+                results.append({
+                    "home_team": home_db,
+                    "away_team": away_db,
+                    "home_goals": home_goals,
+                    "away_goals": away_goals,
+                    "total_goals": home_goals + away_goals,
+                    "date": match_date,
+                    "competition": comp,
+                })
+
+    logger.info(
+        "ESPN: fetched %d completed matches (last %d days, %s)",
+        len(results), days_back, ", ".join(competitions),
+    )
+    return results

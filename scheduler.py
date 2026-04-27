@@ -1,102 +1,429 @@
 """
-Automated scheduler for the betting system.
+Dynamic fixture-aware scheduler for the betting system.
 
-Runs three jobs:
-  1. Generate predictions — every matchday morning (fetches odds, runs models)
-  2. Settle bets — every evening after matches finish
-  3. Refresh odds — periodically to catch line movements
+Three-tier job architecture:
+  Tier 1 — Weekly heavy retrain (Sunday 23:30): full pipeline + model training
+  Tier 2 — Matchday light fetch: load pickled models + fresh odds + edge calc
+  Tier 3 — Edge recalculation (no API): pure computation from cached data
 
-Uses APScheduler with persistent job store so jobs survive restarts.
+Uses APScheduler with:
+  - CronTrigger for static recurring jobs (weekly retrain, daily planner, settlement)
+  - DateTrigger for one-off pre-kickoff odds refreshes (auto-removed after firing)
+
+API budget: ~150 calls/month (well within 500/month free tier).
 """
 import os
 import sys
 import logging
-from datetime import datetime
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.date import DateTrigger
 
 logger = logging.getLogger("scheduler")
+UK_TZ = ZoneInfo("Europe/London")
 
-# ── Job Functions ──
+# Reference to the global scheduler instance (set in create_scheduler)
+_scheduler: BackgroundScheduler | None = None
 
-def job_generate_predictions() -> None:
-    """Fetch live odds, run models, save recommendations."""
-    logger.info("Starting prediction generation...")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Tier 1: Heavy Retrain (Weekly)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def job_weekly_retrain() -> None:
+    """Full retrain + pickle save for both PL and Championship.
+
+    Runs pipeline feature engineering, trains all models, saves trained
+    state and pipeline cache to disk for fast matchday loading.
+    """
+    logger.info("Starting weekly retrain...")
+    print(f"[{datetime.now():%H:%M:%S}] Weekly retrain starting...")
+
+    # ── PL ──
     try:
         from predict import LivePredictor
-        from dashboard import save_recommendations
+        from dashboard import (save_recommendations, save_match_analysis,
+                               log_predictions)
 
         predictor = LivePredictor(verbose=True)
         predictor.load_data()
         predictor.train()
+        predictor.save_trained_state()
+        predictor.save_pipeline_cache()
+
         recs = predictor.generate_recommendations()
         n_saved = save_recommendations(recs)
+        analysis = getattr(predictor, "_match_analysis", [])
+        if analysis:
+            save_match_analysis(analysis, league="PL")
+            log_predictions(analysis, league="PL")
 
-        logger.info(f"Predictions complete: {len(recs)} generated, {n_saved} new saved")
-        print(f"[{datetime.now():%H:%M:%S}] Predictions: {len(recs)} generated, "
-              f"{n_saved} new saved")
+        logger.info(f"PL retrain complete: {len(recs)} recs, {n_saved} saved")
+        print(f"[{datetime.now():%H:%M:%S}] PL retrain: {len(recs)} recs, "
+              f"{n_saved} saved")
     except Exception as e:
-        logger.error(f"Prediction generation failed: {e}", exc_info=True)
-        print(f"[{datetime.now():%H:%M:%S}] Prediction FAILED: {e}")
+        logger.error(f"PL retrain failed: {e}", exc_info=True)
+        print(f"[{datetime.now():%H:%M:%S}] PL retrain FAILED: {e}")
 
+    # ── Championship ──
+    try:
+        from championship_predict import ChampionshipPredictor
+        from dashboard import (save_recommendations, save_match_analysis,
+                               log_predictions)
+
+        champ = ChampionshipPredictor(verbose=True)
+        champ.load_data()
+        champ.train()
+        champ.save_trained_state()
+        champ.save_pipeline_cache()
+
+        recs = champ.generate_recommendations()
+        n_saved = save_recommendations(recs, league="EFL")
+        analysis = getattr(champ, "_match_analysis", [])
+        if analysis:
+            save_match_analysis(analysis, league="EFL")
+            log_predictions(analysis, league="EFL")
+
+        logger.info(f"EFL retrain complete: {len(recs)} recs, {n_saved} saved")
+        print(f"[{datetime.now():%H:%M:%S}] EFL retrain: {len(recs)} recs, "
+              f"{n_saved} saved")
+    except Exception as e:
+        logger.error(f"EFL retrain failed: {e}", exc_info=True)
+        print(f"[{datetime.now():%H:%M:%S}] EFL retrain FAILED: {e}")
+
+    print(f"[{datetime.now():%H:%M:%S}] Weekly retrain complete.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Tier 2: Light Matchday Fetch
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def job_matchday_fetch(
+    league: str = "PL",
+    markets: tuple[str, ...] = ("totals", "btts"),
+) -> None:
+    """Light prediction: load pickled models + fresh odds + save analysis.
+
+    Args:
+        league: "PL" or "EFL".
+        markets: Which odds markets to fetch.
+    """
+    logger.info(f"Matchday fetch for {league} (markets={markets})...")
+    try:
+        from dashboard import (save_recommendations, save_match_analysis,
+                               log_predictions)
+
+        if league == "PL":
+            from predict import LivePredictor
+            predictor = LivePredictor(verbose=True)
+        else:
+            from championship_predict import ChampionshipPredictor
+            predictor = ChampionshipPredictor(verbose=True)
+
+        recs = predictor.light_refresh(markets=markets)
+
+        if league == "PL":
+            n_saved = save_recommendations(recs)
+        else:
+            n_saved = save_recommendations(recs, league="EFL")
+
+        analysis = getattr(predictor, "_match_analysis", [])
+        lg = "PL" if league == "PL" else "EFL"
+        if analysis:
+            save_match_analysis(analysis, league=lg)
+            log_predictions(analysis, league=lg)
+
+        logger.info(f"{league} matchday fetch: {len(recs)} recs, {n_saved} saved, "
+                    f"{len(analysis)} analysis rows")
+        print(f"[{datetime.now():%H:%M:%S}] {league} fetch: {len(recs)} recs, "
+              f"{n_saved} saved, {len(analysis)} analysis rows")
+    except Exception as e:
+        logger.error(f"{league} matchday fetch failed: {e}", exc_info=True)
+        print(f"[{datetime.now():%H:%M:%S}] {league} fetch FAILED: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLV: Closing Odds Capture
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def job_fetch_closing_odds() -> None:
+    """Fetch closing odds for all unsettled logged bets (both leagues).
+
+    Should fire ~5 minutes before kickoff. Updates logged_bets with
+    the latest available odds so CLV can be calculated after settlement.
+    """
+    logger.info("Fetching closing odds for logged bets...")
+    try:
+        from dashboard import fetch_closing_odds_for_logged_bets
+
+        total = 0
+        for league in ("PL", "EFL"):
+            n = fetch_closing_odds_for_logged_bets(league)
+            if n > 0:
+                logger.info(f"  {league}: updated closing odds for {n} bets")
+            total += n
+
+        print(f"[{datetime.now():%H:%M:%S}] Closing odds: "
+              f"{total} bets updated")
+    except Exception as e:
+        logger.error(f"Closing odds fetch failed: {e}", exc_info=True)
+        print(f"[{datetime.now():%H:%M:%S}] Closing odds FAILED: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Settlement
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def job_settle_bets() -> None:
-    """Pull match results and settle open bets."""
+    """Pull match results and settle open bets + predictions."""
     logger.info("Starting bet settlement...")
     try:
-        from settlement import settle_bets
+        from settlement import settle_bets, settle_predictions
         summary = settle_bets(days_back=3, verbose=True)
         logger.info(f"Settlement complete: {summary}")
         print(f"[{datetime.now():%H:%M:%S}] Settlement: "
               f"{summary['settled']} settled, "
               f"{summary['won']}W/{summary['lost']}L, "
               f"P/L: {summary['profit']:+.4f}")
+
+        # Also settle prediction tracking (model accuracy, not stakes)
+        pred_summary = settle_predictions(days_back=3, verbose=True)
+        logger.info(f"Prediction settlement: {pred_summary}")
     except Exception as e:
         logger.error(f"Settlement failed: {e}", exc_info=True)
         print(f"[{datetime.now():%H:%M:%S}] Settlement FAILED: {e}")
 
 
-def job_refresh_odds() -> None:
-    """Refresh odds cache without full model retrain."""
-    logger.info("Refreshing odds cache...")
+# ═══════════════════════════════════════════════════════════════════════════════
+# Dynamic Fixture-Aware Scheduling
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def schedule_matchday_jobs(
+    scheduler: BackgroundScheduler,
+    league: str,
+    kickoffs: list[datetime],
+) -> None:
+    """Schedule matchday-specific jobs for a set of kickoff times.
+
+    Creates:
+      - Morning fetch at 09:00 (all markets including BTTS)
+      - Pre-kickoff fetch 60 min before each distinct kickoff (totals only)
+
+    Uses DateTrigger for one-off execution (auto-removed after firing).
+
+    Args:
+        scheduler: The APScheduler instance.
+        league: "PL" or "EFL".
+        kickoffs: List of distinct kickoff datetimes (UK time).
+    """
+    if not kickoffs:
+        return
+
+    matchday = kickoffs[0].date()
+    now = datetime.now(UK_TZ)
+    jobs_added = 0
+
+    # Morning fetch at 09:00 on matchday (all markets)
+    morning_time = datetime(
+        matchday.year, matchday.month, matchday.day,
+        9, 0, tzinfo=UK_TZ,
+    )
+    morning_id = f"matchday_{league}_{matchday}_morning"
+
+    if morning_time > now:
+        # Remove existing job with same ID if it exists (e.g. re-run of planner)
+        if scheduler.get_job(morning_id):
+            scheduler.remove_job(morning_id)
+        scheduler.add_job(
+            job_matchday_fetch,
+            trigger=DateTrigger(run_date=morning_time),
+            id=morning_id,
+            name=f"{league} morning fetch ({matchday})",
+            kwargs={"league": league, "markets": ("totals", "btts")},
+            replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        jobs_added += 1
+        logger.info(f"Scheduled {league} morning fetch at {morning_time:%H:%M}")
+
+    # Pre-kickoff fetch 60 min before each distinct kickoff (totals only)
+    for ko in kickoffs:
+        pre_ko_time = ko - timedelta(minutes=60)
+        pre_ko_id = f"matchday_{league}_{matchday}_{ko:%H%M}_preko"
+
+        if pre_ko_time > now:
+            if scheduler.get_job(pre_ko_id):
+                scheduler.remove_job(pre_ko_id)
+            scheduler.add_job(
+                job_matchday_fetch,
+                trigger=DateTrigger(run_date=pre_ko_time),
+                id=pre_ko_id,
+                name=f"{league} pre-kickoff {ko:%H:%M} ({matchday})",
+                kwargs={"league": league, "markets": ("totals",)},
+                replace_existing=True,
+                misfire_grace_time=1800,
+            )
+            jobs_added += 1
+            logger.info(f"Scheduled {league} pre-kickoff at {pre_ko_time:%H:%M} "
+                        f"(KO {ko:%H:%M})")
+
+    # CLV: capture closing odds 5 min before earliest kickoff
+    earliest_ko = min(kickoffs)
+    clv_time = earliest_ko - timedelta(minutes=5)
+    clv_id = f"matchday_{league}_{matchday}_clv"
+
+    if clv_time > now:
+        if scheduler.get_job(clv_id):
+            scheduler.remove_job(clv_id)
+        scheduler.add_job(
+            job_fetch_closing_odds,
+            trigger=DateTrigger(run_date=clv_time),
+            id=clv_id,
+            name=f"CLV closing odds ({matchday})",
+            replace_existing=True,
+            misfire_grace_time=1800,
+        )
+        jobs_added += 1
+        logger.info(f"Scheduled CLV closing odds at {clv_time:%H:%M} "
+                    f"(earliest KO {earliest_ko:%H:%M})")
+
+    if jobs_added:
+        print(f"[{datetime.now():%H:%M:%S}] Scheduled {jobs_added} "
+              f"{league} jobs for {matchday}")
+
+
+def job_plan_today() -> None:
+    """Daily planner: check for today's fixtures and schedule matchday jobs.
+
+    Runs at 07:00 every day. If matches are found, creates morning and
+    pre-kickoff jobs via schedule_matchday_jobs().
+    """
+    global _scheduler
+    if _scheduler is None:
+        logger.warning("No scheduler instance — cannot plan matchday jobs")
+        return
+
+    logger.info("Running daily fixture planner...")
+
     try:
-        from api.odds_api import fetch_epl_odds
-        matches = fetch_epl_odds(force_refresh=True)
-        logger.info(f"Odds refreshed: {len(matches)} matches")
-        print(f"[{datetime.now():%H:%M:%S}] Odds refresh: {len(matches)} matches")
+        from fixture_schedule import get_matchday_kickoffs
+    except ImportError as e:
+        logger.error(f"Cannot import fixture_schedule: {e}")
+        return
+
+    today = date.today()
+    any_matches = False
+
+    for league in ("PL", "EFL"):
+        try:
+            kickoffs = get_matchday_kickoffs(league, today)
+            if kickoffs:
+                any_matches = True
+                print(f"[{datetime.now():%H:%M:%S}] {league}: "
+                      f"{len(kickoffs)} kickoff(s) today — "
+                      f"{', '.join(ko.strftime('%H:%M') for ko in kickoffs)}")
+                schedule_matchday_jobs(_scheduler, league, kickoffs)
+            else:
+                logger.info(f"No {league} matches today")
+        except Exception as e:
+            logger.error(f"Fixture check failed for {league}: {e}",
+                         exc_info=True)
+
+    if not any_matches:
+        print(f"[{datetime.now():%H:%M:%S}] No matches today for any league")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Legacy Job Functions (kept for CLI compatibility)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def job_generate_predictions() -> None:
+    """Full PL prediction (retrain + odds + save). Used by CLI run-predict."""
+    logger.info("Starting PL prediction generation...")
+    try:
+        from predict import LivePredictor
+        from dashboard import (save_recommendations, save_match_analysis,
+                               log_predictions)
+
+        predictor = LivePredictor(verbose=True)
+        predictor.load_data()
+        predictor.train()
+        predictor.save_trained_state()
+        predictor.save_pipeline_cache()
+        recs = predictor.generate_recommendations()
+        n_saved = save_recommendations(recs)
+
+        analysis = getattr(predictor, "_match_analysis", [])
+        if analysis:
+            save_match_analysis(analysis, league="PL")
+            log_predictions(analysis, league="PL")
+
+        logger.info(f"Predictions complete: {len(recs)} generated, {n_saved} new saved, "
+                    f"{len(analysis)} analysis rows")
+        print(f"[{datetime.now():%H:%M:%S}] Predictions: {len(recs)} generated, "
+              f"{n_saved} saved, {len(analysis)} analysis rows")
     except Exception as e:
-        logger.error(f"Odds refresh failed: {e}", exc_info=True)
-        print(f"[{datetime.now():%H:%M:%S}] Odds refresh FAILED: {e}")
+        logger.error(f"Prediction generation failed: {e}", exc_info=True)
+        print(f"[{datetime.now():%H:%M:%S}] Prediction FAILED: {e}")
 
 
-# ── Schedule Configuration ──
+def job_generate_champ_predictions() -> None:
+    """Full Championship prediction. Used by CLI run-champ."""
+    logger.info("Starting Championship prediction generation...")
+    try:
+        from championship_predict import ChampionshipPredictor
+        from dashboard import (save_recommendations, save_match_analysis,
+                               log_predictions)
 
-# Premier League matches typically:
-#   - Saturday 15:00 (bulk), some at 12:30 and 17:30
-#   - Sunday 14:00, 16:30
-#   - Midweek: Tue/Wed 19:30, 20:00
-#   - Monday/Friday: occasional 20:00
+        predictor = ChampionshipPredictor(verbose=True)
+        predictor.load_data()
+        predictor.train()
+        predictor.save_trained_state()
+        predictor.save_pipeline_cache()
+        recs = predictor.generate_recommendations()
+        n_saved = save_recommendations(recs, league="EFL")
 
-SCHEDULE = {
-    "predict_morning": {
-        "func": job_generate_predictions,
+        analysis = getattr(predictor, "_match_analysis", [])
+        if analysis:
+            save_match_analysis(analysis, league="EFL")
+            log_predictions(analysis, league="EFL")
+
+        logger.info(f"Championship predictions: {len(recs)} generated, {n_saved} saved")
+        print(f"[{datetime.now():%H:%M:%S}] Championship: {len(recs)} recs, "
+              f"{n_saved} saved, {len(analysis)} analysis rows")
+    except Exception as e:
+        logger.error(f"Championship prediction failed: {e}", exc_info=True)
+        print(f"[{datetime.now():%H:%M:%S}] Championship prediction FAILED: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Schedule Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Static jobs that run regardless of fixtures
+STATIC_SCHEDULE = {
+    "weekly_retrain": {
+        "func": job_weekly_retrain,
+        "trigger": CronTrigger(
+            day_of_week="sun",
+            hour=23,
+            minute=30,
+            timezone=UK_TZ,
+        ),
+        "description": "Weekly full retrain (Sunday 23:30)",
+    },
+    "daily_planner": {
+        "func": job_plan_today,
         "trigger": CronTrigger(
             day_of_week="mon,tue,wed,thu,fri,sat,sun",
-            hour=8,
+            hour=7,
             minute=0,
+            timezone=UK_TZ,
         ),
-        "description": "Generate predictions every morning at 08:00",
-    },
-    "predict_prematch": {
-        "func": job_generate_predictions,
-        "trigger": CronTrigger(
-            day_of_week="sat",
-            hour=11,
-            minute=0,
-        ),
-        "description": "Saturday pre-match refresh at 11:00",
+        "description": "Daily fixture planner (07:00)",
     },
     "settle_evening": {
         "func": job_settle_bets,
@@ -104,8 +431,9 @@ SCHEDULE = {
             day_of_week="mon,tue,wed,thu,fri,sat,sun",
             hour=23,
             minute=0,
+            timezone=UK_TZ,
         ),
-        "description": "Settle bets every evening at 23:00",
+        "description": "Settle bets every evening (23:00)",
     },
     "settle_morning": {
         "func": job_settle_bets,
@@ -113,42 +441,44 @@ SCHEDULE = {
             day_of_week="mon,tue,wed,thu,fri,sat,sun",
             hour=9,
             minute=0,
+            timezone=UK_TZ,
         ),
-        "description": "Morning settlement catch-up at 09:00",
-    },
-    "odds_refresh": {
-        "func": job_refresh_odds,
-        "trigger": IntervalTrigger(minutes=30),
-        "description": "Refresh odds every 30 minutes",
+        "description": "Morning settlement catch-up (09:00)",
     },
 }
 
 
 def create_scheduler() -> BackgroundScheduler:
-    """Create and configure the scheduler with all jobs."""
+    """Create and configure the scheduler with static jobs.
+
+    Dynamic matchday jobs are added by job_plan_today() at 07:00 daily.
+    """
+    global _scheduler
     scheduler = BackgroundScheduler(timezone="Europe/London")
 
-    for job_id, config in SCHEDULE.items():
+    for job_id, config in STATIC_SCHEDULE.items():
         scheduler.add_job(
             config["func"],
             trigger=config["trigger"],
             id=job_id,
             name=config["description"],
             replace_existing=True,
-            misfire_grace_time=3600,  # 1 hour grace for missed jobs
+            misfire_grace_time=3600,
         )
 
+    _scheduler = scheduler
     return scheduler
 
 
 def print_schedule(scheduler: BackgroundScheduler) -> None:
     """Print the current schedule."""
     print("\n  Scheduled Jobs:")
-    print(f"  {'Job':<25} {'Next Run':<25} {'Description'}")
-    print(f"  {'-'*80}")
+    print(f"  {'Job':<35} {'Next Run':<25} {'Description'}")
+    print(f"  {'-'*90}")
     for job in scheduler.get_jobs():
-        next_run = job.next_run_time.strftime("%Y-%m-%d %H:%M %Z") if job.next_run_time else "—"
-        print(f"  {job.id:<25} {next_run:<25} {job.name}")
+        next_run = (job.next_run_time.strftime("%Y-%m-%d %H:%M %Z")
+                    if job.next_run_time else "—")
+        print(f"  {job.id:<35} {next_run:<25} {job.name}")
     print()
 
 
@@ -156,12 +486,19 @@ def run_now(job_name: str) -> None:
     """Run a specific job immediately by name.
 
     Args:
-        job_name: One of 'predict', 'settle', 'odds'.
+        job_name: One of 'predict', 'predict-champ', 'settle',
+                  'retrain', 'plan', 'fetch-pl', 'fetch-efl',
+                  'closing-odds'.
     """
     jobs = {
         "predict": job_generate_predictions,
+        "predict-champ": job_generate_champ_predictions,
         "settle": job_settle_bets,
-        "odds": job_refresh_odds,
+        "retrain": job_weekly_retrain,
+        "plan": job_plan_today,
+        "fetch-pl": lambda: job_matchday_fetch("PL"),
+        "fetch-efl": lambda: job_matchday_fetch("EFL"),
+        "closing-odds": job_fetch_closing_odds,
     }
     func = jobs.get(job_name)
     if func is None:
@@ -170,9 +507,8 @@ def run_now(job_name: str) -> None:
     func()
 
 
-def main():
+def main() -> None:
     """Run the scheduler as a long-lived process alongside the dashboard."""
-    # Set up logging
     log_dir = os.path.join(os.path.dirname(__file__), "logs")
     os.makedirs(log_dir, exist_ok=True)
 
@@ -186,44 +522,59 @@ def main():
     )
 
     print("=" * 60)
-    print("  Premier League Betting System — Scheduler")
+    print("  Betting System — Dynamic Scheduler (PL + Championship)")
+    print("  API budget: ~150 calls/month (500 limit)")
     print("=" * 60)
 
     scheduler = create_scheduler()
-    print_schedule(scheduler)
 
     # Parse CLI args for immediate actions
     if len(sys.argv) > 1:
         action = sys.argv[1].lower()
-        if action == "run-predict":
-            print("Running predictions now...\n")
-            job_generate_predictions()
-            return
-        elif action == "run-settle":
-            print("Running settlement now...\n")
-            job_settle_bets()
-            return
-        elif action == "run-odds":
-            print("Refreshing odds now...\n")
-            job_refresh_odds()
-            return
-        elif action == "run-all":
-            print("Running all jobs now...\n")
-            job_generate_predictions()
-            job_settle_bets()
+        immediate_actions = {
+            "run-predict": ("Running PL predictions...", job_generate_predictions),
+            "run-settle": ("Running settlement...", job_settle_bets),
+            "run-champ": ("Running Championship predictions...",
+                          job_generate_champ_predictions),
+            "run-retrain": ("Running weekly retrain...", job_weekly_retrain),
+            "run-plan": ("Running daily fixture planner...", job_plan_today),
+            "run-fetch-pl": ("Running PL light fetch...",
+                             lambda: job_matchday_fetch("PL")),
+            "run-fetch-efl": ("Running EFL light fetch...",
+                              lambda: job_matchday_fetch("EFL")),
+            "run-closing-odds": ("Fetching closing odds for logged bets...",
+                                 job_fetch_closing_odds),
+            "run-all": ("Running all predictions...", None),
+        }
+
+        if action in immediate_actions:
+            msg, func = immediate_actions[action]
+            print(f"\n{msg}\n")
+            if action == "run-all":
+                job_generate_predictions()
+                job_generate_champ_predictions()
+                job_settle_bets()
+            else:
+                func()
             return
         elif action == "schedule":
             pass  # Fall through to start scheduler
         else:
-            print(f"Usage: python scheduler.py [schedule|run-predict|run-settle|run-odds|run-all]")
+            print(f"Usage: python scheduler.py [schedule|run-predict|run-settle|"
+                  f"run-champ|run-retrain|run-plan|run-fetch-pl|run-fetch-efl|run-all]")
             return
 
     # Start scheduler
     scheduler.start()
+    print_schedule(scheduler)
+
+    # Also run the daily planner immediately on startup to schedule today's jobs
+    print("  Running fixture planner for today...")
+    job_plan_today()
+
     print("  Scheduler started. Press Ctrl+C to stop.\n")
 
     try:
-        # Keep the process alive
         import time
         while True:
             time.sleep(60)

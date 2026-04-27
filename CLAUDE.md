@@ -2,20 +2,68 @@
 
 ## Project Overview
 
-A statistical betting system for Premier League football markets. Uses a Dixon-Coles model (fully implemented) to generate probability estimates for match outcomes, compares them against bookmaker odds across multiple sources, and produces bet recommendations with confidence levels. Currently focused on over/under goals markets with plans to expand into additional football betting markets.
+A statistical betting system for Premier League football markets. Uses a 4-model stacking ensemble (XGBoost + LightGBM + LogReg + Dixon-Coles Poisson) to generate probability estimates, compares them against bookmaker odds from multiple sources (The-Odds-API, OddsPapi), and produces bet recommendations with Kelly staking. Active markets: O/U 2.5 goals, alternative O/U lines (1.5, 3.5, etc.), and BTTS.
 
 ## Tech Stack
 
-- **Language:** Python
-- **Core Model:** Dixon-Coles (implemented and working)
-- **Data Sources:** Football APIs (Football-Data.org, FBref/StatsBomb), odds APIs, historical CSV datasets
+- **Language:** Python 3.13
+- **Core Models:** XGBoost, LightGBM, Logistic Regression, Dixon-Coles Poisson (4-model stacking ensemble)
+- **Data Sources:** Football-Data.org, FPL API, Understat, The-Odds-API, OddsPapi, Betfair, historical CSVs
+- **Dashboard:** Dash + Plotly + SQLite
+- **Scheduling:** APScheduler
 - **Testing:** pytest
+- **Dependencies:** See `requirements.txt`
 
 ## Project Status Notes
 
 - Dixon-Coles model is fully implemented and working — do not refactor or restructure it without explicit approval
-- There are miscellaneous unused files in the project that need cleanup — do not assume every file is active
+- BTTS and O/U strategies are finalised — do not modify strategy logic, thresholds, blend weights, or recommendation parameters without explicit approval
+- Betfair data integration is on hold (website issues)
 - Before modifying any existing file, check whether it is actively imported/used elsewhere in the project
+
+## Active File Structure
+
+### Core Pipeline
+- `config.py` — Centralised configuration (paths, features, seasons, API keys, alt line settings)
+- `pipeline.py` — Feature engineering (150+ features from CSV, xG, FPL, Understat, weather)
+- `model.py` — 4-model ensemble (XGBoost + LightGBM + LogReg + Dixon-Coles) with walk-forward CV
+
+### Prediction & Betting
+- `predict.py` — Live prediction engine (O/U 2.5, BTTS, alt O/U lines)
+- `alt_lines.py` — Alternative O/U line evaluation (Poisson goal distribution, Asian settlement)
+- `backtest.py` — Walk-forward backtesting for O/U 2.5
+- `btts_backtest.py` — BTTS backtesting
+- `alt_lines_backtest.py` — Alternative O/U lines backtesting
+
+### Data Loading
+- `btts_data.py` — BTTS odds from footiqo CSVs
+- `corners_data.py` — Corners O/U odds from Betfair
+- `alt_lines_data.py` — Betfair goal O/U odds merger
+
+### Dashboard & Settlement
+- `dashboard.py` — Dash web UI (port 8050) with active picks, history, performance
+- `settlement.py` — Post-match bet settlement via football-data.org API
+
+### Scheduling & Entry Points
+- `run.py` — Main entry point (dashboard + scheduler)
+- `scheduler.py` — APScheduler for automated predictions & settlements
+- `auto_update.py` — Legacy auto-updater (still in use via Task Scheduler)
+- `OverUnderDash.py` — Legacy dashboard (still referenced by auto_update.py)
+
+### API Integrations (`api/`)
+- `odds_api.py` — The-Odds-API (bulk O/U 2.5 + BTTS)
+- `oddspapi.py` — OddsPapi (alt lines, Asian Handicap, Pinnacle sharp lines)
+- `football_data.py` — football-data.org (match results)
+- `fpl.py`, `fpl_historical.py`, `fpl_team_strengths.py` — FPL data
+- `player_features.py` — Squad availability from FPL-Core-Insights
+- `understat_scraper.py` — Understat xG/shots/tactical data
+- `team_mapping.py` — Team name normalisation
+- `weather.py` — Open-Meteo weather features
+
+### Testing (`tests/`)
+- `test_settlement.py` — Settlement outcome determination
+- `test_alt_lines.py` — Goal distribution, probability, Asian settlement
+- `test_dashboard.py` — Market label formatting, DB operations
 
 ---
 
@@ -108,6 +156,23 @@ A statistical betting system for Premier League football markets. Uses a Dixon-C
 - New markets should reuse the existing data pipeline wherever possible rather than building parallel pipelines
 
 **Key files/areas:** New market modules, probability derivations, integration with existing pipeline
+
+---
+
+## Agent Maintenance Rule
+
+After any session that modifies data schemas, adds or removes data sources, changes model parameters or architecture, adds new markets, or changes the dashboard structure:
+
+1. **Review `.claude/agents/` and `.claude/skills/`** for drift against the current codebase
+2. **Update any references** that are now stale — table schemas, file paths, API endpoints, column names, model details, team name mappings, market definitions
+3. **Update `.claude/commands/full-review.md`** if the review checklist no longer matches what exists
+4. **Do not create new agents** unless a genuinely distinct domain of responsibility has emerged that cannot be covered by an existing agent or skill. Adding a new data source does not justify a new agent — update the existing data-qa agent instead
+
+This is a maintenance task, not a feature. Do it at the end of the session after all code changes are complete, and summarise what was updated.
+
+## Pre-Scan Rule
+
+At the start of any session that involves the data pipeline, scheduling, settlement, dashboard display, or API integrations, run `/pre-scan` before making changes. This catches stale caches, missing env vars, broken DB schemas, and team name mapping gaps before they cause silent failures downstream. Skip this for sessions that only touch model logic, tests, or documentation.
 
 ---
 

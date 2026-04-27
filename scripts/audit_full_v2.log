@@ -1,0 +1,193 @@
+
+######################################################################
+#  Feature audit runner - 5 combos
+######################################################################
+
+
+[pipeline] Loading PL data...
+Loading data...
+Dataset: 9801 rows, 80 columns
+Class balance: Over 2.5 = 51.4%
+Computing rest days...
+Computing fixture congestion features...
+Computing discipline features (cards, fouls)...
+Fetching weather features...
+  Existing weather cache: 9801 entries
+  Weather cache is up to date.
+  Weather features merged: 9801/9801 matches
+Computing match context features (relegation/title/euro proximity)...
+Adding derived features...
+Computing rolling xG features...
+Adding player availability features...
+Adding FPL pre-season strength features...
+  FPL strength features: 2280/9801 matches have data
+Adding squad strength features...
+  Squad features merged: 679 matches (seasons 24-25)
+Computing advanced features (Elo, Poisson, rates)...
+Computing BTTS-specific features...
+Computing corners-specific features...
+  Corner features: 9481/9801 matches have data
+Computing shot-level features...
+  Shot-level features: 3713/9801 matches have data
+Computing roster features (xGChain, xGBuildup, xA)...
+  Roster features: 3719/9801 matches have data
+Computing tactical features (PPDA, deep completions)...
+  Tactical features: 3724/9801 matches have data
+Computing detailed match features (2024-25)...
+  Detailed match features: 350/9801 matches have data
+Using 166 O/U features, 109 BTTS features, 69 Corners features
+Initializing promoted team features...
+  Filled 450 feature values for promoted teams
+Train: 3800 | Val: 380 | Test: 301
+Train seasons: 14-23
+Val seasons: 24-24
+Test seasons: 25-25
+Remaining NaNs in train features: 44540
+[pipeline] PL: 9801 rows
+
+======================================================================
+  Auditing PL / ou25
+======================================================================
+
+  [audit] PL/ou25: 166 features, target=Over_2_5
+    Fold S24: baseline ensemble AUC=0.5625 (train=3800, val=380, n_perm=5)
+    Fold S25: baseline ensemble AUC=0.5494 (train=4180, val=301, n_perm=5)
+  [audit] saved to reports\feature_audit_PL_ou25.csv
+  [audit] noise baseline: mean=+0.00150, std=0.00409, 1-sigma threshold=+0.00559
+  [audit] 164/167 features flagged as pruning candidates (perm <= 1-sigma above noise)
+  [audit] top 10 by perm_auc_drop:
+    Home_TitleProximity                      group=CONTEXT         perm=+0.01856 xgb_gain=0.0090
+    FPL_Openness                             group=FPL_STRENGTH    perm=+0.00921 xgb_gain=0.0083
+    Attack_Power                             group=ADVANCED        perm=+0.00773 xgb_gain=0.0103
+    Home_XGOverperf_5                        group=XG              perm=+0.00417 xgb_gain=0.0068
+    Expected_TG_Consensus                    group=ADVANCED        perm=+0.00382 xgb_gain=0.0134
+    H2HAvgGoals                              group=EXISTING        perm=+0.00332 xgb_gain=0.0079
+    Home_Past5Corners                        group=EXISTING        perm=+0.00201 xgb_gain=0.0074
+    __noise_baseline__                       group=NOISE_BASELINE  perm=+0.00150 xgb_gain=0.0069
+    Home_RollingXGAgainst_5                  group=XG              perm=+0.00130 xgb_gain=0.0073
+    Away_RollingXGAgainst_5                  group=XG              perm=+0.00126 xgb_gain=0.0062
+
+======================================================================
+  Auditing PL / btts
+======================================================================
+
+  [audit] PL/btts: 109 features, target=BTTS
+    Fold S24: baseline ensemble AUC=0.4875 (train=3800, val=380, n_perm=5)
+    Fold S25: baseline ensemble AUC=0.5067 (train=4180, val=301, n_perm=5)
+  [audit] saved to reports\feature_audit_PL_btts.csv
+  [audit] noise baseline: mean=+0.00294, std=0.00493, 1-sigma threshold=+0.00786
+  [audit] 110/110 features flagged as pruning candidates (perm <= 1-sigma above noise)
+  [audit] top 10 by perm_auc_drop:
+    Away_BTTS_EWM10                          group=ADVANCED        perm=+0.00558 xgb_gain=0.0110
+    Poisson_BTTS_Consensus                   group=BTTS_SPECIFIC   perm=+0.00526 xgb_gain=0.0128
+    FPL_Openness                             group=FPL_STRENGTH    perm=+0.00494 xgb_gain=0.0158
+    Away_RestDays                            group=DERIVED         perm=+0.00418 xgb_gain=0.0050
+    Home_CR_20                               group=EXISTING        perm=+0.00328 xgb_gain=0.0106
+    Home_DefensiveStrength_SOT               group=EXISTING        perm=+0.00300 xgb_gain=0.0114
+    Away_FTS_10                              group=BTTS_SPECIFIC   perm=+0.00299 xgb_gain=0.0190
+    __noise_baseline__                       group=NOISE_BASELINE  perm=+0.00294 xgb_gain=0.0102
+    Home_RelegationProximity                 group=CONTEXT         perm=+0.00201 xgb_gain=0.0097
+    Home_FPL_Defence                         group=FPL_STRENGTH    perm=+0.00176 xgb_gain=0.0121
+
+[pipeline] Loading EFL data...
+=== Championship Pipeline ===
+
+Loaded 13608 matches, 25 seasons
+Adding derived features...
+Adding congestion features...
+Adding discipline features...
+Adding half-time features...
+Computing advanced rolling features...
+Computing Elo ratings...
+Computing Poisson features...
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:526: RuntimeWarning: Mean of empty slice
+  df["Poisson_Consensus"] = np.nanmean(
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:542: RuntimeWarning: Mean of empty slice
+  df["Poisson_Consensus_15"] = np.nanmean(
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:549: RuntimeWarning: Mean of empty slice
+  df["Expected_TG_Consensus"] = np.nanmean(
+Computing team strength ratings...
+Adding context features...
+Initialising promoted team features...
+  Filled 53280 feature values for promoted teams
+
+Features available: 114 / 114
+O/U 1.5 features available: 114 / 114
+BTTS features available: 77 / 77
+Over 2.5 rate: 0.475
+Over 1.5 rate: 0.730
+BTTS rate: 0.517
+[pipeline] EFL: 13608 rows
+
+======================================================================
+  Auditing EFL / ou25
+======================================================================
+
+  [audit] EFL/ou25: 114 features, target=Over_2_5
+    Fold S23: baseline ensemble AUC=0.5330 (train=4968, val=552, n_perm=5)
+    Fold S24: baseline ensemble AUC=0.5653 (train=5520, val=552, n_perm=5)
+  [audit] saved to reports\feature_audit_EFL_ou25.csv
+  [audit] noise baseline: mean=+0.00337, std=0.00262, 1-sigma threshold=+0.00599
+  [audit] 112/115 features flagged as pruning candidates (perm <= 1-sigma above noise)
+  [audit] top 10 by perm_auc_drop:
+    Home_GPG_20                              group=ADVANCED        perm=+0.01122 xgb_gain=0.0123
+    Home_HT_Conceded_5                       group=BTTS_SPECIFIC   perm=+0.00766 xgb_gain=0.0117
+    FPL_Openness                             group=FPL_STRENGTH    perm=+0.00744 xgb_gain=0.0107
+    Home_RelegationProximity                 group=CONTEXT         perm=+0.00511 xgb_gain=0.0101
+    H2H_Draws                                group=EXISTING        perm=+0.00448 xgb_gain=0.0100
+    LeaguePosition_Diff                      group=DERIVED         perm=+0.00361 xgb_gain=0.0105
+    __noise_baseline__                       group=NOISE_BASELINE  perm=+0.00337 xgb_gain=0.0093
+    Home_LeaguePosition                      group=EXISTING        perm=+0.00335 xgb_gain=0.0095
+    Away_GoalDiff_5                          group=DERIVED         perm=+0.00327 xgb_gain=0.0086
+    Away_DefensiveStrength_5                 group=EXISTING        perm=+0.00244 xgb_gain=0.0101
+
+======================================================================
+  Auditing EFL / ou15
+======================================================================
+
+  [audit] EFL/ou15: 114 features, target=Over_1_5
+    Fold S23: baseline ensemble AUC=0.5223 (train=4968, val=552, n_perm=5)
+    Fold S24: baseline ensemble AUC=0.5316 (train=5520, val=552, n_perm=5)
+  [audit] saved to reports\feature_audit_EFL_ou15.csv
+  [audit] noise baseline: mean=-0.00022, std=0.00089, 1-sigma threshold=+0.00066
+  [audit] 96/115 features flagged as pruning candidates (perm <= 1-sigma above noise)
+  [audit] top 10 by perm_auc_drop:
+    Home_Fouls_5                             group=UNKNOWN         perm=+0.01305 xgb_gain=0.0120
+    Home_TGAvg_EWM10                         group=ADVANCED        perm=+0.00762 xgb_gain=0.0102
+    Home_GPG_20                              group=ADVANCED        perm=+0.00507 xgb_gain=0.0133
+    Home Factor                              group=EXISTING        perm=+0.00455 xgb_gain=0.0105
+    Home_DefensiveStrength_5                 group=EXISTING        perm=+0.00362 xgb_gain=0.0105
+    H2H_Draws                                group=EXISTING        perm=+0.00327 xgb_gain=0.0117
+    Away_ShotsPerGoal_5                      group=EXISTING        perm=+0.00297 xgb_gain=0.0102
+    Home_LeaguePosition                      group=EXISTING        perm=+0.00259 xgb_gain=0.0094
+    Away_LeaguePosition                      group=EXISTING        perm=+0.00239 xgb_gain=0.0110
+    Away_AvgRest3                            group=UNKNOWN         perm=+0.00146 xgb_gain=0.0098
+
+======================================================================
+  Auditing EFL / btts
+======================================================================
+
+  [audit] EFL/btts: 77 features, target=BTTS
+    Fold S23: baseline ensemble AUC=0.5032 (train=4968, val=552, n_perm=5)
+    Fold S24: baseline ensemble AUC=0.5430 (train=5520, val=552, n_perm=5)
+  [audit] saved to reports\feature_audit_EFL_btts.csv
+  [audit] noise baseline: mean=+0.00199, std=0.00337, 1-sigma threshold=+0.00536
+  [audit] 76/78 features flagged as pruning candidates (perm <= 1-sigma above noise)
+  [audit] top 10 by perm_auc_drop:
+    Home_GPG_20                              group=ADVANCED        perm=+0.00769 xgb_gain=0.0155
+    Elo_Diff                                 group=ADVANCED        perm=+0.00553 xgb_gain=0.0156
+    Away_LeaguePosition                      group=EXISTING        perm=+0.00508 xgb_gain=0.0148
+    Home_FPL_Defence                         group=FPL_STRENGTH    perm=+0.00481 xgb_gain=0.0151
+    Home_Past5Conceded                       group=EXISTING        perm=+0.00396 xgb_gain=0.0139
+    Away_RelegationProximity                 group=CONTEXT         perm=+0.00243 xgb_gain=0.0144
+    Home_RestDays                            group=DERIVED         perm=+0.00238 xgb_gain=0.0138
+    __noise_baseline__                       group=NOISE_BASELINE  perm=+0.00199 xgb_gain=0.0134
+    Away_MatchesLast14Days                   group=UNKNOWN         perm=+0.00187 xgb_gain=0.0142
+    Away_SOT_CR_20                           group=EXISTING        perm=+0.00180 xgb_gain=0.0148
+
+[summary] wrote reports\feature_audit_summary.md
+
+######################################################################
+#  Feature audit complete - wrote 5 CSV(s) to reports/
+######################################################################
+

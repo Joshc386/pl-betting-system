@@ -4,13 +4,33 @@ __pycache__/
 
 # Data files (too large / generated / sensitive)
 data/odds_cache.json
-data/dashboard.db
-data/bets.db
+data/odds_cache_*.json
+data/oddspapi_cache*.json
+data/api_quota.json
+data/*.db
 data/*.bz2
 *.xlsx
 *.xlsm
 *.csv
 *.zip
+
+# Holding folder used during git surgery (Option β-tight PR split)
+tmp_session_holding/
+
+# Reports — kept local, not part of source
+reports/
+
+# Historical odds-data archives (hundreds of thousands of files, GBs of data —
+# checked into local working copies but not source-controlled)
+BTTS_data/
+BetFairData_OU/
+data/championship_raw/
+data/fpl_historical/
+data/player_data/
+
+# Other local-only data files
+data/understat_*.csv
+data/weather_cache.csv
 
 # Notebooks
 *.ipynb

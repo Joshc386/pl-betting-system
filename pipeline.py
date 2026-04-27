@@ -15,6 +15,8 @@ from config import (
     BTTS_ALL_FEATURES, CORNERS_ALL_FEATURES,
     TRAIN_SEASONS, VAL_SEASONS, TEST_SEASONS, TRAIN_MIN_SEASON,
     MATCHES_2425_PATH,
+    GAMES_PER_SEASON, MAX_POINTS, RELEGATION_POS, EURO_POS,
+    HAS_FPL, HAS_UNDERSTAT,
 )
 
 
@@ -208,7 +210,7 @@ def _compute_prior_season_proximities(df):
     Used to carry over context into the next season's early matches.
     Returns: {season_idx: {team: {relprox, titleprox, europrox}}}
     """
-    DENOM = 114.0  # 38 * 3, max possible points — keeps scale aligned with early-season max_remaining
+    DENOM = float(MAX_POINTS)  # games_per_season * 3, keeps scale aligned with max_remaining
 
     prior_proxim = {}
     for season_idx, season_group in df.groupby("SeasonIndex"):
@@ -240,23 +242,25 @@ def _compute_prior_season_proximities(df):
         # Final standings
         standings = sorted(points.keys(), key=lambda t: (-points[t], -gd_map[t]))
         pts_list = [points[t] for t in standings]
+        rel_idx = RELEGATION_POS - 1 if RELEGATION_POS else len(pts_list) - 3
+        euro_idx = (EURO_POS - 1) if EURO_POS else 6  # default 7th if no euro
         pts_1st = pts_list[0] if len(pts_list) >= 1 else 0
-        pts_7th = pts_list[6] if len(pts_list) >= 7 else 0
-        pts_18th = pts_list[17] if len(pts_list) >= 18 else 0
+        pts_euro = pts_list[euro_idx] if len(pts_list) > euro_idx else 0
+        pts_rel = pts_list[rel_idx] if len(pts_list) > rel_idx else 0
 
         team_proxim = {}
         for t in standings:
             team_proxim[t] = {
-                "relprox": (points[t] - pts_18th) / DENOM,
+                "relprox": (points[t] - pts_rel) / DENOM,
                 "titleprox": (pts_1st - points[t]) / DENOM,
-                "europrox": (points[t] - pts_7th) / DENOM,
+                "europrox": (points[t] - pts_euro) / DENOM,
             }
 
         # Default for promoted teams entering NEXT season
         team_proxim["__promoted_default__"] = {
             "relprox": 0.0,  # right at the relegation line
-            "titleprox": (pts_1st - pts_18th) / DENOM,
-            "europrox": (pts_18th - pts_7th) / DENOM,
+            "titleprox": (pts_1st - pts_rel) / DENOM,
+            "europrox": (pts_rel - pts_euro) / DENOM,
         }
 
         prior_proxim[season_idx] = team_proxim
@@ -319,22 +323,24 @@ def add_match_context_features(df):
             standings = sorted(all_teams, key=lambda t: (-points[t], -gd[t]))
 
             pts_by_pos = [points[t] for t in standings]
+            _rel_idx = RELEGATION_POS - 1 if RELEGATION_POS else len(pts_by_pos) - 3
+            _euro_idx = (EURO_POS - 1) if EURO_POS else 6
             pts_1st = pts_by_pos[0] if len(pts_by_pos) >= 1 else 0
-            pts_7th = pts_by_pos[6] if len(pts_by_pos) >= 7 else 0
-            pts_18th = pts_by_pos[17] if len(pts_by_pos) >= 18 else 0
+            pts_euro = pts_by_pos[_euro_idx] if len(pts_by_pos) > _euro_idx else 0
+            pts_rel = pts_by_pos[_rel_idx] if len(pts_by_pos) > _rel_idx else 0
 
             avg_played = (played[home] + played[away]) / 2
-            season_progress = avg_played / 38.0
-            max_remaining = max((38 - avg_played) * 3, 1)
+            season_progress = avg_played / float(GAMES_PER_SEASON)
+            max_remaining = max((GAMES_PER_SEASON - avg_played) * 3, 1)
 
             df.at[idx, "Season_Progress"] = season_progress
 
             # Compute current-season proximity for both teams
             for team, prefix in [(home, "Home"), (away, "Away")]:
                 t_pts = points[team]
-                curr_rel = (t_pts - pts_18th) / max_remaining
+                curr_rel = (t_pts - pts_rel) / max_remaining
                 curr_title = (pts_1st - t_pts) / max_remaining
-                curr_euro = (t_pts - pts_7th) / max_remaining
+                curr_euro = (t_pts - pts_euro) / max_remaining
 
                 # Blend with prior season (if available)
                 if season_idx > 0 and prev_season:
@@ -672,9 +678,26 @@ def add_advanced_features(df):
     long["GPG_20"] = g["GF"].transform(lambda x: x.shift(1).rolling(20, min_periods=5).mean())
     long["GAPG_20"] = g["GA"].transform(lambda x: x.shift(1).rolling(20, min_periods=5).mean())
 
+    # Option 3 Step 2c: short-horizon (_3) rolling windows.
+    # Hypothesis: current windows are _5 / _10 / _20 / _EWM10. A _3 window
+    # captures micro-trends (injury returns, tactical shifts, hot/cold runs)
+    # that a _5 window smooths over. Collinearity with _5 is expected but
+    # acceptable — the model can pick whichever it finds useful.
+    long["Over25_3"] = g["TG"].transform(
+        lambda x: (x.shift(1) > 2).rolling(3, min_periods=1).mean())
+    long["BTTS_3"] = g["BTTS"].transform(
+        lambda x: x.shift(1).rolling(3, min_periods=1).mean())
+    long["TGAvg_3"] = g["TG"].transform(
+        lambda x: x.shift(1).rolling(3, min_periods=1).mean())
+    long["Past3Goals"] = g["GF"].transform(
+        lambda x: x.shift(1).rolling(3, min_periods=1).sum())
+
     # Corner rolling stats (Wheatcroft: corners outperform goals as inputs)
     long["CornersAvg_5"] = g["Corners_For"].transform(lambda x: x.shift(1).rolling(5, min_periods=2).mean())
     long["CornersConcAvg_5"] = g["Corners_Against"].transform(lambda x: x.shift(1).rolling(5, min_periods=2).mean())
+    # Option 3 Step 2c: _3 corner windows
+    long["CornersAvg_3"] = g["Corners_For"].transform(
+        lambda x: x.shift(1).rolling(3, min_periods=1).mean())
 
     # Shots rolling stats for Poisson lambdas (Wheatcroft: shots are lower variance)
     long["SOT_Avg_5"] = g["SOT_For"].transform(lambda x: x.shift(1).rolling(5, min_periods=2).mean())
@@ -686,9 +709,29 @@ def add_advanced_features(df):
     long["BTTS_EWM10"] = g["BTTS"].transform(lambda x: x.shift(1).ewm(span=10, min_periods=3).mean())
     long["GPG_EWM10"] = g["GF"].transform(lambda x: x.shift(1).ewm(span=10, min_periods=3).mean())
 
+    # Option 3 Step 2a: Corner efficiency = rolling goals / rolling corners.
+    # Hypothesis: teams converting set-piece pressure into goals at above-
+    # league-average rate sustain higher goal expectancy in tight games.
+    # Computed as SUM ratio (rather than MEAN/MEAN) for numerical clarity;
+    # guarded against teams with near-zero corners in the window.
+    goals_sum_5 = g["GF"].transform(lambda x: x.shift(1).rolling(5, min_periods=2).sum())
+    corners_sum_5 = g["Corners_For"].transform(lambda x: x.shift(1).rolling(5, min_periods=2).sum())
+    long["CornerEfficiency_5"] = goals_sum_5 / (corners_sum_5 + 1e-6)
+    # If a team won fewer than 1 corner in the whole window, mark NaN
+    # (otherwise we'd get inflated ratios from a single lucky corner).
+    long.loc[corners_sum_5 < 1.0, "CornerEfficiency_5"] = np.nan
+
+    goals_sum_10 = g["GF"].transform(lambda x: x.shift(1).rolling(10, min_periods=3).sum())
+    corners_sum_10 = g["Corners_For"].transform(lambda x: x.shift(1).rolling(10, min_periods=3).sum())
+    long["CornerEfficiency_10"] = goals_sum_10 / (corners_sum_10 + 1e-6)
+    long.loc[corners_sum_10 < 1.0, "CornerEfficiency_10"] = np.nan
+
     new_cols = ["Over25_5", "BTTS_5", "CS_5", "TGAvg_5", "GPG_20", "GAPG_20",
                 "CornersAvg_5", "CornersConcAvg_5", "SOT_Avg_5", "SOT_Against_Avg_5",
-                "Over25_EWM10", "TGAvg_EWM10", "BTTS_EWM10", "GPG_EWM10"]
+                "Over25_EWM10", "TGAvg_EWM10", "BTTS_EWM10", "GPG_EWM10",
+                "CornerEfficiency_5", "CornerEfficiency_10",
+                # Option 3 Step 2c: short-horizon _3 windows
+                "Over25_3", "BTTS_3", "TGAvg_3", "Past3Goals", "CornersAvg_3"]
     feat_long = long[["Date", "Team"] + new_cols].drop_duplicates(["Date", "Team"])
 
     for prefix in ["Home", "Away"]:
@@ -1274,6 +1317,22 @@ def add_shot_level_features(df, ewm_span=8):
 
     n_filled = df[[f"Home_{rolling_cols[0]}"]].notna().sum().iloc[0]
     print(f"  Shot-level features: {n_filled}/{len(df)} matches have data")
+
+    # Option 3 Step 2b: Set-play xG ratio = SetPieceXG_8 / (SetPieceXG_8 + OpenPlayXG_8).
+    # Hypothesis: teams relying heavily on set pieces for xG have narrower
+    # goal distributions (low open-play creativity floor) — useful discriminator
+    # for O/U markets. Guard against division-by-zero; ratio in [0, 1].
+    for prefix in ["Home", "Away"]:
+        sp_col = f"{prefix}_SetPieceXG_8"
+        op_col = f"{prefix}_OpenPlayXG_8"
+        ratio_col = f"{prefix}_SetPieceXG_Ratio_8"
+        if sp_col in df.columns and op_col in df.columns:
+            denom = df[sp_col] + df[op_col]
+            df[ratio_col] = df[sp_col] / (denom + 1e-6)
+            # Mark NaN when total xG is vanishing — the ratio is meaningless
+            df.loc[denom < 0.05, ratio_col] = float("nan")
+        else:
+            df[ratio_col] = float("nan")
 
     return df
 

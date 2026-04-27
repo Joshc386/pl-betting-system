@@ -42,17 +42,33 @@ def main():
         from dashboard import main as run_dashboard
         run_dashboard()
 
+    elif action == "retrain":
+        from scheduler import job_weekly_retrain
+        print("\n  Running weekly retrain (PL + Championship)...\n")
+        job_weekly_retrain()
+
+    elif action == "fetch":
+        league = sys.argv[2].upper() if len(sys.argv) > 2 else "PL"
+        from scheduler import job_matchday_fetch
+        print(f"\n  Running light fetch for {league}...\n")
+        job_matchday_fetch(league=league)
+
     elif action in ("all", "start"):
         print("=" * 60)
-        print("  Premier League Betting System")
+        print("  Premier League & Championship Betting System")
         print("  Dashboard: http://127.0.0.1:8050")
+        print("  Dynamic scheduler: fixture-aware odds fetching")
         print("=" * 60)
 
         # Start scheduler in background thread
-        from scheduler import create_scheduler, print_schedule
+        from scheduler import create_scheduler, print_schedule, job_plan_today
         scheduler = create_scheduler()
-        print_schedule(scheduler)
         scheduler.start()
+        print_schedule(scheduler)
+
+        # Run fixture planner immediately to schedule today's jobs
+        print("  Checking today's fixtures...")
+        job_plan_today()
         print("  Scheduler running in background.\n")
 
         # Start dashboard in main thread (blocking)
@@ -68,7 +84,7 @@ def main():
             print("  Done.")
 
     else:
-        print("Usage: python run.py [all|predict|settle|dashboard]")
+        print("Usage: python run.py [all|predict|settle|dashboard|retrain|fetch]")
 
 
 if __name__ == "__main__":

@@ -21,7 +21,8 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 # ── Configuration ──
 API_KEY = os.environ.get("ODDS_API_KEY", "")
 BASE_URL = "https://api.the-odds-api.com/v4"
-SPORT = "soccer_epl"
+# Default sport — overridden per league via league_config
+SPORT = os.environ.get("ODDS_API_SPORT", "soccer_epl")
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 CACHE_FILE = os.path.join(CACHE_DIR, "odds_cache.json")
 CACHE_TTL_MINUTES = 30  # refresh every 30 mins (odds move)
@@ -31,23 +32,38 @@ SHARP_BOOKS = {"pinnacle"}  # sharpest lines
 MAJOR_BOOKS = {"betfair", "bet365", "williamhill", "unibet", "betsson"}
 
 
-def _load_cache():
-    """Load cached odds if still fresh."""
+def _load_cache(allow_stale: bool = False):
+    """Load cached odds if still fresh (or any cache if allow_stale).
+
+    Args:
+        allow_stale: If True, return cache regardless of age.
+    """
     if not os.path.exists(CACHE_FILE):
         return None
     try:
         with open(CACHE_FILE, "r") as f:
             cache = json.load(f)
-        cached_at = datetime.fromisoformat(cache.get("timestamp", "2000-01-01"))
+        data = cache.get("data", None)
+        # Treat empty data as no cache
+        if not data:
+            return None
+        if allow_stale:
+            return data
+        ts = cache.get("timestamp", "")
+        if not ts:
+            return None
+        cached_at = datetime.fromisoformat(ts)
         if datetime.now() - cached_at < timedelta(minutes=CACHE_TTL_MINUTES):
-            return cache.get("data", None)
+            return data
     except (json.JSONDecodeError, ValueError):
         pass
     return None
 
 
 def _save_cache(data):
-    """Save odds data to cache."""
+    """Save odds data to cache. Never overwrites good data with empty data."""
+    if not data:
+        return
     os.makedirs(CACHE_DIR, exist_ok=True)
     cache = {"timestamp": datetime.now().isoformat(), "data": data}
     with open(CACHE_FILE, "w") as f:
@@ -66,7 +82,7 @@ def _fetch_market(market_key: str) -> list[dict]:
     url = f"{BASE_URL}/sports/{SPORT}/odds/"
     params = {
         "apiKey": API_KEY,
-        "regions": "uk,eu",
+        "regions": "eu",
         "markets": market_key,
         "oddsFormat": "decimal",
     }
@@ -109,7 +125,7 @@ def _fetch_event_market(event_id: str, market_key: str) -> dict | None:
     url = f"{BASE_URL}/sports/{SPORT}/events/{event_id}/odds"
     params = {
         "apiKey": API_KEY,
-        "regions": "uk,eu",
+        "regions": "eu",
         "markets": market_key,
         "oddsFormat": "decimal",
     }
@@ -126,13 +142,22 @@ def _fetch_event_market(event_id: str, market_key: str) -> dict | None:
         return None
 
 
-def fetch_epl_odds(force_refresh=False):
+def fetch_epl_odds(
+    force_refresh: bool = False,
+    markets: tuple[str, ...] = ("totals", "btts"),
+) -> list[dict]:
     """Fetch Over/Under 2.5 and BTTS odds for all upcoming EPL matches.
 
     Makes separate API calls for totals and btts markets, then merges
     results by event ID. Uses cache to avoid burning API quota.
 
-    Returns list of match dicts with odds from all bookmakers.
+    Args:
+        force_refresh: Bypass cache TTL.
+        markets: Which markets to fetch. ("totals", "btts") for full,
+                 ("totals",) to skip BTTS and save API calls.
+
+    Returns:
+        List of match dicts with odds from all bookmakers.
     """
     if not force_refresh:
         cached = _load_cache()
@@ -143,7 +168,8 @@ def fetch_epl_odds(force_refresh=False):
     totals_raw = _fetch_market("totals")
 
     if not totals_raw:
-        return _load_cache() or []
+        # API failed (quota exhausted, network error) — use stale cache
+        return _load_cache(allow_stale=True) or []
 
     # Build match dict keyed by event ID
     matches_by_id: dict[str, dict] = {}
@@ -197,48 +223,109 @@ def fetch_epl_odds(force_refresh=False):
                         "all_lines": complete_lines,
                     }
 
+    # Fetch alternate totals (O/U 1.5, 3.5, 4.5 etc.) — 1 extra API request
+    alt_raw = _fetch_market("alternate_totals")
+    if alt_raw:
+        for event in alt_raw:
+            eid = event.get("id", "")
+            if eid not in matches_by_id:
+                continue
+            match = matches_by_id[eid]
+
+            for bm in event.get("bookmakers", []):
+                bm_key = bm.get("key", "")
+                bm_title = bm.get("title", bm_key)
+
+                for market in bm.get("markets", []):
+                    if market.get("key") != "alternate_totals":
+                        continue
+
+                    alt_lines: dict = {}
+                    for outcome in market.get("outcomes", []):
+                        point = outcome.get("point")
+                        if point is None:
+                            continue
+                        point = float(point)
+                        if point not in alt_lines:
+                            alt_lines[point] = {}
+                        if outcome.get("name") == "Over":
+                            alt_lines[point]["over"] = outcome.get("price")
+                        elif outcome.get("name") == "Under":
+                            alt_lines[point]["under"] = outcome.get("price")
+
+                    complete = {pt: lo for pt, lo in alt_lines.items()
+                                if "over" in lo and "under" in lo}
+                    if not complete:
+                        continue
+
+                    # Merge into existing bookmaker entry or create new one
+                    if bm_key in match["bookmakers"]:
+                        existing_lines = match["bookmakers"][bm_key].get(
+                            "all_lines", {})
+                        for pt, lo in complete.items():
+                            if pt not in existing_lines:
+                                existing_lines[pt] = lo
+                        match["bookmakers"][bm_key]["all_lines"] = existing_lines
+                    else:
+                        # Book only has alt totals (not the main 2.5 line)
+                        over_25 = complete.get(2.5, {}).get("over")
+                        under_25 = complete.get(2.5, {}).get("under")
+                        match["bookmakers"][bm_key] = {
+                            "title": bm_title,
+                            "over": over_25 or 0,
+                            "under": under_25 or 0,
+                            "is_sharp": bm_key in SHARP_BOOKS,
+                            "is_major": bm_key in MAJOR_BOOKS,
+                            "all_lines": complete,
+                        }
+
     # Fetch BTTS per event (not available on bulk endpoint)
     event_ids = list(matches_by_id.keys())
     btts_fetched = 0
-    print(f"  Fetching BTTS for {len(event_ids)} events...")
-    for eid in event_ids:
-        btts_event = _fetch_event_market(eid, "btts")
-        if btts_event is None:
-            continue
+    if "btts" not in markets:
+        print(f"  Skipping BTTS fetch ({len(event_ids)} events) "
+              f"— not in requested markets")
+    else:
+        print(f"  Fetching BTTS for {len(event_ids)} events...")
+        for eid in event_ids:
+            btts_event = _fetch_event_market(eid, "btts")
+            if btts_event is None:
+                continue
 
-        match = matches_by_id[eid]
-        for bm in btts_event.get("bookmakers", []):
-            bm_key = bm.get("key", "")
-            bm_title = bm.get("title", bm_key)
+            match = matches_by_id[eid]
+            for bm in btts_event.get("bookmakers", []):
+                bm_key = bm.get("key", "")
+                bm_title = bm.get("title", bm_key)
 
-            for market in bm.get("markets", []):
-                if market.get("key") != "btts":
-                    continue
+                for market in bm.get("markets", []):
+                    if market.get("key") != "btts":
+                        continue
 
-                btts_yes = None
-                btts_no = None
-                for outcome in market.get("outcomes", []):
-                    if outcome.get("name") == "Yes":
-                        btts_yes = outcome.get("price")
-                    elif outcome.get("name") == "No":
-                        btts_no = outcome.get("price")
+                    btts_yes = None
+                    btts_no = None
+                    for outcome in market.get("outcomes", []):
+                        if outcome.get("name") == "Yes":
+                            btts_yes = outcome.get("price")
+                        elif outcome.get("name") == "No":
+                            btts_no = outcome.get("price")
 
-                if btts_yes and btts_no and btts_yes > 1 and btts_no > 1:
-                    match["btts_bookmakers"][bm_key] = {
-                        "title": bm_title,
-                        "yes": btts_yes,
-                        "no": btts_no,
-                        "is_sharp": bm_key in SHARP_BOOKS,
-                        "is_major": bm_key in MAJOR_BOOKS,
-                    }
+                    if btts_yes and btts_no and btts_yes > 1 and btts_no > 1:
+                        match["btts_bookmakers"][bm_key] = {
+                            "title": bm_title,
+                            "yes": btts_yes,
+                            "no": btts_no,
+                            "is_sharp": bm_key in SHARP_BOOKS,
+                            "is_major": bm_key in MAJOR_BOOKS,
+                        }
 
-        if match["btts_bookmakers"]:
-            btts_fetched += 1
+            if match["btts_bookmakers"]:
+                btts_fetched += 1
 
     remaining = "?"
     try:
         # Check quota with a lightweight call
-        resp = requests.get(f"{BASE_URL}/sports/", params={"apiKey": API_KEY}, timeout=10)
+        resp = requests.get(f"{BASE_URL}/sports/", params={"apiKey": API_KEY},
+                            timeout=10)
         remaining = resp.headers.get("x-requests-remaining", "?")
     except requests.RequestException:
         pass

@@ -193,21 +193,40 @@ class DixonColesPredictor:
       - Promoted team priors (venue-aware, not uniform)
     """
 
-    # Venue-aware promoted team priors
+    # Venue-aware promoted team priors (used as terminal fallback when a team
+    # has zero matches at either venue — e.g. the very first game for a newly
+    # synthesised promoted team).
     PRIORS = {
         "attack_home": 0.90,   # promoted teams decent at home
         "attack_away": 0.75,   # promoted teams struggle away
         "defence_home": 1.10,  # slightly leaky at home
         "defence_away": 1.20,  # leakier away
     }
-    MIN_VENUE_MATCHES = 3  # fallback to pooled if fewer matches at venue
+    MIN_VENUE_MATCHES = 3  # legacy hard threshold — still used when use_mle=True
 
-    def __init__(self, rho=-0.13, half_life=30, use_xg=False, use_mle=False, mle_alpha=0.01):
+    # Option 2 Step 2 — Partial pooling (Bayesian shrinkage) toward the
+    # league mean (=1.0 by DC construction). Each team's venue estimate is
+    # blended with the league mean, weighted by effective sample size:
+    #     rating = (n/(n+N_PRIOR)) * team_estimate + (N_PRIOR/(n+N_PRIOR)) * 1.0
+    # With N_PRIOR=6, a team with 2 matches is weighted 25% own / 75% mean;
+    # at 20 matches it flips to ~77% own / 23% mean. Eliminates the
+    # discontinuity at MIN_VENUE_MATCHES. Applied only for the
+    # weighted-average path — MLE keeps its own ridge regularisation.
+    N_PRIOR = 6
+
+    def __init__(self, rho=-0.13, half_life=30, use_xg=False, use_mle=False,
+                 mle_alpha=0.01, use_shrinkage=True):
         self.rho = rho
         self.half_life = half_life  # matches; more recent = more weight
         self.use_xg = use_xg
         self.use_mle = use_mle      # use MLE optimization after weighted-average
         self.mle_alpha = mle_alpha   # ridge penalty for MLE
+        # Option 2 Step 2: partial pooling toward league mean. On by default
+        # for the weighted-average path. Forced off when use_mle=True to
+        # avoid double-regularising (MLE's ridge penalty handles small-sample
+        # stability). Exposed as a flag so diagnostics can A/B against the
+        # old hard-threshold behaviour.
+        self.use_shrinkage = use_shrinkage
         self.attack_home = {}   # team -> home attack strength (1.0 = average)
         self.attack_away = {}   # team -> away attack strength
         self.defence_home = {}  # team -> home defence weakness (>1 = leaky)
@@ -227,6 +246,33 @@ class DixonColesPredictor:
         if len(values) == 0:
             return None
         return np.average(values, weights=weights)
+
+    def _shrink_to_league(self, estimate, n_eff):
+        """Blend a team estimate toward the league mean (=1.0).
+
+        n_eff = effective sample size (match count at the relevant venue
+        or pooled across venues). Returns a continuous shrinkage that
+        eliminates the discontinuity of the old hard-threshold fallback.
+        """
+        if estimate is None:
+            return None
+        shrink = n_eff / (n_eff + self.N_PRIOR)
+        return shrink * estimate + (1.0 - shrink) * 1.0
+
+    def _pool_with_shrinkage(self, venue_val, n_venue,
+                             pooled_val, n_pool, prior):
+        """Pick the best available estimate and apply partial pooling.
+
+        Preference order:
+          1. Venue-specific estimate (shrunk by n_venue)
+          2. Cross-venue pooled estimate (shrunk by n_pool)
+          3. Prior constant (team has no data at all)
+        """
+        if venue_val is not None:
+            return self._shrink_to_league(venue_val, n_venue)
+        if pooled_val is not None:
+            return self._shrink_to_league(pooled_val, n_pool)
+        return prior
 
     def fit(self, df):
         """Estimate venue-specific attack/defence ratings from historical match data.
@@ -276,20 +322,33 @@ class DixonColesPredictor:
             elif att_away_val is not None:
                 att_pooled = att_away_val
 
-            # Assign with fallback: venue-specific if enough matches, else pooled, else prior
-            if n_home >= self.MIN_VENUE_MATCHES and att_home_val is not None:
-                self.attack_home[team] = att_home_val
-            elif att_pooled is not None:
-                self.attack_home[team] = att_pooled
+            # Assign attack ratings.
+            # Shrinkage path (use_mle=False): partial pooling toward league mean,
+            # continuous weighting, eliminates the hard-threshold discontinuity.
+            # MLE warm-start path (use_mle=True): keep legacy hard-threshold
+            # behaviour — MLE's ridge penalty already regularises small samples.
+            n_pool = n_home + n_away
+            if self.use_shrinkage and not self.use_mle:
+                self.attack_home[team] = self._pool_with_shrinkage(
+                    att_home_val, n_home, att_pooled, n_pool,
+                    self.PRIORS["attack_home"])
+                self.attack_away[team] = self._pool_with_shrinkage(
+                    att_away_val, n_away, att_pooled, n_pool,
+                    self.PRIORS["attack_away"])
             else:
-                self.attack_home[team] = self.PRIORS["attack_home"]
+                if n_home >= self.MIN_VENUE_MATCHES and att_home_val is not None:
+                    self.attack_home[team] = att_home_val
+                elif att_pooled is not None:
+                    self.attack_home[team] = att_pooled
+                else:
+                    self.attack_home[team] = self.PRIORS["attack_home"]
 
-            if n_away >= self.MIN_VENUE_MATCHES and att_away_val is not None:
-                self.attack_away[team] = att_away_val
-            elif att_pooled is not None:
-                self.attack_away[team] = att_pooled
-            else:
-                self.attack_away[team] = self.PRIORS["attack_away"]
+                if n_away >= self.MIN_VENUE_MATCHES and att_away_val is not None:
+                    self.attack_away[team] = att_away_val
+                elif att_pooled is not None:
+                    self.attack_away[team] = att_pooled
+                else:
+                    self.attack_away[team] = self.PRIORS["attack_away"]
 
             # --- Defence ratings ---
             # Home defence: goals conceded at home / away league avg
@@ -313,19 +372,28 @@ class DixonColesPredictor:
             elif def_away_val is not None:
                 def_pooled = def_away_val
 
-            if n_home >= self.MIN_VENUE_MATCHES and def_home_val is not None:
-                self.defence_home[team] = def_home_val
-            elif def_pooled is not None:
-                self.defence_home[team] = def_pooled
+            # Assign defence ratings — same shrinkage pattern as attack.
+            if self.use_shrinkage and not self.use_mle:
+                self.defence_home[team] = self._pool_with_shrinkage(
+                    def_home_val, n_home, def_pooled, n_pool,
+                    self.PRIORS["defence_home"])
+                self.defence_away[team] = self._pool_with_shrinkage(
+                    def_away_val, n_away, def_pooled, n_pool,
+                    self.PRIORS["defence_away"])
             else:
-                self.defence_home[team] = self.PRIORS["defence_home"]
+                if n_home >= self.MIN_VENUE_MATCHES and def_home_val is not None:
+                    self.defence_home[team] = def_home_val
+                elif def_pooled is not None:
+                    self.defence_home[team] = def_pooled
+                else:
+                    self.defence_home[team] = self.PRIORS["defence_home"]
 
-            if n_away >= self.MIN_VENUE_MATCHES and def_away_val is not None:
-                self.defence_away[team] = def_away_val
-            elif def_pooled is not None:
-                self.defence_away[team] = def_pooled
-            else:
-                self.defence_away[team] = self.PRIORS["defence_away"]
+                if n_away >= self.MIN_VENUE_MATCHES and def_away_val is not None:
+                    self.defence_away[team] = def_away_val
+                elif def_pooled is not None:
+                    self.defence_away[team] = def_pooled
+                else:
+                    self.defence_away[team] = self.PRIORS["defence_away"]
 
         # Optionally refine with MLE
         if self.use_mle:
@@ -461,7 +529,7 @@ class DixonColesPredictor:
 
         # Optimize
         result = minimize(neg_log_likelihood, x0, method='L-BFGS-B', bounds=bounds,
-                          options={'maxiter': 500, 'ftol': 1e-10})
+                          options={'maxiter': 1000, 'ftol': 1e-10})
 
         if not result.success:
             print(f"  [DC MLE] Warning: optimizer did not converge ({result.message})")
@@ -526,6 +594,40 @@ class DixonColesPredictor:
                     p_under += max(p, 0)
 
         return np.clip(1 - p_under, 0.01, 0.99)
+
+    def predict_match_ou15(self, home_team, away_team):
+        """Predict P(Over 1.5) for a single match.
+
+        Same lambda formula as predict_match but different scoreline threshold:
+        P(Over 1.5) = 1 - P(0-0) - P(1-0) - P(0-1).
+        """
+        h_att = self.attack_home.get(home_team, self.PRIORS["attack_home"])
+        a_def = self.defence_away.get(away_team, self.PRIORS["defence_away"])
+        a_att = self.attack_away.get(away_team, self.PRIORS["attack_away"])
+        h_def = self.defence_home.get(home_team, self.PRIORS["defence_home"])
+
+        sqrt_gamma = np.sqrt(self.gamma)
+        home_lambda = np.clip(h_att * a_def * self.mu * sqrt_gamma, 0.1, 5.0)
+        away_lambda = np.clip(a_att * h_def * self.mu / sqrt_gamma, 0.1, 5.0)
+
+        p_under = 0
+        for h in range(12):
+            for a in range(12):
+                if h + a <= 1:
+                    p = (poisson_dist.pmf(h, home_lambda) *
+                         poisson_dist.pmf(a, away_lambda) *
+                         self._dc_tau(h, a, home_lambda, away_lambda))
+                    p_under += max(p, 0)
+
+        return np.clip(1 - p_under, 0.01, 0.99)
+
+    def predict_proba_ou15_df(self, df):
+        """Predict P(Over 1.5) for a DataFrame with Home_Team, Away_Team columns."""
+        probs = np.array([
+            self.predict_match_ou15(row["Home_Team"], row["Away_Team"])
+            for _, row in df.iterrows()
+        ])
+        return probs
 
     def predict_match_btts(self, home_team, away_team):
         """Predict P(Both Teams To Score) for a single match.
@@ -721,14 +823,27 @@ class DixonColesPredictor:
 # Dixon-Coles hyperparameter tuning
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def tune_dc_params(full_df, min_train_season=14, start_val_season=19):
+def tune_dc_params(full_df, min_train_season=14, start_val_season=19,
+                   target_col="Over_2_5", predict_fn_name="predict_proba_df"):
     """Grid-search half_life, rho, and MLE vs weighted-avg via walk-forward CV.
 
     Returns dict of best params for DixonColesPredictor constructor.
-    Phase 1: Fast grid over half_life x rho (weighted-avg only, 49 combos).
+    Phase 1: Fast grid over half_life x rho (weighted-avg only).
     Phase 2: Test MLE with best half_life at a few alpha values.
+
+    Args:
+        full_df: Full pipeline DataFrame with match history.
+        min_train_season: First season to include in training folds.
+        start_val_season: First season to hold out as validation.
+        target_col: Outcome column to optimise AUC against
+            (e.g. "Over_2_5", "BTTS"). Default preserves existing behaviour.
+        predict_fn_name: DixonColesPredictor method to use for predictions
+            against target_col (e.g. "predict_proba_df" for O/U 2.5,
+            "predict_proba_btts_df" for BTTS).
     """
-    half_life_grid = [15, 20, 25, 30, 40, 50, 70]
+    # half_life=10 added at low end for markets that favour very recent form
+    # (BTTS, O/U 1.5 tend to respond to short-term team defensive/scoring streaks)
+    half_life_grid = [10, 15, 20, 25, 30, 40, 50, 70]
     rho_grid = [-0.20, -0.15, -0.13, -0.10, -0.07, -0.03, 0.0]
 
     all_seasons = sorted(full_df["SeasonIndex"].unique())
@@ -759,8 +874,8 @@ def tune_dc_params(full_df, min_train_season=14, start_val_season=19):
             for train_df, val_df in folds:
                 dc = DixonColesPredictor(rho=rho, half_life=hl)
                 dc.fit(train_df)
-                preds = dc.predict_proba_df(val_df)
-                y = val_df["Over_2_5"].values
+                preds = getattr(dc, predict_fn_name)(val_df)
+                y = val_df[target_col].values
                 if len(np.unique(y)) < 2:
                     continue
                 fold_aucs.append(roc_auc_score(y, preds))
@@ -773,7 +888,7 @@ def tune_dc_params(full_df, min_train_season=14, start_val_season=19):
                     best_params = {"half_life": hl, "rho": rho}
 
     print(f"\n{'='*60}")
-    print("Dixon-Coles Hyperparameter Tuning")
+    print(f"Dixon-Coles Hyperparameter Tuning (target={target_col})")
     print(f"{'='*60}")
     print(f"\n  Phase 1: Weighted-average grid ({len(half_life_grid)}x{len(rho_grid)} = {len(results)} combos)")
     print(f"  Folds: {len(folds)}")
@@ -818,8 +933,8 @@ def tune_dc_params(full_df, min_train_season=14, start_val_season=19):
                     use_xg=use_xg, use_mle=use_mle, mle_alpha=mle_alpha
                 )
                 dc.fit(train_df)
-                preds = dc.predict_proba_df(val_df)
-                y = val_df["Over_2_5"].values
+                preds = getattr(dc, predict_fn_name)(val_df)
+                y = val_df[target_col].values
                 if len(np.unique(y)) < 2:
                     continue
                 fold_aucs.append(roc_auc_score(y, preds))
@@ -1133,6 +1248,300 @@ def walk_forward_cv(full_df, features, min_train_season=14, start_val_season=19,
 
     oof_df = pd.DataFrame(oof_records)
     return fold_metrics, oof_df
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Feature Importance Audit (Option 3 Step 1)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_feature_to_group_map() -> dict[str, str]:
+    """Build a feature name -> group name lookup from config.py.
+
+    A feature appearing in multiple groups gets the first-listed group
+    (e.g. a roster feature also in tactical would be marked as ROSTER).
+    """
+    from config import (
+        EXISTING_FEATURES, DERIVED_FEATURES, XG_FEATURES, PLAYER_FEATURES,
+        FPL_STRENGTH_FEATURES, ADVANCED_FEATURES, SHOT_LEVEL_FEATURES,
+        ROSTER_FEATURES, TACTICAL_FEATURES, DETAILED_MATCH_FEATURES,
+        CONTEXT_FEATURES, WEATHER_FEATURES, BTTS_SPECIFIC_FEATURES,
+    )
+    groups_ordered = [
+        ("EXISTING", EXISTING_FEATURES),
+        ("DERIVED", DERIVED_FEATURES),
+        ("XG", XG_FEATURES),
+        ("PLAYER", PLAYER_FEATURES),
+        ("FPL_STRENGTH", FPL_STRENGTH_FEATURES),
+        ("ADVANCED", ADVANCED_FEATURES),
+        ("SHOT_LEVEL", SHOT_LEVEL_FEATURES),
+        ("ROSTER", ROSTER_FEATURES),
+        ("TACTICAL", TACTICAL_FEATURES),
+        ("DETAILED_MATCH", DETAILED_MATCH_FEATURES),
+        ("CONTEXT", CONTEXT_FEATURES),
+        ("WEATHER", WEATHER_FEATURES),
+        ("BTTS_SPECIFIC", BTTS_SPECIFIC_FEATURES),
+    ]
+    lookup: dict[str, str] = {}
+    for group_name, feat_list in groups_ordered:
+        for f in feat_list:
+            if f not in lookup:
+                lookup[f] = group_name
+    return lookup
+
+
+def _resolve_audit_config(league: str, market: str,
+                          full_df: pd.DataFrame) -> tuple[list[str], str]:
+    """Resolve (feature_list, target_column) for a (league, market) pair.
+
+    Returns the feature list filtered to those actually present in full_df.
+    """
+    from config import ALL_FEATURES, BTTS_ALL_FEATURES
+    try:
+        from championship_pipeline import (
+            CHAMP_ALL_FEATURES, CHAMP_OU15_FEATURES, CHAMP_BTTS_FEATURES,
+        )
+    except ImportError:
+        CHAMP_ALL_FEATURES = []
+        CHAMP_OU15_FEATURES = []
+        CHAMP_BTTS_FEATURES = []
+
+    key = (league.upper(), market.lower())
+    mapping = {
+        ("PL",  "ou25"): (ALL_FEATURES,         "Over_2_5"),
+        ("PL",  "btts"): (BTTS_ALL_FEATURES,    "BTTS"),
+        ("EFL", "ou25"): (CHAMP_ALL_FEATURES,   "Over_2_5"),
+        ("EFL", "ou15"): (CHAMP_OU15_FEATURES,  "Over_1_5"),
+        ("EFL", "btts"): (CHAMP_BTTS_FEATURES,  "BTTS"),
+    }
+    if key not in mapping:
+        raise ValueError(
+            f"Unsupported audit combination: league={league}, market={market}. "
+            f"Supported: {list(mapping.keys())}")
+    features, target = mapping[key]
+    # Drop any feature not actually present in the loaded DataFrame
+    features = [f for f in features if f in full_df.columns]
+    return features, target
+
+
+def audit_features(
+    league: str,
+    market: str,
+    full_df: pd.DataFrame | None = None,
+    output_dir: str = "reports",
+    verbose: bool = True,
+    random_seed: int = 42,
+    n_permutations: int = 5,
+) -> pd.DataFrame:
+    """Feature importance audit for a single (league, market) combination.
+
+    Trains XGB + LGB on walk-forward folds; for the last two validation
+    folds extracts gain-based importance and computes permutation
+    importance (mean AUC drop over ``n_permutations`` shuffles per
+    fold). Injects a Gaussian-noise column as a baseline — any feature
+    with permutation importance below the noise column is flagged as a
+    pruning candidate.
+
+    Args:
+        league: "PL" or "EFL".
+        market: "ou25", "ou15", or "btts".
+        full_df: Optional pre-loaded pipeline DataFrame. Saves ~60s reload
+            when auditing multiple markets of the same league.
+        output_dir: Directory to write the audit CSV to (created if missing).
+        verbose: Print progress.
+        random_seed: Seed for noise column and permutation shuffles.
+        n_permutations: Number of shuffles per feature per fold. Higher
+            values reduce variance in the permutation estimate at the
+            cost of linear extra predict-calls. Default 5 gives 10 total
+            samples per feature across two folds.
+
+    Returns:
+        DataFrame with columns: feature, group, xgb_gain, lgb_gain,
+        perm_auc_drop, perm_auc_drop_std, nan_rate, pruning_candidate.
+    """
+    rng = np.random.default_rng(random_seed)
+
+    # ── 1. Load pipeline data if not provided ─────────────────────────────
+    if full_df is None:
+        if league.upper() == "PL":
+            from pipeline import run_pipeline as _pl_pipeline
+            data = _pl_pipeline(verbose=verbose)
+        elif league.upper() == "EFL":
+            from championship_pipeline import run_pipeline as _efl_pipeline
+            data = _efl_pipeline(verbose=verbose)
+        else:
+            raise ValueError(f"Unknown league: {league}")
+        full_df = data["full_df"].copy()
+
+    # ── 2. Materialise BTTS if the market needs it ────────────────────────
+    if "BTTS" not in full_df.columns:
+        full_df = full_df.copy()
+        full_df["BTTS"] = (
+            (full_df["Home_Goals"] > 0) & (full_df["Away_Goals"] > 0)
+        ).astype(int)
+
+    # ── 3. Resolve features and target for this market ───────────────────
+    features, target_col = _resolve_audit_config(league, market, full_df)
+    if verbose:
+        print(f"\n  [audit] {league}/{market}: "
+              f"{len(features)} features, target={target_col}")
+
+    if target_col not in full_df.columns:
+        raise ValueError(f"Target column {target_col} missing from DataFrame")
+
+    # ── 4. Inject noise baseline column ───────────────────────────────────
+    noise_col = "__noise_baseline__"
+    full_df = full_df.copy()
+    full_df[noise_col] = rng.standard_normal(len(full_df))
+    features_with_noise = list(features) + [noise_col]
+
+    # ── 5. Identify last two walk-forward folds ───────────────────────────
+    # Match walk_forward_cv's convention: train on 14..N, validate on N+1.
+    all_seasons = sorted(full_df["SeasonIndex"].unique())
+    valid_seasons = [s for s in all_seasons if s >= 14]
+    # Use the final two seasons as our audit folds
+    audit_seasons = valid_seasons[-2:]
+    if len(audit_seasons) < 2:
+        raise RuntimeError(
+            f"Not enough seasons to run audit (need 2, got {len(audit_seasons)})")
+
+    # ── 6. Run two folds: train models, compute gains + perm importance ──
+    gain_xgb_sum = np.zeros(len(features_with_noise))
+    gain_lgb_sum = np.zeros(len(features_with_noise))
+    # Collect all permutation samples across folds × repeats for std estimate
+    perm_samples: list[np.ndarray] = []
+    n_folds = 0
+
+    for val_season in audit_seasons:
+        train_df = full_df[(full_df["SeasonIndex"] >= 14)
+                            & (full_df["SeasonIndex"] < val_season)]
+        val_df = full_df[full_df["SeasonIndex"] == val_season]
+        if len(train_df) < 100 or len(val_df) < 50:
+            if verbose:
+                print(f"    Skipping fold S{val_season} "
+                      f"(train={len(train_df)}, val={len(val_df)})")
+            continue
+
+        X_tr = train_df[features_with_noise].values
+        y_tr = train_df[target_col].values
+        X_v_df = val_df[features_with_noise]
+        X_v = X_v_df.values
+        y_v = val_df[target_col].values
+
+        if len(np.unique(y_v)) < 2:
+            if verbose:
+                print(f"    Skipping fold S{val_season} (target is constant)")
+            continue
+
+        xgb_m = train_xgb(X_tr, y_tr, X_v, y_v)
+        lgb_m = train_lgb(X_tr, y_tr, X_v, y_v,
+                          feature_names=features_with_noise)
+
+        # Gain importances (already normalised by sklearn wrappers)
+        gain_xgb_sum += xgb_m.feature_importances_
+        gain_lgb_sum += lgb_m.feature_importances_
+
+        # Baseline ensemble AUC on this fold
+        base_xgb_p = xgb_m.predict_proba(X_v)[:, 1]
+        base_lgb_p = lgb_m.predict_proba(
+            pd.DataFrame(X_v, columns=features_with_noise))[:, 1]
+        base_ensemble = (base_xgb_p + base_lgb_p) / 2.0
+        baseline_auc = roc_auc_score(y_v, base_ensemble)
+
+        if verbose:
+            print(f"    Fold S{val_season}: baseline ensemble AUC={baseline_auc:.4f} "
+                  f"(train={len(train_df)}, val={len(val_df)}, "
+                  f"n_perm={n_permutations})")
+
+        # Permutation importance: shuffle each column n_permutations times,
+        # measure AUC drop per shuffle, and keep every sample for std.
+        perm_rng = np.random.default_rng(random_seed + val_season)
+        for rep in range(n_permutations):
+            fold_drops = np.zeros(len(features_with_noise))
+            for fi, feat_name in enumerate(features_with_noise):
+                X_v_perm = X_v.copy()
+                X_v_perm[:, fi] = perm_rng.permutation(X_v_perm[:, fi])
+                perm_xgb_p = xgb_m.predict_proba(X_v_perm)[:, 1]
+                perm_lgb_p = lgb_m.predict_proba(
+                    pd.DataFrame(X_v_perm, columns=features_with_noise))[:, 1]
+                perm_ensemble = (perm_xgb_p + perm_lgb_p) / 2.0
+                try:
+                    perm_auc = roc_auc_score(y_v, perm_ensemble)
+                except ValueError:
+                    perm_auc = baseline_auc
+                fold_drops[fi] = baseline_auc - perm_auc
+            perm_samples.append(fold_drops)
+
+        n_folds += 1
+
+    if n_folds == 0:
+        raise RuntimeError(f"No usable audit folds for {league}/{market}")
+
+    # Average gains across folds; average perm drops across all samples
+    gain_xgb = gain_xgb_sum / n_folds
+    gain_lgb = gain_lgb_sum / n_folds
+    perm_matrix = np.vstack(perm_samples)  # shape: (n_samples, n_features)
+    perm_drop = perm_matrix.mean(axis=0)
+    perm_drop_std = perm_matrix.std(axis=0)
+
+    # ── 7. NaN rate across the full training window ──────────────────────
+    train_window = full_df[full_df["SeasonIndex"] >= 14]
+    nan_rates = []
+    for f in features_with_noise:
+        col = train_window[f]
+        nan_rates.append(col.isna().mean())
+
+    # ── 8. Group membership ─────────────────────────────────────────────
+    group_map = _build_feature_to_group_map()
+    groups = [group_map.get(f, "UNKNOWN") for f in features_with_noise]
+    # Override for noise baseline
+    noise_idx = features_with_noise.index(noise_col)
+    groups[noise_idx] = "NOISE_BASELINE"
+
+    # ── 9. Pruning candidate flag ────────────────────────────────────────
+    # A feature is a pruning candidate if its permutation importance is
+    # not statistically distinguishable from the noise baseline —
+    # specifically, if perm_drop <= noise_mean + 1 * noise_std. This
+    # treats noise as a distribution rather than a point estimate; with
+    # only ~10 permutation samples per feature the mean alone is noisy.
+    noise_perm_drop = perm_drop[noise_idx]
+    noise_perm_std = perm_drop_std[noise_idx]
+    noise_threshold = noise_perm_drop + noise_perm_std
+    pruning_candidate = perm_drop <= noise_threshold
+
+    # ── 10. Assemble and save results ────────────────────────────────────
+    audit_df = pd.DataFrame({
+        "feature": features_with_noise,
+        "group": groups,
+        "xgb_gain": gain_xgb,
+        "lgb_gain": gain_lgb,
+        "perm_auc_drop": perm_drop,
+        "perm_auc_drop_std": perm_drop_std,
+        "nan_rate": nan_rates,
+        "pruning_candidate": pruning_candidate,
+    })
+    # Sort by permutation importance descending (highest contributors first)
+    audit_df = audit_df.sort_values(
+        "perm_auc_drop", ascending=False).reset_index(drop=True)
+
+    os.makedirs(output_dir, exist_ok=True)
+    out_path = os.path.join(
+        output_dir, f"feature_audit_{league.upper()}_{market.lower()}.csv")
+    audit_df.to_csv(out_path, index=False)
+
+    if verbose:
+        print(f"  [audit] saved to {out_path}")
+        print(f"  [audit] noise baseline: mean={noise_perm_drop:+.5f}, "
+              f"std={noise_perm_std:.5f}, "
+              f"1-sigma threshold={noise_threshold:+.5f}")
+        print(f"  [audit] {pruning_candidate.sum()}/{len(features_with_noise)} "
+              f"features flagged as pruning candidates (perm <= 1-sigma above noise)")
+        print(f"  [audit] top 10 by perm_auc_drop:")
+        for _, row in audit_df.head(10).iterrows():
+            print(f"    {row['feature']:40s} group={row['group']:15s} "
+                  f"perm={row['perm_auc_drop']:+.5f} "
+                  f"xgb_gain={row['xgb_gain']:.4f}")
+
+    return audit_df
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

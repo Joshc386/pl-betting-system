@@ -1,0 +1,209 @@
+
+######################################################################
+#  Option 3 pruning diagnostic  -  baseline vs use_sparse=False
+######################################################################
+
+[pipeline] Loading PL...
+Loading data...
+Dataset: 9801 rows, 80 columns
+Class balance: Over 2.5 = 51.4%
+Computing rest days...
+Computing fixture congestion features...
+Computing discipline features (cards, fouls)...
+Fetching weather features...
+  Existing weather cache: 9801 entries
+  Weather cache is up to date.
+  Weather features merged: 9801/9801 matches
+Computing match context features (relegation/title/euro proximity)...
+Adding derived features...
+Computing rolling xG features...
+Adding player availability features...
+Adding FPL pre-season strength features...
+  FPL strength features: 2280/9801 matches have data
+Adding squad strength features...
+  Squad features merged: 679 matches (seasons 24-25)
+Computing advanced features (Elo, Poisson, rates)...
+Computing BTTS-specific features...
+Computing corners-specific features...
+  Corner features: 9481/9801 matches have data
+Computing shot-level features...
+  Shot-level features: 3713/9801 matches have data
+Computing roster features (xGChain, xGBuildup, xA)...
+  Roster features: 3719/9801 matches have data
+Computing tactical features (PPDA, deep completions)...
+  Tactical features: 3724/9801 matches have data
+Computing detailed match features (2024-25)...
+  Detailed match features: 350/9801 matches have data
+Using 166 O/U features, 109 BTTS features, 69 Corners features
+Initializing promoted team features...
+  Filled 450 feature values for promoted teams
+Train: 3800 | Val: 380 | Test: 301
+Train seasons: 14-23
+Val seasons: 24-24
+Test seasons: 25-25
+Remaining NaNs in train features: 44540
+[pipeline] PL: 9801 rows
+
+======================================================================
+  PL / ou25
+======================================================================
+  baseline: 166 features
+  pruned:   104 features (removed 62)
+
+  [A] BASELINE (use_sparse=True)
+       [A] S19: n_feat=166 AUC=0.6151 Brier=0.2405
+       [A] S20: n_feat=166 AUC=0.5447 Brier=0.2487
+       [A] S21: n_feat=166 AUC=0.6042 Brier=0.2417
+       [A] S22: n_feat=166 AUC=0.6262 Brier=0.2404
+       [A] S23: n_feat=166 AUC=0.5280 Brier=0.2407
+       [A] S24: n_feat=166 AUC=0.5628 Brier=0.2440
+       [A] S25: n_feat=166 AUC=0.6075 Brier=0.2448
+
+  [B] PRUNED   (use_sparse=False)
+       [B] S19: n_feat=104 AUC=0.6200 Brier=0.2399
+       [B] S20: n_feat=104 AUC=0.5440 Brier=0.2487
+       [B] S21: n_feat=104 AUC=0.6004 Brier=0.2422
+       [B] S22: n_feat=104 AUC=0.6242 Brier=0.2402
+       [B] S23: n_feat=104 AUC=0.5460 Brier=0.2396
+       [B] S24: n_feat=104 AUC=0.5665 Brier=0.2441
+       [B] S25: n_feat=104 AUC=0.6099 Brier=0.2444
+
+======================================================================
+  PL / btts
+======================================================================
+  baseline: 109 features
+  pruned:   87 features (removed 22)
+
+  [A] BASELINE (use_sparse=True)
+       [A] S19: n_feat=109 AUC=0.5377 Brier=0.2488
+       [A] S20: n_feat=109 AUC=0.5340 Brier=0.2496
+       [A] S21: n_feat=109 AUC=0.5716 Brier=0.2470
+       [A] S22: n_feat=109 AUC=0.5296 Brier=0.2492
+       [A] S23: n_feat=109 AUC=0.5293 Brier=0.2438
+       [A] S24: n_feat=109 AUC=0.5249 Brier=0.2457
+       [A] S25: n_feat=109 AUC=0.5713 Brier=0.2450
+
+  [B] PRUNED   (use_sparse=False)
+       [B] S19: n_feat=87 AUC=0.5323 Brier=0.2491
+       [B] S20: n_feat=87 AUC=0.5361 Brier=0.2494
+       [B] S21: n_feat=87 AUC=0.5711 Brier=0.2471
+       [B] S22: n_feat=87 AUC=0.4969 Brier=0.2508
+       [B] S23: n_feat=87 AUC=0.5280 Brier=0.2454
+       [B] S24: n_feat=87 AUC=0.5257 Brier=0.2455
+       [B] S25: n_feat=87 AUC=0.5723 Brier=0.2451
+
+[pipeline] Loading EFL...
+=== Championship Pipeline ===
+
+Loaded 13608 matches, 25 seasons
+Adding derived features...
+Adding congestion features...
+Adding discipline features...
+Adding half-time features...
+Computing advanced rolling features...
+Computing Elo ratings...
+Computing Poisson features...
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:526: RuntimeWarning: Mean of empty slice
+  df["Poisson_Consensus"] = np.nanmean(
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:542: RuntimeWarning: Mean of empty slice
+  df["Poisson_Consensus_15"] = np.nanmean(
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:549: RuntimeWarning: Mean of empty slice
+  df["Expected_TG_Consensus"] = np.nanmean(
+Computing team strength ratings...
+Adding context features...
+Initialising promoted team features...
+  Filled 53280 feature values for promoted teams
+
+Features available: 114 / 114
+O/U 1.5 features available: 114 / 114
+BTTS features available: 77 / 77
+Over 2.5 rate: 0.475
+Over 1.5 rate: 0.730
+BTTS rate: 0.517
+[pipeline] EFL: 13608 rows
+
+======================================================================
+  EFL / ou25
+======================================================================
+  baseline: 114 features
+  pruned:   114 features (removed 0)
+
+  [A] BASELINE (use_sparse=True)
+       [A] S19: n_feat=114 AUC=0.5525 Brier=0.2487
+       [A] S20: n_feat=114 AUC=0.5114 Brier=0.2495
+       [A] S21: n_feat=114 AUC=0.5102 Brier=0.2498
+       [A] S22: n_feat=114 AUC=0.5229 Brier=0.2467
+       [A] S23: n_feat=114 AUC=0.5206 Brier=0.2519
+       [A] S24: n_feat=114 AUC=0.5658 Brier=0.2446
+
+  [B] PRUNED   (use_sparse=False)
+       [B] S19: n_feat=114 AUC=0.5525 Brier=0.2487
+       [B] S20: n_feat=114 AUC=0.5114 Brier=0.2495
+       [B] S21: n_feat=114 AUC=0.5102 Brier=0.2498
+       [B] S22: n_feat=114 AUC=0.5229 Brier=0.2467
+       [B] S23: n_feat=114 AUC=0.5206 Brier=0.2519
+       [B] S24: n_feat=114 AUC=0.5658 Brier=0.2446
+
+======================================================================
+  EFL / ou15
+======================================================================
+  baseline: 114 features
+  pruned:   114 features (removed 0)
+
+  [A] BASELINE (use_sparse=True)
+       [A] S19: n_feat=114 AUC=0.5285 Brier=0.1943
+       [A] S20: n_feat=114 AUC=0.4882 Brier=0.2225
+       [A] S21: n_feat=114 AUC=0.5130 Brier=0.2022
+       [A] S22: n_feat=114 AUC=0.5627 Brier=0.2082
+       [A] S23: n_feat=114 AUC=0.4990 Brier=0.1892
+       [A] S24: n_feat=114 AUC=0.5241 Brier=0.2064
+
+  [B] PRUNED   (use_sparse=False)
+       [B] S19: n_feat=114 AUC=0.5285 Brier=0.1943
+       [B] S20: n_feat=114 AUC=0.4882 Brier=0.2225
+       [B] S21: n_feat=114 AUC=0.5130 Brier=0.2022
+       [B] S22: n_feat=114 AUC=0.5627 Brier=0.2082
+       [B] S23: n_feat=114 AUC=0.4990 Brier=0.1892
+       [B] S24: n_feat=114 AUC=0.5241 Brier=0.2064
+
+======================================================================
+  EFL / btts
+======================================================================
+  baseline: 77 features
+  pruned:   77 features (removed 0)
+
+  [A] BASELINE (use_sparse=True)
+       [A] S19: n_feat=77 AUC=0.5039 Brier=0.2490
+       [A] S20: n_feat=77 AUC=0.4884 Brier=0.2543
+       [A] S21: n_feat=77 AUC=0.4896 Brier=0.2515
+       [A] S22: n_feat=77 AUC=0.5365 Brier=0.2492
+       [A] S23: n_feat=77 AUC=0.5259 Brier=0.2491
+       [A] S24: n_feat=77 AUC=0.5586 Brier=0.2466
+
+  [B] PRUNED   (use_sparse=False)
+       [B] S19: n_feat=77 AUC=0.5039 Brier=0.2490
+       [B] S20: n_feat=77 AUC=0.4884 Brier=0.2543
+       [B] S21: n_feat=77 AUC=0.4896 Brier=0.2515
+       [B] S22: n_feat=77 AUC=0.5365 Brier=0.2492
+       [B] S23: n_feat=77 AUC=0.5259 Brier=0.2491
+       [B] S24: n_feat=77 AUC=0.5586 Brier=0.2466
+
+######################################################################
+#  SUMMARY - pruning effect per market
+######################################################################
+
+  Combo             nFeat  AUC-base AUC-prune      dAUC Brier-base Brier-prune    dBrier
+  PL/ou25        166->104    0.5841    0.5873   +0.0032     0.2429      0.2427   -0.0002
+  PL/btts         109->87    0.5426    0.5375   -0.0051     0.2470      0.2475   +0.0005
+  EFL/ou25       114->114    0.5306    0.5306   +0.0000     0.2485      0.2485   +0.0000
+  EFL/ou15       114->114    0.5193    0.5193   +0.0000     0.2038      0.2038   +0.0000
+  EFL/btts         77->77    0.5172    0.5172   +0.0000     0.2500      0.2500   +0.0000
+
+  Full results saved to: reports/diagnose_option3_pruning.txt
+
+######################################################################
+#  Interpretation:
+#    dAUC > +0.002  AND  dBrier <= 0:  pruning helps - populate SPARSE_FEATURE_GROUPS permanently
+#    |dAUC| <= 0.001 AND |dBrier| <= 0.001: neutral - pruning is safe, decide on simplicity grounds
+#    dAUC < -0.002:  pruning hurts - the groups carried hidden correlated signal
+######################################################################

@@ -1,0 +1,76 @@
+
+######################################################################
+#  Feature audit runner — 5 combos
+######################################################################
+
+
+[pipeline] Loading PL data...
+Loading data...
+Dataset: 9801 rows, 80 columns
+Class balance: Over 2.5 = 51.4%
+Computing rest days...
+Computing fixture congestion features...
+Computing discipline features (cards, fouls)...
+Fetching weather features...
+  Existing weather cache: 9801 entries
+  Weather cache is up to date.
+  Weather features merged: 9801/9801 matches
+Computing match context features (relegation/title/euro proximity)...
+Adding derived features...
+Computing rolling xG features...
+Adding player availability features...
+Adding FPL pre-season strength features...
+  FPL strength features: 2280/9801 matches have data
+Adding squad strength features...
+  Squad features merged: 679 matches (seasons 24-25)
+Computing advanced features (Elo, Poisson, rates)...
+Computing BTTS-specific features...
+Computing corners-specific features...
+  Corner features: 9481/9801 matches have data
+Computing shot-level features...
+  Shot-level features: 3713/9801 matches have data
+Computing roster features (xGChain, xGBuildup, xA)...
+  Roster features: 3719/9801 matches have data
+Computing tactical features (PPDA, deep completions)...
+  Tactical features: 3724/9801 matches have data
+Computing detailed match features (2024-25)...
+  Detailed match features: 350/9801 matches have data
+Using 166 O/U features, 109 BTTS features, 69 Corners features
+Initializing promoted team features...
+  Filled 450 feature values for promoted teams
+Train: 3800 | Val: 380 | Test: 301
+Train seasons: 14-23
+Val seasons: 24-24
+Test seasons: 25-25
+Remaining NaNs in train features: 44540
+[pipeline] PL: 9801 rows
+
+======================================================================
+  Auditing PL / ou25
+======================================================================
+
+  [audit] PL/ou25: 166 features, target=Over_2_5
+    Fold S24: baseline ensemble AUC=0.5625 (train=3800, val=380, n_perm=5)
+    Fold S25: baseline ensemble AUC=0.5494 (train=4180, val=301, n_perm=5)
+  [audit] saved to reports\feature_audit_PL_ou25.csv
+Traceback (most recent call last):
+  File "C:\Users\joshc\OneDrive\Documents\Project\scripts\run_feature_audit.py", line 186, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\joshc\OneDrive\Documents\Project\scripts\run_feature_audit.py", line 167, in main
+    df = audit_features(
+        league=league,
+    ...<3 lines>...
+        verbose=True,
+    )
+  File "C:\Users\joshc\OneDrive\Documents\Project\model.py", line 1533, in audit_features
+    print(f"  [audit] noise baseline: mean={noise_perm_drop:+.5f}, "
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          f"std={noise_perm_std:.5f}, "
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          f"1\u03c3 threshold={noise_threshold:+.5f}")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u03c3' in position 55: character maps to <undefined>

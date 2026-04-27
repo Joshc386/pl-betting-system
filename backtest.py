@@ -111,7 +111,8 @@ class RegimeDetector:
     """
 
     def __init__(self, prior_base_rate, window=40, blend_speed=0.4,
-                 trigger_threshold=0.04, min_matches=15):
+                 trigger_threshold=0.04, min_matches=15,
+                 clamp_lo=0.30, clamp_hi=0.75):
         """
         Args:
             prior_base_rate: base rate from training data (e.g. 0.52)
@@ -119,12 +120,17 @@ class RegimeDetector:
             blend_speed: how quickly to adapt (0=ignore, 1=fully reactive)
             trigger_threshold: deviation from prior needed to activate (e.g. 0.04 = 4pp)
             min_matches: minimum matches before regime detection activates
+            clamp_lo: lower bound on adjusted rate (safety rail against
+                extreme short-sample deviations)
+            clamp_hi: upper bound on adjusted rate
         """
         self.prior = prior_base_rate
         self.window = window
         self.blend_speed = blend_speed
         self.trigger = trigger_threshold
         self.min_matches = min_matches
+        self.clamp_lo = clamp_lo
+        self.clamp_hi = clamp_hi
         self.results = []  # list of Over 2.5 outcomes (1 or 0)
         self.current_rate = prior_base_rate
 
@@ -149,8 +155,9 @@ class RegimeDetector:
             # Within normal range — stay with prior
             self.current_rate = self.prior
 
-        # Clamp to reasonable range
-        self.current_rate = np.clip(self.current_rate, 0.30, 0.75)
+        # Clamp to reasonable range (per-market bounds)
+        self.current_rate = np.clip(
+            self.current_rate, self.clamp_lo, self.clamp_hi)
         return self.current_rate
 
     def get_adjusted_base_rate(self):
@@ -167,87 +174,41 @@ class RegimeDetector:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Staking Refinement: Confidence-scaled Kelly with drawdown protection
+# Staking Refinement: confidence-scaled Kelly with drawdown protection.
+#
+# Canonical definitions live in ``staking.py``. ``shrink_edge``,
+# ``apply_portfolio_constraints``, and ``compute_drawdown_factor`` are
+# re-exported unchanged (same signatures). ``refined_kelly`` keeps a thin
+# backward-compat wrapper that injects ``PL_AGREE_SCALE`` so peripheral
+# callers (corners, alt lines, btts grid search) continue to import from
+# ``backtest`` without edits.
 # ═══════════════════════════════════════════════════════════════════════════════
+
+from staking import (  # noqa: E402 — re-exports for backward compatibility
+    shrink_edge,
+    apply_portfolio_constraints,
+    compute_drawdown_factor,
+    refined_kelly as _staking_refined_kelly,
+    PL_AGREE_SCALE,
+)
+
 
 def refined_kelly(blended_prob, odds, n_agree, edge,
                   kelly_fraction=0.25, max_stake_pct=0.05,
                   drawdown_factor=1.0):
-    """Confidence-scaled Kelly with agreement weighting and drawdown protection.
+    """Backward-compat wrapper: PL-scale refined Kelly.
 
-    Improvements over flat quarter-Kelly:
-      1. Scale by model agreement: 4/4 agree = full fraction, 2/4 = reduced
-      2. Scale by edge magnitude: larger edge = more confident
-      3. Drawdown protection: reduce stakes after losses
-      4. Minimum stake filter (below 0.5% not worth the effort)
-
-    Args:
-        blended_prob: blended P(win) for this bet side
-        odds: decimal odds
-        n_agree: number of models agreeing (out of 4)
-        edge: blended edge over fair market
-        kelly_fraction: base Kelly fraction (e.g. 0.25 = quarter-Kelly)
-        max_stake_pct: hard cap on stake as % of bankroll
-        drawdown_factor: 1.0 = normal, <1.0 = in drawdown (reduce stakes)
-
-    Returns:
-        float: stake as fraction of bankroll (0 if no bet)
+    Injects ``PL_AGREE_SCALE`` automatically. Callers that want the EFL
+    scale (or any other) should import ``refined_kelly`` directly from
+    ``staking`` and pass ``agree_scale=`` explicitly.
     """
-    if odds <= 1 or blended_prob <= 0:
-        return 0.0
-
-    # Raw Kelly
-    kelly = (blended_prob * odds - 1) / (odds - 1)
-    if kelly <= 0:
-        return 0.0
-
-    # 1. Base fraction
-    stake = kelly * kelly_fraction
-
-    # 2. Agreement scaling: 2/4 = 0.7x, 3/4 = 0.9x, 4/4 = 1.1x
-    agree_scale = {0: 0.0, 1: 0.0, 2: 0.70, 3: 0.90, 4: 1.10}
-    stake *= agree_scale.get(n_agree, 0.70)
-
-    # 3. Edge confidence: scale up slightly for larger edges (diminishing)
-    # edge of 2% = 1.0x, 4% = 1.15x, 6%+ = 1.25x
-    if edge > 0.04:
-        stake *= 1.15
-    elif edge > 0.06:
-        stake *= 1.25
-
-    # 4. Drawdown protection
-    stake *= drawdown_factor
-
-    # 5. Apply caps
-    stake = min(stake, max_stake_pct)
-
-    # 6. Minimum stake filter (below 0.3% not worth it)
-    if stake < 0.003:
-        return 0.0
-
-    return stake
-
-
-def compute_drawdown_factor(cumulative_bankroll, peak_bankroll):
-    """Reduce stakes when in drawdown.
-
-    At 5% drawdown: 90% of normal stakes
-    At 10% drawdown: 75% of normal stakes
-    At 15%+ drawdown: 60% of normal stakes
-    """
-    if peak_bankroll <= 0:
-        return 1.0
-    dd = 1.0 - (cumulative_bankroll / peak_bankroll)
-    if dd <= 0.02:
-        return 1.0
-    elif dd <= 0.05:
-        return 0.90
-    elif dd <= 0.10:
-        return 0.75
-    elif dd <= 0.15:
-        return 0.60
-    else:
-        return 0.50  # severe drawdown — half stakes
+    return _staking_refined_kelly(
+        blended_prob, odds, n_agree, edge,
+        agree_scale=PL_AGREE_SCALE,
+        kelly_fraction=kelly_fraction,
+        max_stake_pct=max_stake_pct,
+        drawdown_factor=drawdown_factor,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

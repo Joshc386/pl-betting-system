@@ -88,41 +88,6 @@ def main():
     except Exception as e:
         log.warning(f"  Squad adjuster retrain failed (non-critical): {e}")
 
-    # Step 3: Restart dashboard
-    log.info("Step 3: Restarting dashboard...")
-    try:
-        import subprocess
-        import signal
-
-        # Kill existing dashboard on port 8052
-        result = subprocess.run(
-            ["powershell", "-Command",
-             "Get-NetTCPConnection -LocalPort 8052 -ErrorAction SilentlyContinue | "
-             "Select-Object -ExpandProperty OwningProcess -Unique"],
-            capture_output=True, text=True,
-        )
-        for pid in result.stdout.strip().split("\n"):
-            pid = pid.strip()
-            if pid and pid.isdigit():
-                log.info(f"  Killing old dashboard process (PID {pid})")
-                os.kill(int(pid), signal.SIGTERM)
-
-        import time
-        time.sleep(2)  # Brief pause for port release
-
-        # Launch new dashboard (detached, won't block updater)
-        dashboard_script = os.path.join(PROJECT_DIR, "OverUnderDash.py")
-        subprocess.Popen(
-            [sys.executable, dashboard_script],
-            cwd=PROJECT_DIR,
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-            stdout=open(os.path.join(PROJECT_DIR, "logs", "dashboard.log"), "a"),
-            stderr=subprocess.STDOUT,
-        )
-        log.info("  Dashboard restarted on port 8052.")
-    except Exception as e:
-        log.warning(f"  Dashboard restart failed (non-critical): {e}")
-
     log.info("Auto-update completed successfully.")
 
 

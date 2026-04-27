@@ -1,0 +1,417 @@
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:526: RuntimeWarning: Mean of empty slice
+  df["Poisson_Consensus"] = np.nanmean(
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:542: RuntimeWarning: Mean of empty slice
+  df["Poisson_Consensus_15"] = np.nanmean(
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:549: RuntimeWarning: Mean of empty slice
+  df["Expected_TG_Consensus"] = np.nanmean(
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+
+######################################################################
+#  Option 2 Diagnostic — DC-only comparison
+######################################################################
+
+[1/3] Loading PL pipeline...
+  Existing weather cache: 9801 entries
+  Weather cache is up to date.
+  Weather features merged: 9801/9801 matches
+  FPL strength features: 2280/9801 matches have data
+  Squad features merged: 679 matches (seasons 24-25)
+  Corner features: 9481/9801 matches have data
+  Shot-level features: 3713/9801 matches have data
+  Roster features: 3719/9801 matches have data
+  Tactical features: 3724/9801 matches have data
+  Detailed match features: 350/9801 matches have data
+  PL: 9801 rows, seasons 0-25
+[2/3] Loading EFL pipeline...
+  EFL: 13608 rows, seasons 0-24
+
+[3/3] Tuning DC hyperparameters...
+
+  PL O/U 2.5 (shared baseline + market-specific)...
+
+============================================================
+Dixon-Coles Hyperparameter Tuning (target=Over_2_5)
+============================================================
+
+  Phase 1: Weighted-average grid (8x7 = 56 combos)
+  Folds: 7
+  Top 5:
+    half_life= 30  rho=-0.20  AUC=0.5751 <-- BEST
+    half_life= 30  rho=-0.15  AUC=0.5751
+    half_life= 30  rho=-0.13  AUC=0.5751
+    half_life= 30  rho=-0.10  AUC=0.5751
+    half_life= 30  rho=-0.07  AUC=0.5751
+
+  Phase 1 best: half_life=30, rho=-0.2, AUC=0.5751
+
+  Phase 2: Testing MLE + xG variants (using best half_life=30, rho=-0.2)
+    weighted-avg (baseline)         AUC=0.5751  (7 folds)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+    MLE a=0.001                     AUC=0.5073  (7 folds)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+    MLE a=0.005                     AUC=0.5103  (7 folds)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+    MLE a=0.01                      AUC=0.5109  (7 folds)
+    MLE a=0.05                      AUC=0.5124  (7 folds)
+    xG weighted-avg                 AUC=0.5672  (7 folds)
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+    xG+MLE a=0.005                  AUC=0.5679  (7 folds)
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+    xG+MLE a=0.01                   AUC=0.5679  (7 folds)
+
+  Final best: {'half_life': 30, 'rho': -0.2}, AUC=0.5751
+============================================================
+
+    -> {'half_life': 30, 'rho': -0.2}
+
+  PL BTTS (market-specific)...
+
+============================================================
+Dixon-Coles Hyperparameter Tuning (target=BTTS)
+============================================================
+
+  Phase 1: Weighted-average grid (8x7 = 56 combos)
+  Folds: 7
+  Top 5:
+    half_life= 20  rho=+0.00  AUC=0.5329 <-- BEST
+    half_life= 20  rho=-0.03  AUC=0.5329
+    half_life= 25  rho=+0.00  AUC=0.5329
+    half_life= 25  rho=-0.20  AUC=0.5328
+    half_life= 25  rho=-0.03  AUC=0.5328
+
+  Phase 1 best: half_life=20, rho=0.0, AUC=0.5329
+
+  Phase 2: Testing MLE + xG variants (using best half_life=20, rho=0.0)
+    weighted-avg (baseline)         AUC=0.5329  (7 folds)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+    MLE a=0.001                     AUC=0.5053  (7 folds)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+    MLE a=0.005                     AUC=0.5025  (7 folds)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+  [DC MLE] Warning: optimizer did not converge (STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT)
+    MLE a=0.01                      AUC=0.5004  (7 folds)
+    MLE a=0.05                      AUC=0.5011  (7 folds)
+    xG weighted-avg                 AUC=0.5296  (7 folds)
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+C:\Users\joshc\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\scipy\optimize\_numdiff.py:686: RuntimeWarning: invalid value encountered in subtract
+  df = [f_eval - f0 for f_eval in f_evals]
+
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+    xG+MLE a=0.005                  AUC=0.5304  (7 folds)
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+  [DC MLE] Warning: optimizer did not converge (ABNORMAL: )
+    xG+MLE a=0.01                   AUC=0.5304  (7 folds)
+
+  Final best: {'half_life': 20, 'rho': 0.0}, AUC=0.5329
+============================================================
+
+    -> {'half_life': 20, 'rho': 0.0}
+
+  EFL O/U 2.5 (shared baseline + market-specific)...
+
+============================================================
+Dixon-Coles Tuning (Championship, target=Over_2_5)
+============================================================
+  Grid: 8x7 = 56 combos, 9 folds
+  Top 5:
+    half_life= 10  rho=-0.20  AUC=0.5250 <-- BEST
+    half_life= 10  rho=-0.15  AUC=0.5250
+    half_life= 10  rho=-0.13  AUC=0.5250
+    half_life= 10  rho=-0.10  AUC=0.5250
+    half_life= 10  rho=-0.07  AUC=0.5250
+  (MLE skipped: 64 teams makes MLE impractical)
+
+  Final: {'half_life': 10, 'rho': -0.2}, AUC=0.5250
+============================================================
+
+    -> {'half_life': 10, 'rho': -0.2}
+
+  EFL O/U 1.5 (market-specific)...
+
+============================================================
+Dixon-Coles Tuning (Championship, target=Over_1_5)
+============================================================
+  Grid: 8x7 = 56 combos, 9 folds
+  Top 5:
+    half_life= 10  rho=-0.15  AUC=0.5353 <-- BEST
+    half_life= 10  rho=-0.20  AUC=0.5353
+    half_life= 10  rho=-0.13  AUC=0.5353
+    half_life= 10  rho=-0.10  AUC=0.5352
+    half_life= 10  rho=-0.07  AUC=0.5352
+  (MLE skipped: 64 teams makes MLE impractical)
+
+  Final: {'half_life': 10, 'rho': -0.15}, AUC=0.5353
+============================================================
+
+    -> {'half_life': 10, 'rho': -0.15}
+
+  EFL BTTS (market-specific)...
+
+============================================================
+Dixon-Coles Tuning (Championship, target=BTTS)
+============================================================
+  Grid: 8x7 = 56 combos, 9 folds
+  Top 5:
+    half_life= 70  rho=-0.20  AUC=0.5279 <-- BEST
+    half_life= 70  rho=-0.15  AUC=0.5279
+    half_life= 70  rho=-0.13  AUC=0.5279
+    half_life= 70  rho=-0.10  AUC=0.5278
+    half_life= 70  rho=-0.07  AUC=0.5278
+  (MLE skipped: 64 teams makes MLE impractical)
+
+  Final: {'half_life': 70, 'rho': -0.2}, AUC=0.5279
+============================================================
+
+    -> {'half_life': 70, 'rho': -0.2}
+
+======================================================================
+  PL / ou25  (target=Over_2_5)
+======================================================================
+  Shared kwargs (O/U 2.5 tune): {'half_life': 30, 'rho': -0.2}
+  Market kwargs (per-market tune): {'half_life': 30, 'rho': -0.2}
+
+  Fold-by-fold AUC / Brier:
+  Season   A_baseline           B_step1              C_1+2               
+  S19      AUC=0.6104 Br=0.2401 AUC=0.6104 Br=0.2401 AUC=0.6077 Br=0.2408
+  S20      AUC=0.5211 Br=0.2582 AUC=0.5211 Br=0.2582 AUC=0.5234 Br=0.2560
+  S21      AUC=0.6158 Br=0.2387 AUC=0.6158 Br=0.2387 AUC=0.6177 Br=0.2389
+  S22      AUC=0.5576 Br=0.2497 AUC=0.5576 Br=0.2497 AUC=0.5618 Br=0.2483
+  S23      AUC=0.5463 Br=0.2529 AUC=0.5463 Br=0.2529 AUC=0.5475 Br=0.2508
+  S24      AUC=0.5631 Br=0.2463 AUC=0.5631 Br=0.2463 AUC=0.5634 Br=0.2459
+  S25      AUC=0.6027 Br=0.2443 AUC=0.6027 Br=0.2443 AUC=0.6039 Br=0.2440
+
+  Mean across folds:
+  Variant              AUC          Brier        n_folds 
+  A_baseline           0.5739       0.2472       7
+  B_step1              0.5739       0.2472       7
+  C_steps1_2           0.5751       0.2464       7
+
+  Delta vs baseline (A):
+  B_step1              dAUC=+0.0000  dBrier=+0.0000  (worse AUC, better Brier)
+  C_steps1_2           dAUC=++0.0012  dBrier=-0.0008  (better AUC, better Brier)
+
+======================================================================
+  PL / btts  (target=BTTS)
+======================================================================
+  Shared kwargs (O/U 2.5 tune): {'half_life': 30, 'rho': -0.2}
+  Market kwargs (per-market tune): {'half_life': 20, 'rho': 0.0}
+
+  Fold-by-fold AUC / Brier:
+  Season   A_baseline           B_step1              C_1+2               
+  S19      AUC=0.5303 Br=0.2523 AUC=0.5309 Br=0.2520 AUC=0.5316 Br=0.2510
+  S20      AUC=0.5200 Br=0.2536 AUC=0.5180 Br=0.2544 AUC=0.5175 Br=0.2535
+  S21      AUC=0.5821 Br=0.2464 AUC=0.5793 Br=0.2457 AUC=0.5786 Br=0.2459
+  S22      AUC=0.4732 Br=0.2607 AUC=0.4710 Br=0.2613 AUC=0.4737 Br=0.2590
+  S23      AUC=0.5237 Br=0.2498 AUC=0.5301 Br=0.2549 AUC=0.5304 Br=0.2517
+  S24      AUC=0.5229 Br=0.2471 AUC=0.5358 Br=0.2464 AUC=0.5364 Br=0.2462
+  S25      AUC=0.5714 Br=0.2451 AUC=0.5645 Br=0.2451 AUC=0.5625 Br=0.2451
+
+  Mean across folds:
+  Variant              AUC          Brier        n_folds 
+  A_baseline           0.5319       0.2507       7
+  B_step1              0.5328       0.2514       7
+  C_steps1_2           0.5329       0.2503       7
+
+  Delta vs baseline (A):
+  B_step1              dAUC=++0.0009  dBrier=++0.0007  (better AUC, worse Brier)
+  C_steps1_2           dAUC=++0.0010  dBrier=-0.0004  (better AUC, better Brier)
+
+======================================================================
+  EFL / ou25  (target=Over_2_5)
+======================================================================
+  Shared kwargs (O/U 2.5 tune): {'half_life': 10, 'rho': -0.2}
+  Market kwargs (per-market tune): {'half_life': 10, 'rho': -0.2}
+
+  Fold-by-fold AUC / Brier:
+  Season   A_baseline           B_step1              C_1+2               
+  S19      AUC=0.5392 Br=0.2551 AUC=0.5392 Br=0.2551 AUC=0.5390 Br=0.2545
+  S20      AUC=0.5018 Br=0.2713 AUC=0.5018 Br=0.2713 AUC=0.5018 Br=0.2701
+  S21      AUC=0.5160 Br=0.2617 AUC=0.5160 Br=0.2617 AUC=0.5158 Br=0.2610
+  S22      AUC=0.5202 Br=0.2529 AUC=0.5202 Br=0.2529 AUC=0.5198 Br=0.2526
+  S23      AUC=0.5294 Br=0.2643 AUC=0.5294 Br=0.2643 AUC=0.5288 Br=0.2638
+  S24      AUC=0.5309 Br=0.2520 AUC=0.5309 Br=0.2520 AUC=0.5312 Br=0.2516
+
+  Mean across folds:
+  Variant              AUC          Brier        n_folds 
+  A_baseline           0.5229       0.2595       6
+  B_step1              0.5229       0.2595       6
+  C_steps1_2           0.5227       0.2589       6
+
+  Delta vs baseline (A):
+  B_step1              dAUC=+0.0000  dBrier=+0.0000  (worse AUC, better Brier)
+  C_steps1_2           dAUC=-0.0002  dBrier=-0.0006  (worse AUC, better Brier)
+
+======================================================================
+  EFL / ou15  (target=Over_1_5)
+======================================================================
+  Shared kwargs (O/U 2.5 tune): {'half_life': 10, 'rho': -0.2}
+  Market kwargs (per-market tune): {'half_life': 10, 'rho': -0.15}
+
+  Fold-by-fold AUC / Brier:
+  Season   A_baseline           B_step1              C_1+2               
+  S19      AUC=0.5381 Br=0.1979 AUC=0.5382 Br=0.1978 AUC=0.5384 Br=0.1974
+  S20      AUC=0.4922 Br=0.2352 AUC=0.4922 Br=0.2342 AUC=0.4917 Br=0.2338
+  S21      AUC=0.5299 Br=0.2074 AUC=0.5296 Br=0.2076 AUC=0.5293 Br=0.2072
+  S22      AUC=0.5426 Br=0.2119 AUC=0.5424 Br=0.2117 AUC=0.5423 Br=0.2115
+  S23      AUC=0.5251 Br=0.1963 AUC=0.5253 Br=0.1968 AUC=0.5250 Br=0.1963
+  S24      AUC=0.5194 Br=0.2111 AUC=0.5194 Br=0.2110 AUC=0.5193 Br=0.2108
+
+  Mean across folds:
+  Variant              AUC          Brier        n_folds 
+  A_baseline           0.5246       0.2100       6
+  B_step1              0.5245       0.2099       6
+  C_steps1_2           0.5243       0.2095       6
+
+  Delta vs baseline (A):
+  B_step1              dAUC=-0.0001  dBrier=-0.0001  (worse AUC, better Brier)
+  C_steps1_2           dAUC=-0.0002  dBrier=-0.0005  (worse AUC, better Brier)
+
+======================================================================
+  EFL / btts  (target=BTTS)
+======================================================================
+  Shared kwargs (O/U 2.5 tune): {'half_life': 10, 'rho': -0.2}
+  Market kwargs (per-market tune): {'half_life': 70, 'rho': -0.2}
+
+  Fold-by-fold AUC / Brier:
+  Season   A_baseline           B_step1              C_1+2               
+  S19      AUC=0.5133 Br=0.2533 AUC=0.5061 Br=0.2505 AUC=0.5058 Br=0.2504
+  S20      AUC=0.4804 Br=0.2689 AUC=0.5055 Br=0.2589 AUC=0.5047 Br=0.2589
+  S21      AUC=0.4713 Br=0.2613 AUC=0.4836 Br=0.2564 AUC=0.4832 Br=0.2563
+  S22      AUC=0.5474 Br=0.2500 AUC=0.5266 Br=0.2517 AUC=0.5266 Br=0.2518
+  S23      AUC=0.5100 Br=0.2564 AUC=0.5373 Br=0.2480 AUC=0.5375 Br=0.2480
+  S24      AUC=0.5607 Br=0.2485 AUC=0.5630 Br=0.2469 AUC=0.5625 Br=0.2470
+
+  Mean across folds:
+  Variant              AUC          Brier        n_folds 
+  A_baseline           0.5139       0.2564       6
+  B_step1              0.5203       0.2521       6
+  C_steps1_2           0.5200       0.2521       6
+
+  Delta vs baseline (A):
+  B_step1              dAUC=++0.0065  dBrier=-0.0043  (better AUC, better Brier)
+  C_steps1_2           dAUC=++0.0062  dBrier=-0.0044  (better AUC, better Brier)
+
+######################################################################
+#  SUMMARY — mean AUC across walk-forward folds
+######################################################################
+
+  Market       A_base     B_step1    C_1+2      dAUC (C-A)  
+  PL_ou25      0.5739     0.5739     0.5751     ++0.0012
+  PL_btts      0.5319     0.5328     0.5329     ++0.0010
+  EFL_ou25     0.5229     0.5229     0.5227     -0.0002
+  EFL_ou15     0.5246     0.5245     0.5243     -0.0002
+  EFL_btts     0.5139     0.5203     0.5200     ++0.0062
+
+######################################################################
+#  Interpretation guide:
+#    dAUC > +0.005  = clear uplift from Option 2
+#    dAUC ± 0.002   = noise (no meaningful change)
+#    dAUC < -0.005  = regression (something broken)
+######################################################################

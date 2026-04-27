@@ -1,0 +1,118 @@
+
+######################################################################
+#  Option 5 Step 2a: same-match market correlation measurement
+######################################################################
+
+[pipeline] Loading PL...
+  Existing weather cache: 9801 entries
+  Weather cache is up to date.
+  Weather features merged: 9801/9801 matches
+  FPL strength features: 2280/9801 matches have data
+  Squad features merged: 679 matches (seasons 24-25)
+  Corner features: 9481/9801 matches have data
+  Shot-level features: 3713/9801 matches have data
+  Roster features: 3719/9801 matches have data
+  Tactical features: 3724/9801 matches have data
+  Detailed match features: 350/9801 matches have data
+[pipeline] PL settled matches: 9801
+
+PL results:
+
+  PL / Over 2.5 vs BTTS
+    n=9801  P(A)=0.514  P(B)=0.512
+    P(A and B):       0.401  (independent would be 0.263, lift = 1.53x)
+    P(B|A):           0.780  P(B|not A): 0.228  (delta = +0.552)
+    Pearson rho:      +0.5524
+    Kelly discount:   0.834  (applied when BOTH legs are bet on same fixture)
+
+  PL / Over 1.5 vs BTTS
+    n=9801  P(A)=0.754  P(B)=0.512
+    P(A and B):       0.512  (independent would be 0.386, lift = 1.33x)
+    P(B|A):           0.679  P(B|not A): 0.000  (delta = +0.679)
+    Pearson rho:      +0.5849
+    Kelly discount:   0.811  (applied when BOTH legs are bet on same fixture)
+
+  PL / Over 1.5 vs Over 2.5
+    n=9801  P(A)=0.754  P(B)=0.514
+    P(A and B):       0.514  (independent would be 0.387, lift = 1.33x)
+    P(B|A):           0.681  P(B|not A): 0.000  (delta = +0.681)
+    Pearson rho:      +0.5870
+    Kelly discount:   0.810  (applied when BOTH legs are bet on same fixture)
+
+  PL / Over 2.5 vs Over 3.5
+    n=9801  P(A)=0.514  P(B)=0.295
+    P(A and B):       0.295  (independent would be 0.151, lift = 1.95x)
+    P(B|A):           0.574  P(B|not A): 0.000  (delta = +0.574)
+    Pearson rho:      +0.6294
+    Kelly discount:   0.777  (applied when BOTH legs are bet on same fixture)
+
+[pipeline] Loading EFL...
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:561: RuntimeWarning: Mean of empty slice
+  df["Poisson_Consensus"] = np.nanmean(
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:577: RuntimeWarning: Mean of empty slice
+  df["Poisson_Consensus_15"] = np.nanmean(
+C:\Users\joshc\OneDrive\Documents\Project\championship_pipeline.py:584: RuntimeWarning: Mean of empty slice
+  df["Expected_TG_Consensus"] = np.nanmean(
+[pipeline] EFL settled matches: 13608
+
+EFL results:
+
+  EFL / Over 2.5 vs BTTS
+    n=13608  P(A)=0.475  P(B)=0.517
+    P(A and B):       0.388  (independent would be 0.246, lift = 1.58x)
+    P(B|A):           0.817  P(B|not A): 0.246  (delta = +0.570)
+    Pearson rho:      +0.5698
+    Kelly discount:   0.822  (applied when BOTH legs are bet on same fixture)
+
+  EFL / Over 1.5 vs BTTS
+    n=13608  P(A)=0.730  P(B)=0.517
+    P(A and B):       0.517  (independent would be 0.377, lift = 1.37x)
+    P(B|A):           0.709  P(B|not A): 0.000  (delta = +0.709)
+    Pearson rho:      +0.6303
+    Kelly discount:   0.776  (applied when BOTH legs are bet on same fixture)
+
+  EFL / Over 1.5 vs Over 2.5
+    n=13608  P(A)=0.730  P(B)=0.475
+    P(A and B):       0.475  (independent would be 0.347, lift = 1.37x)
+    P(B|A):           0.651  P(B|not A): 0.000  (delta = +0.651)
+    Pearson rho:      +0.5793
+    Kelly discount:   0.815  (applied when BOTH legs are bet on same fixture)
+
+  EFL / Over 2.5 vs Over 3.5
+    n=13608  P(A)=0.475  P(B)=0.253
+    P(A and B):       0.253  (independent would be 0.120, lift = 2.10x)
+    P(B|A):           0.533  P(B|not A): 0.000  (delta = +0.533)
+    Pearson rho:      +0.6123
+    Kelly discount:   0.791  (applied when BOTH legs are bet on same fixture)
+
+######################################################################
+#  SUMMARY: correlation and implied Kelly discount per pair
+######################################################################
+
+  League Pair                           rho  joint_lift   discount
+  PL    Over 2.5 vs BTTS           +0.5524        1.53      0.834
+  PL    Over 1.5 vs BTTS           +0.5849        1.33      0.811
+  PL    Over 1.5 vs Over 2.5       +0.5870        1.33      0.810
+  PL    Over 2.5 vs Over 3.5       +0.6294        1.95      0.777
+  EFL   Over 2.5 vs BTTS           +0.5698        1.58      0.822
+  EFL   Over 1.5 vs BTTS           +0.6303        1.37      0.776
+  EFL   Over 1.5 vs Over 2.5       +0.5793        1.37      0.815
+  EFL   Over 2.5 vs Over 3.5       +0.6123        2.10      0.791
+
+  Full results saved to: reports/same_match_correlations.csv
+
+######################################################################
+#  RECOMMENDATION for SAME_MATCH_DISCOUNT config
+######################################################################
+
+  Based on measured correlations, populate config.py with:
+    SAME_MATCH_DISCOUNT = {
+        frozenset({"ou25", "btts"})             : 0.834,  # PL rho=+0.552
+        frozenset({"ou15", "btts"})             : 0.811,  # PL rho=+0.585
+        frozenset({"ou15", "ou25"})             : 0.810,  # PL rho=+0.587
+        frozenset({"ou25", "ou35"})             : 0.777,  # PL rho=+0.629
+        frozenset({"ou25", "btts"})             : 0.822,  # EFL rho=+0.570
+        frozenset({"ou15", "btts"})             : 0.776,  # EFL rho=+0.630
+        frozenset({"ou15", "ou25"})             : 0.815,  # EFL rho=+0.579
+        frozenset({"ou25", "ou35"})             : 0.791,  # EFL rho=+0.612
+    }
