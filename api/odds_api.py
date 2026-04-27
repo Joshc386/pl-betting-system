@@ -93,6 +93,12 @@ def _fetch_market(market_key: str) -> list[dict]:
         used = resp.headers.get("x-requests-used", "?")
         print(f"  Odds API [{market_key}]: {resp.status_code}, "
               f"quota remaining: {remaining}, used: {used}")
+        # Persist the quota snapshot for the dashboard widget. Best-effort:
+        # any failure inside record_call is swallowed by the tracker itself.
+        from api.quota_tracker import record_call, _try_parse
+        record_call("odds_api",
+                    remaining=_try_parse(remaining),
+                    used=_try_parse(used))
 
         if resp.status_code == 429:
             print("  WARNING: Odds API quota exceeded!")
@@ -132,6 +138,14 @@ def _fetch_event_market(event_id: str, market_key: str) -> dict | None:
 
     try:
         resp = requests.get(url, params=params, timeout=15)
+        # Per-event endpoint also returns quota headers — track them so
+        # the BTTS fetch loop's heavy credit consumption is visible.
+        from api.quota_tracker import record_call, _try_parse
+        record_call(
+            "odds_api",
+            remaining=_try_parse(resp.headers.get("x-requests-remaining")),
+            used=_try_parse(resp.headers.get("x-requests-used")),
+        )
         if resp.status_code == 429:
             print("  WARNING: Odds API quota exceeded!")
             return None
@@ -327,6 +341,11 @@ def fetch_epl_odds(
         resp = requests.get(f"{BASE_URL}/sports/", params={"apiKey": API_KEY},
                             timeout=10)
         remaining = resp.headers.get("x-requests-remaining", "?")
+        used = resp.headers.get("x-requests-used", "?")
+        from api.quota_tracker import record_call, _try_parse
+        record_call("odds_api",
+                    remaining=_try_parse(remaining),
+                    used=_try_parse(used))
     except requests.RequestException:
         pass
     print(f"  BTTS: {btts_fetched}/{len(event_ids)} events have odds "

@@ -307,16 +307,22 @@ class ChampionshipPredictor:
         btts_config: dict | None = None,
         verbose: bool = True,
         use_sparse_features: bool | None = None,
+        snapshot_type: str | None = None,
     ) -> None:
         self.ou_config = ou_config or DEFAULT_CONFIG.copy()
         self.ou15_config = ou15_config or OU15_DEFAULT_CONFIG.copy()
         self.btts_config = btts_config or BTTS_DEFAULT_CONFIG.copy()
         self.verbose = verbose
         # Option 3 Step 3: mirrors LivePredictor — None = use global default.
-        from config import USE_SPARSE_FEATURES
+        from config import USE_SPARSE_FEATURES, DEFAULT_SNAPSHOT_TYPE
         self.use_sparse_features = (
             USE_SPARSE_FEATURES if use_sparse_features is None
             else use_sparse_features)
+        # Option β-tight: gates OddsPapi fetch. "week_ahead" = full sweep,
+        # "refresh" = Odds-API only.
+        self.snapshot_type = (
+            DEFAULT_SNAPSHOT_TYPE if snapshot_type is None
+            else snapshot_type)
 
         self._pipeline_data: dict | None = None
         self._full_df: pd.DataFrame | None = None
@@ -975,16 +981,22 @@ class ChampionshipPredictor:
         matches = _filtered
 
         # OddsPapi for supplementary odds.
-        # force_refresh=False respects the 60-min cache TTL — previously
-        # force_refresh=True burned ~14 credits per predict run regardless
-        # of cache freshness. See reports/roi_findings.md API usage notes.
+        # Option β-tight: only fire on the week-ahead snapshot. Matchday
+        # morning, KO-1h, and CLV refreshes use Odds-API only — saves
+        # ~215 OddsPapi credits/month. The merge code downstream is
+        # null-safe when oddspapi_data is empty.
         oddspapi_data: dict[tuple[str, str], dict] = {}
-        try:
-            oddspapi_data = _fetch_champ_oddspapi(
-                force_refresh=False, our_teams=self._our_teams)
-            self._log(f"OddsPapi: {len(oddspapi_data)} fixtures matched")
-        except Exception as e:
-            logger.warning("OddsPapi Championship failed: %s", e)
+        if self.snapshot_type == "week_ahead":
+            try:
+                oddspapi_data = _fetch_champ_oddspapi(
+                    force_refresh=False, our_teams=self._our_teams)
+                self._log(f"OddsPapi: {len(oddspapi_data)} fixtures matched")
+            except Exception as e:
+                logger.warning("OddsPapi Championship failed: %s", e)
+        else:
+            self._log(
+                f"OddsPapi skipped (snapshot_type={self.snapshot_type!r}, "
+                "Option β-tight)")
 
         # Build fixture features
         df = self._full_df

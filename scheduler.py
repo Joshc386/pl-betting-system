@@ -48,7 +48,10 @@ def job_weekly_retrain() -> None:
         from dashboard import (save_recommendations, save_match_analysis,
                                log_predictions)
 
-        predictor = LivePredictor(verbose=True)
+        # Option β-tight: weekly retrain IS the week-ahead snapshot — fetch
+        # the full OddsPapi sweep here so bet selection has 300+ bookmaker
+        # best-price coverage. Matchday refreshes go Odds-API only.
+        predictor = LivePredictor(verbose=True, snapshot_type="week_ahead")
         predictor.load_data()
         predictor.train()
         predictor.save_trained_state()
@@ -74,7 +77,8 @@ def job_weekly_retrain() -> None:
         from dashboard import (save_recommendations, save_match_analysis,
                                log_predictions)
 
-        champ = ChampionshipPredictor(verbose=True)
+        # Option β-tight: weekly retrain = week-ahead snapshot (see PL above).
+        champ = ChampionshipPredictor(verbose=True, snapshot_type="week_ahead")
         champ.load_data()
         champ.train()
         champ.save_trained_state()
@@ -116,12 +120,15 @@ def job_matchday_fetch(
         from dashboard import (save_recommendations, save_match_analysis,
                                log_predictions)
 
+        # Option β-tight: matchday morning + KO-1h refreshes use Odds-API
+        # only. snapshot_type="refresh" gates out the OddsPapi fetch path.
         if league == "PL":
             from predict import LivePredictor
-            predictor = LivePredictor(verbose=True)
+            predictor = LivePredictor(verbose=True, snapshot_type="refresh")
         else:
             from championship_predict import ChampionshipPredictor
-            predictor = ChampionshipPredictor(verbose=True)
+            predictor = ChampionshipPredictor(
+                verbose=True, snapshot_type="refresh")
 
         recs = predictor.light_refresh(markets=markets)
 
@@ -348,7 +355,9 @@ def job_generate_predictions() -> None:
         from dashboard import (save_recommendations, save_match_analysis,
                                log_predictions)
 
-        predictor = LivePredictor(verbose=True)
+        # CLI run-predict is treated as a week-ahead sweep (operator running
+        # manually expects full OddsPapi enrichment).
+        predictor = LivePredictor(verbose=True, snapshot_type="week_ahead")
         predictor.load_data()
         predictor.train()
         predictor.save_trained_state()
@@ -378,7 +387,9 @@ def job_generate_champ_predictions() -> None:
         from dashboard import (save_recommendations, save_match_analysis,
                                log_predictions)
 
-        predictor = ChampionshipPredictor(verbose=True)
+        # CLI run-champ is treated as a week-ahead sweep (see PL above).
+        predictor = ChampionshipPredictor(
+            verbose=True, snapshot_type="week_ahead")
         predictor.load_data()
         predictor.train()
         predictor.save_trained_state()

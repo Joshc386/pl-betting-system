@@ -147,6 +147,10 @@ def _api_get(endpoint: str, params: dict | None = None, max_retries: int = 2) ->
                 logger.error("OddsPapi %s: %d - %s",
                              endpoint, resp.status_code, resp.text[:200])
                 return None
+            # Successful call → one credit consumed. OddsPapi has no quota
+            # header so we increment a client-side counter (resets monthly).
+            from api.quota_tracker import record_call
+            record_call("oddspapi")
             return resp.json()
         except requests.Timeout:
             if attempt < max_retries:

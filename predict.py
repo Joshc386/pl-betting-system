@@ -107,6 +107,7 @@ class LivePredictor:
         btts_config: Optional[dict] = None,
         verbose: bool = True,
         use_sparse_features: Optional[bool] = None,
+        snapshot_type: Optional[str] = None,
     ) -> None:
         self.ou_config = ou_config or DEFAULT_CONFIG.copy()
         self.btts_config = btts_config or BTTS_DEFAULT_CONFIG.copy()
@@ -116,10 +117,15 @@ class LivePredictor:
         # (USE_SPARSE_FEATURES from config.py). Exposed as constructor
         # parameter so diagnose_option3.py can A/B compare variants without
         # touching the global.
-        from config import USE_SPARSE_FEATURES
+        from config import USE_SPARSE_FEATURES, DEFAULT_SNAPSHOT_TYPE
         self.use_sparse_features = (
             USE_SPARSE_FEATURES if use_sparse_features is None
             else use_sparse_features)
+        # Option β-tight: gates OddsPapi fetch. "week_ahead" = full sweep,
+        # "refresh" = Odds-API only. See config.DEFAULT_SNAPSHOT_TYPE notes.
+        self.snapshot_type = (
+            DEFAULT_SNAPSHOT_TYPE if snapshot_type is None
+            else snapshot_type)
 
         self._pipeline_data: Optional[dict] = None
         self._full_df: Optional[pd.DataFrame] = None
@@ -832,39 +838,46 @@ class LivePredictor:
         matches = _filtered
 
         # Fetch OddsPapi for alt lines + AH (supplements The-Odds-API).
-        # force_refresh=False respects the 60-min cache TTL — previously
-        # force_refresh=True burned ~14 credits per predict run regardless
-        # of cache freshness. See reports/roi_findings.md API usage notes.
+        # Option β-tight: only fire on the week-ahead snapshot. Matchday
+        # morning, KO-1h, and CLV refreshes use Odds-API only — saves
+        # ~215 OddsPapi credits/month. The merge code downstream is
+        # null-safe (every op_data lookup tolerates an empty dict).
         oddspapi_data: dict[str, dict] = {}
-        try:
-            oddspapi_fixtures = fetch_oddspapi_odds(force_refresh=False)
+        if self.snapshot_type == "week_ahead":
+            try:
+                oddspapi_fixtures = fetch_oddspapi_odds(force_refresh=False)
 
-            # If API returned nothing (quota exhausted, timeout, etc.),
-            # load stale cache directly — old odds are better than none
-            if not oddspapi_fixtures:
-                from api.oddspapi import CACHE_FILE as _op_cache_file
-                try:
-                    with open(_op_cache_file, "r") as _f:
-                        import json as _json
-                        _raw = _json.load(_f)
-                    oddspapi_fixtures = _raw.get("data", [])
-                    if oddspapi_fixtures:
-                        logger.info(
-                            "Loaded stale OddsPapi cache: %d fixtures "
-                            "(cached %s)", len(oddspapi_fixtures),
-                            _raw.get("timestamp", "unknown"),
-                        )
-                except (FileNotFoundError, ValueError):
-                    pass
+                # If API returned nothing (quota exhausted, timeout, etc.),
+                # load stale cache directly — old odds are better than none
+                if not oddspapi_fixtures:
+                    from api.oddspapi import CACHE_FILE as _op_cache_file
+                    try:
+                        with open(_op_cache_file, "r") as _f:
+                            import json as _json
+                            _raw = _json.load(_f)
+                        oddspapi_fixtures = _raw.get("data", [])
+                        if oddspapi_fixtures:
+                            logger.info(
+                                "Loaded stale OddsPapi cache: %d fixtures "
+                                "(cached %s)", len(oddspapi_fixtures),
+                                _raw.get("timestamp", "unknown"),
+                            )
+                    except (FileNotFoundError, ValueError):
+                        pass
 
-            for fx in oddspapi_fixtures:
-                home = oddspapi_map_team(fx["home_team"], self._our_teams)
-                away = oddspapi_map_team(fx["away_team"], self._our_teams)
-                if home and away:
-                    oddspapi_data[(home, away)] = fx
-            self._log(f"OddsPapi: {len(oddspapi_data)} fixtures matched")
-        except Exception as e:
-            logger.warning("OddsPapi fetch failed (using The-Odds-API only): %s", e)
+                for fx in oddspapi_fixtures:
+                    home = oddspapi_map_team(fx["home_team"], self._our_teams)
+                    away = oddspapi_map_team(fx["away_team"], self._our_teams)
+                    if home and away:
+                        oddspapi_data[(home, away)] = fx
+                self._log(f"OddsPapi: {len(oddspapi_data)} fixtures matched")
+            except Exception as e:
+                logger.warning(
+                    "OddsPapi fetch failed (using The-Odds-API only): %s", e)
+        else:
+            self._log(
+                f"OddsPapi skipped (snapshot_type={self.snapshot_type!r}, "
+                "Option β-tight)")
 
         # Build fixture features from historical data
         df = self._full_df

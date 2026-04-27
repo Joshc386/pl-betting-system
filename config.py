@@ -631,6 +631,27 @@ ODDSPAPI_CACHE_TTL_MINUTES = 60  # Longer TTL than odds_api since quota is tight
 ODDSPAPI_SHARP_BOOKS = {"pinnacle"}
 ODDSPAPI_TIER1_BOOKS = {"bet365", "betfair-ex", "unibet", "betsson", "betway"}
 
+# ── Option β-tight: OddsPapi usage strategy ──
+# Phase 4a + API audit (April 2026) showed OddsPapi was burning ~430 credits/month
+# (158 in 11 days) because every dashboard load + every predict refresh fetched
+# fresh data, even though only the week-ahead snapshot meaningfully drives bet
+# selection. Option β-tight restricts OddsPapi to the week-ahead snapshot only;
+# matchday/lineup/CLV refreshes go Odds-API-only (still 14 sharp books, plenty
+# for line-movement tracking and CLV).
+#
+# Snapshot type semantics:
+#   "week_ahead"  → Monday morning sweep. Both APIs fetch.
+#   "refresh"     → Matchday morning, KO-1h, KO-5m. Odds-API only.
+# Default is "refresh" (the conservative cheap path); the Monday scheduler job
+# explicitly passes snapshot_type="week_ahead".
+DEFAULT_SNAPSHOT_TYPE = "refresh"
+
+# Dashboard read-only mode: when False, dashboard scans serve the most-recent
+# cached merged snapshot from the predictor and never fire a fresh OddsPapi
+# fetch on page load. The Refresh button + scheduled jobs are the only paths
+# that hit the API. Set True only for diagnostic use.
+DASHBOARD_FETCH_ODDSPAPI = False
+
 # ── API Keys ──
 # football-data.org: sign up at https://www.football-data.org/ for free key
 FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY", "")

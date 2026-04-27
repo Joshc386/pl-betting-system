@@ -858,6 +858,112 @@ def _stat_card(title: str, value: str, color: str = "primary") -> dbc.Card:
     )
 
 
+def _format_age(ts_iso: str | None) -> str:
+    """Render an ISO timestamp as a short relative-age string.
+
+    Examples: "12m ago", "1h 23m ago", "2d ago", "never".
+    Used by the dashboard freshness indicator — keeps wording compact
+    enough to fit on one line of the header.
+    """
+    if not ts_iso:
+        return "never"
+    try:
+        ts = datetime.fromisoformat(ts_iso.replace("Z", "+00:00"))
+        # Drop tz to compare with naive datetime.now()
+        if ts.tzinfo is not None:
+            ts = ts.replace(tzinfo=None)
+        delta = datetime.now() - ts
+    except (TypeError, ValueError):
+        return "?"
+    secs = int(delta.total_seconds())
+    if secs < 0:
+        return "just now"
+    if secs < 60:
+        return f"{secs}s ago"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m ago"
+    hours = mins // 60
+    if hours < 24:
+        rem = mins % 60
+        return f"{hours}h {rem}m ago" if rem else f"{hours}h ago"
+    days = hours // 24
+    return f"{days}d ago"
+
+
+def _cache_timestamp(path: str) -> str | None:
+    """Read the ``timestamp`` field from a cache JSON file (or None)."""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r") as f:
+            return json.load(f).get("timestamp")
+    except (json.JSONDecodeError, ValueError, OSError):
+        return None
+
+
+def _make_odds_status(league: str) -> html.Div:
+    """Top-of-dashboard widget: freshness + monthly API quota.
+
+    Renders one line summarising:
+      * when each provider's cache for this league was last refreshed
+      * monthly credit usage vs cap for both providers
+
+    Pulled from cache file timestamps + ``api/quota_tracker``. Read-only;
+    does not trigger any network calls.
+    """
+    from api.quota_tracker import read_quota, QUOTA_LIMITS
+
+    # Cache file paths — match the conventions used elsewhere in the project
+    proj_dir = os.path.dirname(os.path.abspath(__file__))
+    suffix = "" if league == "PL" else "_efl"
+    odds_cache = os.path.join(proj_dir, "data", f"odds_cache{suffix}.json")
+    op_cache = os.path.join(proj_dir, "data", f"oddspapi_cache{suffix}.json")
+
+    odds_age = _format_age(_cache_timestamp(odds_cache))
+    op_age = _format_age(_cache_timestamp(op_cache))
+
+    quota = read_quota()
+    oa = quota.get("odds_api", {})
+    op = quota.get("oddspapi", {})
+
+    def _fmt_quota(used, limit):
+        if used is None:
+            return f"–/{limit}"
+        # Visual warning thresholds — yellow at 70%, red at 90%
+        return f"{used}/{limit}"
+
+    def _quota_colour(used, limit):
+        if used is None:
+            return "text-muted"
+        ratio = used / limit
+        if ratio >= 0.9:
+            return "text-danger"
+        if ratio >= 0.7:
+            return "text-warning"
+        return "text-success"
+
+    oa_used = oa.get("used")
+    op_used = op.get("used")
+
+    return html.Div([
+        html.Span("Odds last updated: ", className="text-muted small"),
+        html.Span(f"Odds API {odds_age}", className="small me-2",
+                  style={"fontWeight": "600"}),
+        html.Span("·", className="text-muted small me-2"),
+        html.Span(f"OddsPapi {op_age}", className="small me-3",
+                  style={"fontWeight": "600"}),
+        html.Span("│ Quota: ", className="text-muted small"),
+        html.Span(f"Odds API {_fmt_quota(oa_used, QUOTA_LIMITS['odds_api'])}",
+                  className=f"small me-2 {_quota_colour(oa_used, QUOTA_LIMITS['odds_api'])}",
+                  style={"fontWeight": "600"}),
+        html.Span("·", className="text-muted small me-2"),
+        html.Span(f"OddsPapi {_fmt_quota(op_used, QUOTA_LIMITS['oddspapi'])}",
+                  className=f"small {_quota_colour(op_used, QUOTA_LIMITS['oddspapi'])}",
+                  style={"fontWeight": "600"}),
+    ], className="mb-2", style={"fontFamily": "monospace"})
+
+
 def _make_stats_row(league: str) -> html.Div:
     """Build summary stat cards for the selected league."""
     all_bets = get_all_bets(league)
@@ -2601,12 +2707,20 @@ def create_app() -> Dash:
             ], md=4, className="d-flex align-items-center justify-content-center"),
             dbc.Col([
                 dbc.Button([html.I(className="bi bi-arrow-clockwise me-1"),
-                            "Scan Fixtures"],
+                            "Refresh Odds"],
                            id="btn-scan", color="primary", size="sm",
-                           className="me-2"),
+                           className="me-2",
+                           title=("Refresh fixtures + odds for the active "
+                                  "league (Odds-API only — OddsPapi week-"
+                                  "ahead sweep runs on Sunday).")),
                 html.Span(id="status-text", className="text-muted small"),
             ], md=4, className="text-end pt-2"),
         ], className="py-3 border-bottom border-secondary mb-3"),
+
+        # ── Cache freshness + API quota strip ──
+        # Updated alongside stats-row whenever the league/scan/interval
+        # callback fires. Read-only; never triggers network calls.
+        html.Div(id="odds-status-row"),
 
         # ── Stats row ──
         html.Div(id="stats-row"),
@@ -2641,7 +2755,8 @@ def create_app() -> Dash:
     @app.callback(
         [Output("tab-content", "children"),
          Output("stats-row", "children"),
-         Output("status-text", "children")],
+         Output("status-text", "children"),
+         Output("odds-status-row", "children")],
         [Input("content-tabs", "active_tab"),
          Input("league-selector", "active_tab"),
          Input("btn-scan", "n_clicks"),
@@ -2667,6 +2782,9 @@ def create_app() -> Dash:
 
         # Build content
         stats = _make_stats_row(league)
+        # Recompute the freshness/quota strip every callback so post-scan
+        # refreshes pick up the newly written cache timestamp + quota delta.
+        odds_status = _make_odds_status(league)
 
         if active_tab == "tab-matches":
             content = _build_match_centre(league)
@@ -2679,7 +2797,7 @@ def create_app() -> Dash:
         else:
             content = html.P("Select a tab.", className="text-muted")
 
-        return content, stats, status
+        return content, stats, status, odds_status
 
     # ── Reset bookmaker dropdown ──────────────────────────────────────────
     @app.callback(
@@ -3283,59 +3401,87 @@ def _run_scan(league: str) -> str:
             odds_mod.CACHE_FILE = original_cache
 
         # ── OddsPapi integration ──
-        # OddsPapi has its own API key and cache with full market data
-        # (O/U alt lines, BTTS, Asian Handicap) across 300+ bookmakers.
-        # Strategy:
-        #   - If The-Odds-API returned nothing: use OddsPapi as full fallback
-        #   - If The-Odds-API returned data: merge OddsPapi to fill gaps
-        #     (alt lines like O/U 1.5, missing BTTS)
-        try:
-            from api.oddspapi import (
-                fetch_epl_all_odds as _fetch_op_epl,
-                fetch_championship_all_odds as _fetch_op_efl,
-                CACHE_FILE as _OP_CACHE_PL,
-                CHAMPIONSHIP_CACHE_FILE as _OP_CACHE_EFL,
-            )
-            _op_fetcher = _fetch_op_efl if league == "EFL" else _fetch_op_epl
-            _op_cache = _OP_CACHE_EFL if league == "EFL" else _OP_CACHE_PL
+        # Option β-tight: gated behind DASHBOARD_FETCH_ODDSPAPI (default False).
+        # Dashboard serves cached merged snapshots from the most recent
+        # predictor run; the predictor itself is the only path that fetches
+        # OddsPapi (and only on the week-ahead snapshot). This avoids burning
+        # ~14 OddsPapi credits per dashboard load. Set the flag to True only
+        # for diagnostic use.
+        from config import DASHBOARD_FETCH_ODDSPAPI as _DB_FETCH_OP
+        if _DB_FETCH_OP:
+            try:
+                from api.oddspapi import (
+                    fetch_epl_all_odds as _fetch_op_epl,
+                    fetch_championship_all_odds as _fetch_op_efl,
+                    CACHE_FILE as _OP_CACHE_PL,
+                    CHAMPIONSHIP_CACHE_FILE as _OP_CACHE_EFL,
+                )
+                _op_fetcher = _fetch_op_efl if league == "EFL" else _fetch_op_epl
+                _op_cache = _OP_CACHE_EFL if league == "EFL" else _OP_CACHE_PL
 
-            # Try normal fetch (respects TTL)
-            op_fixtures = _op_fetcher(force_refresh=False)
+                # Try normal fetch (respects TTL)
+                op_fixtures = _op_fetcher(force_refresh=False)
 
-            # If that returns nothing (API + cache both expired),
-            # load stale cache directly — old odds are better than none
-            if not op_fixtures:
-                import json as _json
+                # If that returns nothing (API + cache both expired),
+                # load stale cache directly — old odds are better than none
+                if not op_fixtures:
+                    import json as _json
+                    try:
+                        with open(_op_cache, "r") as _f:
+                            _raw = _json.load(_f)
+                        op_fixtures = _raw.get("data", [])
+                        if op_fixtures:
+                            logger.info(
+                                "Loaded stale OddsPapi cache (%s): %d fixtures "
+                                "(cached %s)", league, len(op_fixtures),
+                                _raw.get("timestamp", "unknown"),
+                            )
+                    except (FileNotFoundError, _json.JSONDecodeError):
+                        pass
+
+                if op_fixtures:
+                    op_matches = _oddspapi_to_matches(op_fixtures)
+                    if not matches:
+                        # Full fallback — The-Odds-API returned nothing
+                        matches = op_matches
+                        logger.info(
+                            "OddsPapi fallback (%s): %d fixtures converted",
+                            league, len(matches),
+                        )
+                    else:
+                        # Merge — enrich The-Odds-API data with OddsPapi
+                        # alt lines + BTTS
+                        matches = _merge_oddspapi_into_matches(
+                            matches, op_matches)
+            except Exception as e:
+                logger.warning("OddsPapi integration failed (%s): %s",
+                               league, e)
+        else:
+            # Option β-tight: dashboard read-only. If The-Odds-API returned
+            # nothing (quota exhausted etc.), fall back to whatever the
+            # OddsPapi cache last contained — but never trigger a fresh
+            # network fetch from this code path.
+            if not matches:
                 try:
+                    from api.oddspapi import (
+                        CACHE_FILE as _OP_CACHE_PL,
+                        CHAMPIONSHIP_CACHE_FILE as _OP_CACHE_EFL,
+                    )
+                    import json as _json
+                    _op_cache = _OP_CACHE_EFL if league == "EFL" else _OP_CACHE_PL
                     with open(_op_cache, "r") as _f:
                         _raw = _json.load(_f)
                     op_fixtures = _raw.get("data", [])
                     if op_fixtures:
+                        matches = _oddspapi_to_matches(op_fixtures)
                         logger.info(
-                            "Loaded stale OddsPapi cache (%s): %d fixtures "
-                            "(cached %s)", league, len(op_fixtures),
+                            "Dashboard read-only fallback to OddsPapi cache "
+                            "(%s): %d fixtures (cached %s)",
+                            league, len(matches),
                             _raw.get("timestamp", "unknown"),
                         )
-                except (FileNotFoundError, _json.JSONDecodeError):
+                except (FileNotFoundError, ValueError, ImportError):
                     pass
-
-            if op_fixtures:
-                op_matches = _oddspapi_to_matches(op_fixtures)
-                if not matches:
-                    # Full fallback — The-Odds-API returned nothing
-                    matches = op_matches
-                    logger.info(
-                        "OddsPapi fallback (%s): %d fixtures converted",
-                        league, len(matches),
-                    )
-                else:
-                    # Merge — enrich The-Odds-API data with OddsPapi
-                    # alt lines + BTTS
-                    matches = _merge_oddspapi_into_matches(
-                        matches, op_matches)
-        except Exception as e:
-            logger.warning("OddsPapi integration failed (%s): %s",
-                           league, e)
 
         if not matches:
             return f"{league_name} | No upcoming fixtures found | {now}"
