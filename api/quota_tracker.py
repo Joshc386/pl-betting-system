@@ -164,6 +164,37 @@ def read_quota() -> dict:
     return out
 
 
+def is_quota_safe(provider: str, threshold: float = 0.95) -> bool:
+    """Return False when usage has crossed the threshold for this provider.
+
+    Used by API fetch sites as a hard guardrail: if we've hit, say, 95%
+    of the monthly cap, refuse to fire any more requests until the
+    operator swaps the key (Odds API) or the month rolls over (OddsPapi).
+
+    Failure-mode posture: when we don't have data (no calls recorded
+    this month, corrupt file, unknown provider), return ``True`` —
+    "safe by default" — so an empty tracker file never blocks legitimate
+    fetches. The dashboard's quota widget is the primary alert; this
+    function only kicks in once we *know* we're near the cap.
+
+    Args:
+        provider: ``"odds_api"`` or ``"oddspapi"``.
+        threshold: Block fraction. 0.95 = block at 95% used. Range (0, 1].
+
+    Returns:
+        True if it's safe to call the API; False if quota is too close
+        to the cap.
+    """
+    if provider not in QUOTA_LIMITS:
+        return True  # unknown provider — don't block
+    limit = QUOTA_LIMITS[provider]
+    snap = read_quota().get(provider, {})
+    used = snap.get("used")
+    if used is None:
+        return True  # no data yet — assume fresh
+    return (used / limit) < threshold
+
+
 def _try_parse(header_value) -> Optional[int]:
     """Parse the Odds API quota header values (which may be '?' or missing).
 
