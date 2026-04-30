@@ -15,11 +15,25 @@ import threading
 LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 
+# Force UTF-8 on stdout/stderr so log lines containing characters like
+# the right-arrow (regime shift logs) or Greek beta (Option beta-tight
+# logs) don't crash on Windows' default cp1252 console encoding. The
+# logger's StreamHandler inherits this stream and can now emit any
+# unicode without UnicodeEncodeError noise in the terminal.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):
+    # reconfigure() requires Python 3.7+ and a TextIOWrapper-backed stream;
+    # if it's unavailable (rare runtime), fall through silently.
+    pass
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     handlers=[
-        logging.FileHandler(os.path.join(LOG_DIR, "system.log")),
+        logging.FileHandler(os.path.join(LOG_DIR, "system.log"),
+                            encoding="utf-8"),
         logging.StreamHandler(sys.stdout),
     ],
 )
