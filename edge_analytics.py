@@ -20,6 +20,112 @@ from typing import Optional
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Confidence-interval helpers (Performance tab)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# These exist so that headline numbers on the dashboard can show "is this
+# actually trustworthy?" alongside the point estimate. Two methods:
+#
+#   wilson_ci   — for binomial proportions (win rate). Closed form, always
+#                 valid even at n=1 or wins=0/n. Standard in the literature
+#                 for hit-rate confidence intervals.
+#
+#   bootstrap_ci — for arbitrary distributions (ROI, P/L). Resamples the
+#                 underlying profit array N times and reads percentiles.
+#                 More expensive but works for ratios and skewed
+#                 distributions where parametric formulas would lie.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def wilson_ci(wins: int, n: int, alpha: float = 0.05) -> tuple[float, float]:
+    """Wilson score interval for a binomial proportion.
+
+    More accurate than the textbook normal-approximation interval at small
+    n, and always returns a valid [0, 1] range (the normal approximation
+    can produce negative lower bounds at low win counts).
+
+    Args:
+        wins: count of successful trials
+        n: total trials
+        alpha: significance level (default 0.05 for 95% CI)
+
+    Returns:
+        (lo, hi) tuple, both in [0, 1]. Returns (0.0, 1.0) when n == 0.
+    """
+    if n <= 0:
+        return (0.0, 1.0)
+    # 1.96 for 95% CI; computed from inverse normal CDF
+    from scipy.stats import norm
+    z = norm.ppf(1 - alpha / 2)
+    p_hat = wins / n
+    denom = 1 + (z ** 2) / n
+    centre = (p_hat + (z ** 2) / (2 * n)) / denom
+    half = (z * np.sqrt(p_hat * (1 - p_hat) / n + (z ** 2) / (4 * n ** 2))) / denom
+    return (max(0.0, centre - half), min(1.0, centre + half))
+
+
+def bootstrap_ci(values: np.ndarray, n_resamples: int = 2000,
+                 alpha: float = 0.05, seed: int = 0) -> tuple[float, float, float]:
+    """Bootstrap percentile CI for the mean of an array.
+
+    Used for ROI and P/L confidence intervals where the underlying
+    profit-per-bet distribution is heavy-tailed (a single +6.0u win
+    drags the mean far more than a -1u loss). Bootstrap is robust to
+    that shape; a normal-approximation CI would be too narrow.
+
+    Args:
+        values: 1-D array of per-bet outcomes (e.g. profit_pct values)
+        n_resamples: bootstrap iterations (2000 = solid for 95% CI)
+        alpha: significance level
+        seed: RNG seed for reproducibility — same data, same CI
+
+    Returns:
+        (lo, hi, mean) tuple. Returns (nan, nan, nan) for empty input.
+    """
+    arr = np.asarray(values, dtype=float)
+    arr = arr[~np.isnan(arr)]
+    if arr.size == 0:
+        return (float("nan"), float("nan"), float("nan"))
+    if arr.size == 1:
+        # single observation — can't bootstrap, return point with infinite CI
+        return (float("nan"), float("nan"), float(arr[0]))
+
+    rng = np.random.default_rng(seed)
+    n = arr.size
+    means = np.empty(n_resamples, dtype=float)
+    for i in range(n_resamples):
+        idx = rng.integers(0, n, size=n)
+        means[i] = arr[idx].mean()
+    lo = float(np.percentile(means, 100 * alpha / 2))
+    hi = float(np.percentile(means, 100 * (1 - alpha / 2)))
+    return (lo, hi, float(arr.mean()))
+
+
+def adequacy_label(n: int, ci_lo: float, ci_hi: float) -> str:
+    """Three-state badge for whether a result is interpretable.
+
+    Used in the Performance-tab per-market table to flag which rows are
+    statistically meaningful vs which are noise. The thresholds are
+    pragmatic (not derived from a power calc) — the goal is to stop the
+    eye reading a +28% ROI on 18 bets as a real edge.
+
+    Returns:
+        "ok" | "marginal" | "noise"
+    """
+    if n < 30:
+        return "noise"
+    # CI width on ROI / P/L — wider than ±15pp means we can't tell
+    # apart "+5%" from "-5%" so calling the result anything is dishonest
+    if not np.isnan(ci_lo) and not np.isnan(ci_hi):
+        width = ci_hi - ci_lo
+        if width > 0.30:
+            return "noise"
+        # CI doesn't straddle 0 → effect is detectable
+        if ci_lo > 0 or ci_hi < 0:
+            return "ok"
+    return "marginal"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Edge Bucket Analysis
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -570,6 +676,158 @@ def run_backtest_analytics(
             return run_full_analytics(total_bets, verbose=True)
 
     return {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Counterfactual strategy comparison (Performance tab Section 2)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def counterfactual_strategies(predictions_df: pd.DataFrame,
+                              recs_df: pd.DataFrame) -> pd.DataFrame:
+    """Compare three betting strategies on the same settled outcomes.
+
+    The point of this table is to disentangle two decisions the bot makes:
+      1. Which markets to bet (the "recommendation" filter — n_agree, EV
+         after vig, Kelly stake > 0)
+      2. How much to stake (Kelly vs flat)
+
+    Three rows answer those questions independently:
+
+      Row 1  Recommended only — Kelly stake
+             What the bot actually did. Real ROI / P/L.
+
+      Row 2  Recommended only — flat stake (avg Kelly)
+             Same selection, but flat-staked. Comparing row 1 vs row 2
+             tells you whether Kelly sizing earned its variance.
+
+      Row 3  All positive edge — flat stake (avg Kelly)
+             Wider selection, same flat stake. Comparing row 2 vs row 3
+             tells you whether the recommendation filter picks winners.
+
+    All three rows use the SAME flat stake (the bot's average Kelly stake)
+    so absolute stake size is held constant — the only differences are
+    selection and sizing.
+
+    Args:
+        predictions_df: settled `predictions` rows (positive-edge, no
+            recommendation filter applied). Needs: best_odds, won.
+        recs_df: settled `recommendations` rows (filter passed).
+            Needs: odds, won, profit_pct, stake_pct.
+
+    Returns:
+        DataFrame with columns: strategy, n_bets, win_rate, win_rate_lo,
+        win_rate_hi, roi, roi_lo, roi_hi, pl_pct, pl_lo, pl_hi, avg_stake.
+        Empty DataFrame when neither input has any settled rows.
+    """
+    rows: list[dict] = []
+
+    # Average Kelly stake from settled recommendations — the flat-stake
+    # baseline for rows 2 and 3. If no settled recs yet, fall back to 1%
+    # so the comparison at least renders something.
+    if not recs_df.empty and recs_df["stake_pct"].notna().any():
+        avg_kelly = float(recs_df["stake_pct"].dropna().mean())
+        if avg_kelly <= 0:
+            avg_kelly = 0.01
+    else:
+        avg_kelly = 0.01
+
+    def _summarise(profits_arr: np.ndarray, stakes_arr: np.ndarray,
+                   wins: int, n: int, label: str) -> dict:
+        """One row of the output table — point estimates plus CIs."""
+        if n == 0:
+            return {
+                "strategy": label, "n_bets": 0,
+                "win_rate": np.nan, "win_rate_lo": np.nan, "win_rate_hi": np.nan,
+                "roi": np.nan, "roi_lo": np.nan, "roi_hi": np.nan,
+                "pl_pct": np.nan, "pl_lo": np.nan, "pl_hi": np.nan,
+                "avg_stake": np.nan,
+            }
+        # Win rate + Wilson CI
+        wr = wins / n
+        wr_lo, wr_hi = wilson_ci(wins, n)
+        # ROI = profit / staked, bootstrapped on per-bet ROI
+        total_staked = float(stakes_arr.sum())
+        total_profit = float(profits_arr.sum())
+        roi = total_profit / total_staked if total_staked > 0 else np.nan
+        # ROI CI: bootstrap on per-bet ROI ratios for stability
+        per_bet_roi = profits_arr / np.where(stakes_arr > 0, stakes_arr, np.nan)
+        roi_lo, roi_hi, _ = bootstrap_ci(per_bet_roi)
+        # P/L = bankroll change as %, bootstrap on per-bet profit
+        pl_lo, pl_hi, pl_mean = bootstrap_ci(profits_arr)
+        return {
+            "strategy": label, "n_bets": n,
+            "win_rate": wr, "win_rate_lo": wr_lo, "win_rate_hi": wr_hi,
+            "roi": roi, "roi_lo": roi_lo, "roi_hi": roi_hi,
+            "pl_pct": total_profit, "pl_lo": pl_lo * n, "pl_hi": pl_hi * n,
+            "avg_stake": float(stakes_arr.mean()),
+        }
+
+    # Row 1 — recommended, Kelly stake (uses precomputed profit_pct from DB)
+    rec_settled = recs_df[recs_df.get("settled", 0) == 1].copy() if not recs_df.empty else pd.DataFrame()
+    if not rec_settled.empty:
+        # profit_pct in the DB is already normalised to bankroll fraction.
+        # Coerce to numeric first to dodge the pandas FutureWarning about
+        # downcasting object dtypes on .fillna — settled-bet columns can
+        # arrive as object dtype if any row had a NULL at insert time.
+        profits_kelly = pd.to_numeric(
+            rec_settled["profit_pct"], errors="coerce").fillna(0).to_numpy(dtype=float)
+        stakes_kelly = pd.to_numeric(
+            rec_settled["stake_pct"], errors="coerce").fillna(0).to_numpy(dtype=float)
+        wins_kelly = int(pd.to_numeric(
+            rec_settled["won"], errors="coerce").fillna(0).sum())
+        rows.append(_summarise(
+            profits_kelly, stakes_kelly, wins_kelly, len(rec_settled),
+            f"Recommended — Kelly (avg {avg_kelly*100:.2f}%)"))
+
+        # Row 2 — same selection, flat stake at avg Kelly
+        odds_arr = pd.to_numeric(
+            rec_settled["odds"], errors="coerce").fillna(0).to_numpy(dtype=float)
+        won_arr = pd.to_numeric(
+            rec_settled["won"], errors="coerce").fillna(0).to_numpy(dtype=float)
+        # profit at flat stake: (odds-1)*stake on win, -stake on loss
+        profits_flat = np.where(
+            won_arr == 1,
+            (odds_arr - 1) * avg_kelly,
+            -avg_kelly,
+        )
+        stakes_flat = np.full(len(rec_settled), avg_kelly, dtype=float)
+        rows.append(_summarise(
+            profits_flat, stakes_flat, wins_kelly, len(rec_settled),
+            f"Recommended — flat ({avg_kelly*100:.2f}%)"))
+    else:
+        rows.append(_summarise(np.array([]), np.array([]), 0, 0,
+                               "Recommended — Kelly"))
+        rows.append(_summarise(np.array([]), np.array([]), 0, 0,
+                               "Recommended — flat"))
+
+    # Row 3 — all settled positive-edge predictions, flat stake at avg Kelly
+    if not predictions_df.empty:
+        pred_settled = predictions_df[
+            (predictions_df.get("settled", 0) == 1)
+            & (predictions_df["edge_pct"].fillna(-1) > 0)
+        ].copy()
+    else:
+        pred_settled = pd.DataFrame()
+    if not pred_settled.empty:
+        odds_arr = pd.to_numeric(
+            pred_settled["best_odds"], errors="coerce").fillna(0).to_numpy(dtype=float)
+        won_arr = pd.to_numeric(
+            pred_settled["won"], errors="coerce").fillna(0).to_numpy(dtype=float)
+        profits_all = np.where(
+            won_arr == 1,
+            (odds_arr - 1) * avg_kelly,
+            -avg_kelly,
+        )
+        stakes_all = np.full(len(pred_settled), avg_kelly, dtype=float)
+        wins_all = int(won_arr.sum())
+        rows.append(_summarise(
+            profits_all, stakes_all, wins_all, len(pred_settled),
+            f"All positive edge — flat ({avg_kelly*100:.2f}%)"))
+    else:
+        rows.append(_summarise(np.array([]), np.array([]), 0, 0,
+                               "All positive edge — flat"))
+
+    return pd.DataFrame(rows)
 
 
 if __name__ == "__main__":

@@ -844,16 +844,35 @@ def get_all_recommendations(league: str = "PL") -> pd.DataFrame:
 # Dashboard UI Components
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _stat_card(title: str, value: str, color: str = "primary") -> dbc.Card:
-    """Single stat card."""
+def _stat_card(title: str, value: str, color: str = "primary",
+               subtitle: str | None = None) -> dbc.Card:
+    """Single stat card.
+
+    Args:
+        title: small uppercase label above the value
+        value: the headline number (rendered large + monospace)
+        color: bootstrap color class for the value
+        subtitle: optional muted text below the value — used for things
+            like "95% CI: -7% to +20%" so the eye gets uncertainty info
+            alongside the point estimate. Backwards compatible — every
+            existing call site that omits it still renders cleanly.
+    """
+    body = [
+        html.H6(title, className="card-title text-muted mb-1",
+                 style={"fontSize": "11px", "textTransform": "uppercase",
+                        "letterSpacing": "0.5px"}),
+        html.H4(value, className=f"text-{color} mb-0",
+                 style={"fontFamily": "monospace", "fontWeight": "600"}),
+    ]
+    if subtitle:
+        body.append(html.Div(
+            subtitle,
+            className="text-muted",
+            style={"fontSize": "10px", "fontStyle": "italic",
+                   "marginTop": "4px"},
+        ))
     return dbc.Card(
-        dbc.CardBody([
-            html.H6(title, className="card-title text-muted mb-1",
-                     style={"fontSize": "11px", "textTransform": "uppercase",
-                            "letterSpacing": "0.5px"}),
-            html.H4(value, className=f"text-{color} mb-0",
-                     style={"fontFamily": "monospace", "fontWeight": "600"}),
-        ]),
+        dbc.CardBody(body),
         className="bg-dark border-secondary",
     )
 
@@ -1003,22 +1022,43 @@ def _make_stats_row(league: str) -> html.Div:
 
 # ── Match Centre ──
 
-def _build_match_centre(league: str) -> html.Div:
+def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
     """Build the Match Centre view showing all fixtures and markets.
 
     Features a bookmaker dropdown that defaults to 'Best Edge' (auto-selects
     the bookmaker offering the highest odds / largest edge per row). Selecting
     a specific bookmaker recalculates odds and edge for that book across all
     rows. Edge is always displayed regardless of sign.
+
+    Args:
+        league: ``"PL"`` or ``"EFL"`` selected league.
+        show_all: When False (default), rows whose ``edge_pct`` is below
+            ``config.EDGE_DISPLAY_THRESHOLD`` are filtered out — the
+            "useless markets the model says no edge on" the operator
+            asked us to suppress. The toggle flips this off to reveal
+            every evaluated market for transparency / spot-checking.
     """
+    from config import EDGE_DISPLAY_THRESHOLD
+
     analysis = get_match_analysis(league)
+
+    # Path B display filter — hide low-edge rows by default. The toggle
+    # at the top of the dashboard exposes them when the operator wants
+    # to see what the model considered and rejected. Rows with NULL
+    # edge_pct are kept so brand-new markets without odds yet still show.
+    if not show_all and not analysis.empty and "edge_pct" in analysis.columns:
+        keep_mask = (
+            analysis["edge_pct"].isna()
+            | (analysis["edge_pct"] >= EDGE_DISPLAY_THRESHOLD)
+        )
+        analysis = analysis[keep_mask].reset_index(drop=True)
 
     if analysis.empty:
         return html.Div([
             dbc.Alert([
                 html.I(className="bi bi-info-circle me-2"),
                 "No match data available. Click ",
-                html.Strong("Scan Fixtures"),
+                html.Strong("Refresh Odds"),
                 " to fetch upcoming matches and run the model.",
             ], color="info", className="mt-3"),
         ])
@@ -1069,17 +1109,26 @@ def _build_match_centre(league: str) -> html.Div:
     # Load recommendations to flag formally suggested bets.
     # A "recommendation" passed stricter filters (min edge, model agreement,
     # positive EV, Kelly stake > 0) beyond just having a positive edge.
+    # We also harvest stake_pct here for the Stake % column — same lookup,
+    # one DB hit instead of two.
     _recommended: set[tuple] = set()
+    _stake_lookup: dict[tuple, float] = {}
     try:
         rec_df = get_active_recommendations(league)
         settled_rec_df = get_settled_recommendations(league)
         for _rdf in (rec_df, settled_rec_df):
             if not _rdf.empty:
                 for _, r in _rdf.iterrows():
-                    _recommended.add((
-                        r["home_team"], r["away_team"],
-                        r["market"], r["side"],
-                    ))
+                    _key = (r["home_team"], r["away_team"],
+                            r["market"], r["side"])
+                    _recommended.add(_key)
+                    _sp = r.get("stake_pct")
+                    if pd.notna(_sp) and _sp is not None:
+                        # Active recs win over settled (latest-wins): only
+                        # write if no entry yet OR we're now on rec_df.
+                        # rec_df iterates first so settled won't overwrite.
+                        if _key not in _stake_lookup:
+                            _stake_lookup[_key] = float(_sp)
     except Exception:
         pass
 
@@ -1150,6 +1199,16 @@ def _build_match_centre(league: str) -> html.Div:
             "model_prob": round(model_p * 100, 1) if pd.notna(model_p) else None,
             "fair_odds": round(fair_odds, 2) if pd.notna(fair_odds) else None,
             "edge": round(edge, 1) if pd.notna(edge) else None,
+            # stake_pct is stored as a fraction (0.0184 = 1.84% of
+            # bankroll); convert to percentage for display so the bin
+            # filter queries (>= 1, >= 3, >= 5) match user-facing units.
+            "stake_pct": (
+                round(_stake_lookup[(row["home_team"], row["away_team"],
+                                     row["market"], row["side"])] * 100.0, 2)
+                if (row["home_team"], row["away_team"],
+                    row["market"], row["side"]) in _stake_lookup
+                else None
+            ),
             "confidence": conf,
             "n_books": int(row["n_books"]) if pd.notna(row.get("n_books")) else None,
             # Hidden: bookmaker odds JSON for callback recalculation
@@ -1196,6 +1255,8 @@ def _build_match_centre(league: str) -> html.Div:
         {"name": "Edge %", "id": "edge", "type": "numeric",
          "format": Format(precision=1, scheme=Scheme.fixed, sign=Sign.positive)
                   .symbol_suffix("%")},
+        {"name": "Stake %", "id": "stake_pct", "type": "numeric",
+         "format": Format(precision=2, scheme=Scheme.fixed).symbol_suffix("%")},
         {"name": "Conf", "id": "confidence", "type": "text"},
         {"name": "Books", "id": "n_books", "type": "numeric"},
         {"name": "Rec", "id": "rec", "type": "text"},
@@ -1324,6 +1385,40 @@ def _build_match_centre(league: str) -> html.Div:
                            "column_id": "rec"},
                     "color": "#69db7c", "fontWeight": "bold", "fontSize": "16px",
                 },
+                # Stake bins -- only colour cells with a value (None renders
+                # blank, so non-recommended bets stay neutral).
+                # Tier 1: tiny conviction (<1%) -- faint green hint.
+                {
+                    "if": {"filter_query": "{stake_pct} > 0 && {stake_pct} < 1",
+                           "column_id": "stake_pct"},
+                    "backgroundColor": "#1a3322",
+                    "color": "#a3e6b4",
+                },
+                # Tier 2: standard recommendation (1-3%) -- clear green.
+                {
+                    "if": {"filter_query": "{stake_pct} >= 1 && {stake_pct} < 3",
+                           "column_id": "stake_pct"},
+                    "backgroundColor": "#1f4a2c",
+                    "color": "#69db7c",
+                    "fontWeight": "bold",
+                },
+                # Tier 3: high conviction (3-5%) -- deeper green.
+                {
+                    "if": {"filter_query": "{stake_pct} >= 3 && {stake_pct} < 5",
+                           "column_id": "stake_pct"},
+                    "backgroundColor": "#1a5e36",
+                    "color": "#00d4aa",
+                    "fontWeight": "bold",
+                },
+                # Tier 4: very high (>=5%) -- amber warning. Kelly rarely
+                # asks for this much; worth a manual sanity check.
+                {
+                    "if": {"filter_query": "{stake_pct} >= 5",
+                           "column_id": "stake_pct"},
+                    "backgroundColor": "#5e4a1a",
+                    "color": "#ffd966",
+                    "fontWeight": "bold",
+                },
                 # High confidence row highlight
                 {
                     "if": {"filter_query": '{confidence} = "high"'},
@@ -1345,6 +1440,7 @@ def _build_match_centre(league: str) -> html.Div:
                 {"if": {"column_id": "model_prob"}, "width": "90px", "textAlign": "center"},
                 {"if": {"column_id": "fair_odds"}, "width": "80px", "textAlign": "center"},
                 {"if": {"column_id": "edge"}, "width": "70px", "textAlign": "center"},
+                {"if": {"column_id": "stake_pct"}, "width": "80px", "textAlign": "center"},
                 {"if": {"column_id": "confidence"}, "width": "60px", "textAlign": "center"},
                 {"if": {"column_id": "n_books"}, "width": "60px", "textAlign": "center"},
                 {"if": {"column_id": "rec"}, "width": "45px", "textAlign": "center"},
@@ -1708,6 +1804,10 @@ def _build_performance(league: str) -> html.Div:
             ], md=12),
         ]),
         html.Hr(className="border-secondary"),
+        # Live ROI vs Phase 4a simulation — the diagnostic for whether
+        # the live system tracks the simulated numbers it was deployed on.
+        _make_live_vs_sim_panel(league, settled),
+        html.Hr(className="border-secondary"),
         dbc.Row([
             dbc.Col([
                 _make_market_breakdown(settled),
@@ -1726,6 +1826,182 @@ def _build_performance(league: str) -> html.Div:
             ], md=6),
         ]),
     ])
+
+
+# ── Live ROI vs Phase 4a baseline ──
+
+# Bet count threshold below which we display ROI as low-confidence —
+# per-market n_bets must clear this before the drift signal is meaningful.
+_LIVE_ROI_MIN_BETS = 20
+
+# Drift threshold: when live ROI is more than this far below baseline
+# *and* n_bets >= _LIVE_ROI_MIN_BETS, show the row in red as a Phase 4b
+# re-spin trigger candidate.
+_LIVE_ROI_DRIFT_TRIGGER_PP = 0.03
+
+
+def _compute_live_roi_rows(league: str, settled: pd.DataFrame) -> list[dict]:
+    """Build per-market rows for the Live ROI vs Simulation table.
+
+    Each row reports the live ROI for that (league, market) cell,
+    the Phase 4a simulated ROI baseline, and the drift between them.
+    Rows are emitted for *every* market with a baseline entry — even
+    those with no live bets — so the operator sees the full slate of
+    cells the system was validated on.
+
+    Returns a list of dicts with these keys:
+        market, n_bets, win_pct, live_roi, sim_roi, drift_pp, status
+
+    ``status`` is one of:
+        "ok"       → enough data, drift is within tolerance (or ahead)
+        "drift"    → enough data, drift > trigger threshold (red flag)
+        "low_n"    → too few bets to interpret ROI yet
+        "no_data"  → no settled bets in this cell at all
+        "no_baseline" → live cell with no Phase 4a baseline (rare —
+                        e.g. a market we started betting outside the validated set)
+    """
+    from config import PHASE_4A_BASELINE_ROI
+
+    # Markets to display: all baselines for this league, plus any live
+    # markets we have data for that aren't in the baseline.
+    baseline_for_league = {
+        m: roi for (lg, m), roi in PHASE_4A_BASELINE_ROI.items() if lg == league
+    }
+    live_markets = (
+        set(settled["market"].dropna().unique()) if not settled.empty else set()
+    )
+    markets = sorted(set(baseline_for_league) | live_markets)
+
+    rows = []
+    for mkt in markets:
+        sub = settled[settled["market"] == mkt] if not settled.empty else pd.DataFrame()
+        n_bets = len(sub)
+        win_pct = (sub["won"].sum() / n_bets) if n_bets else None
+        total_staked = sub["stake"].sum() if n_bets else 0
+        total_profit = sub["profit"].sum() if n_bets else 0
+        live_roi = (total_profit / total_staked) if total_staked > 0 else None
+        sim_roi = baseline_for_league.get(mkt)
+        drift_pp = (live_roi - sim_roi) if (live_roi is not None and sim_roi is not None) else None
+
+        # Status classification — drives the colour and the "should I act" signal.
+        if sim_roi is None:
+            status = "no_baseline"
+        elif n_bets == 0:
+            status = "no_data"
+        elif n_bets < _LIVE_ROI_MIN_BETS:
+            status = "low_n"
+        elif drift_pp is not None and drift_pp < -_LIVE_ROI_DRIFT_TRIGGER_PP:
+            status = "drift"
+        else:
+            status = "ok"
+
+        rows.append({
+            "market": mkt,
+            "n_bets": n_bets,
+            "win_pct": win_pct,
+            "live_roi": live_roi,
+            "sim_roi": sim_roi,
+            "drift_pp": drift_pp,
+            "status": status,
+        })
+    return rows
+
+
+def _make_live_vs_sim_panel(league: str, settled: pd.DataFrame) -> html.Div:
+    """Render the Live ROI vs Phase 4a baseline panel."""
+    rows = _compute_live_roi_rows(league, settled)
+
+    # Format helpers — handle the None states explicitly so cells read
+    # "—" instead of "nan%" or similar
+    def _pct(x: float | None, signed: bool = False) -> str:
+        if x is None:
+            return "—"
+        return f"{x * 100:+.1f}%" if signed else f"{x * 100:.1f}%"
+
+    # Bright text-friendly shades — _COLOURS["green"]/["red"] are dark
+    # backgrounds (used elsewhere for table row fills) so we use lighter
+    # foreground variants here for legibility against the card background.
+    _TEXT_GREEN = "#51cf66"
+    _TEXT_RED = "#ff6b6b"
+
+    def _drift_cell(drift: float | None, status: str) -> html.Span:
+        if drift is None:
+            return html.Span("—", className="text-muted")
+        colour = {
+            "ok": _TEXT_GREEN,
+            "drift": _TEXT_RED,
+            "low_n": _COLOURS["text"],
+        }.get(status, _COLOURS["text"])
+        return html.Span(_pct(drift, signed=True),
+                         style={"color": colour, "fontWeight": "600"})
+
+    def _status_label(status: str) -> html.Span:
+        labels = {
+            "ok": ("on track", _TEXT_GREEN),
+            "drift": ("DRIFT — investigate", _TEXT_RED),
+            "low_n": (f"low n (<{_LIVE_ROI_MIN_BETS})", _COLOURS["warn"]),
+            "no_data": ("no bets yet", _COLOURS["muted"]),
+            "no_baseline": ("no baseline", _COLOURS["warn"]),
+        }
+        text, colour = labels.get(status, (status, _COLOURS["text"]))
+        return html.Span(text,
+                         style={"color": colour, "fontSize": "12px",
+                                "fontWeight": "600"})
+
+    # Build the table rows
+    table_rows = []
+    for r in rows:
+        table_rows.append(html.Tr([
+            html.Td(_format_market(r["market"]),
+                    style={"fontWeight": "600"}),
+            html.Td(str(r["n_bets"]) if r["n_bets"] else "—",
+                    className="text-end"),
+            html.Td(_pct(r["win_pct"]) if r["win_pct"] is not None else "—",
+                    className="text-end"),
+            html.Td(_pct(r["live_roi"], signed=True) if r["live_roi"] is not None else "—",
+                    className="text-end",
+                    style={"fontFamily": "monospace"}),
+            html.Td(_pct(r["sim_roi"], signed=True) if r["sim_roi"] is not None else "—",
+                    className="text-end text-muted",
+                    style={"fontFamily": "monospace"}),
+            html.Td(_drift_cell(r["drift_pp"], r["status"]),
+                    className="text-end",
+                    style={"fontFamily": "monospace"}),
+            html.Td(_status_label(r["status"])),
+        ]))
+
+    table = dbc.Table([
+        html.Thead(html.Tr([
+            html.Th("Market"),
+            html.Th("Bets", className="text-end"),
+            html.Th("Win%", className="text-end"),
+            html.Th("Live ROI", className="text-end"),
+            html.Th("Sim ROI", className="text-end"),
+            html.Th("Drift", className="text-end"),
+            html.Th("Status"),
+        ])),
+        html.Tbody(table_rows),
+    ], dark=True, hover=True, size="sm", className="mb-2")
+
+    # Caveat line: written so a reviewer can interpret the table without
+    # context. The two thresholds are config constants — change there.
+    caveat = html.P(
+        f"Drift = Live ROI − Phase 4a simulated baseline. Cells turn "
+        f"red when bets ≥ {_LIVE_ROI_MIN_BETS} *and* drift "
+        f"< −{_LIVE_ROI_DRIFT_TRIGGER_PP * 100:.0f}pp — the trigger to "
+        f"investigate or schedule a Phase 4b re-spin. Ignore single-game "
+        f"swings; this is a sustained-trend diagnostic.",
+        className="text-muted small mb-0",
+    )
+
+    return dbc.Card([
+        dbc.CardHeader(
+            html.H5("Live ROI vs Simulation",
+                    className="mb-0 text-light"),
+            className="bg-dark border-secondary",
+        ),
+        dbc.CardBody([table, caveat], className="bg-dark"),
+    ], className="border-secondary mb-4")
 
 
 def _make_bankroll_chart(settled: pd.DataFrame) -> go.Figure:
@@ -2072,6 +2348,14 @@ def _build_analytics(league: str) -> html.Div:
                 if n_not_rec > 0 else None
             )
 
+            # Wilson CIs on each hit-rate card so small-n results don't
+            # masquerade as proven edges. The card colour stays driven by
+            # the point estimate; the CI in the subtitle lets the eye
+            # discount uncertain-looking results.
+            from edge_analytics import wilson_ci
+            model_wins = int(settled_preds["won"].sum())
+            mh_lo, mh_hi = wilson_ci(model_wins, n_settled)
+
             cards = [
                 dbc.Col(_stat_card("Predictions", str(n_total), "primary"), width=2),
                 dbc.Col(_stat_card("Settled", str(n_settled), "info"), width=2),
@@ -2080,19 +2364,26 @@ def _build_analytics(league: str) -> html.Div:
                     "Model Hit Rate",
                     f"{model_hit:.1%}",
                     "success" if model_hit > 0.5 else "danger",
+                    subtitle=f"95% CI: {mh_lo:.0%} – {mh_hi:.0%}",
                 ), width=2),
             ]
             if n_rec > 0:
+                rec_wins = int(settled_preds.loc[rec_mask, "won"].sum())
+                rh_lo, rh_hi = wilson_ci(rec_wins, int(n_rec))
                 cards.append(dbc.Col(_stat_card(
                     f"Rec'd ({n_rec})",
                     f"{rec_hit:.1%}",
                     "success" if rec_hit and rec_hit > 0.5 else "danger",
+                    subtitle=f"95% CI: {rh_lo:.0%} – {rh_hi:.0%}",
                 ), width=2))
             if n_not_rec > 0 and n_rec > 0:
+                nr_wins = int(settled_preds.loc[~rec_mask, "won"].sum())
+                nh_lo, nh_hi = wilson_ci(nr_wins, int(n_not_rec))
                 cards.append(dbc.Col(_stat_card(
                     f"Not Rec'd ({n_not_rec})",
                     f"{not_rec_hit:.1%}",
                     "success" if not_rec_hit and not_rec_hit > 0.5 else "danger",
+                    subtitle=f"95% CI: {nh_lo:.0%} – {nh_hi:.0%}",
                 ), width=2))
 
             sections.append(html.Div([
@@ -2104,6 +2395,268 @@ def _build_analytics(league: str) -> html.Div:
                 ),
                 dbc.Row(cards, className="mb-3"),
             ]))
+
+            # ══════════════════════════════════════════════════════════════
+            # NEW: Strategy Counterfactuals
+            # Compares Kelly-rec'd vs flat-rec'd vs flat-all-positive-edge
+            # on the same settled outcomes. Directly answers "did the
+            # recommendation filter and Kelly sizing each earn their keep?"
+            # ══════════════════════════════════════════════════════════════
+            try:
+                from edge_analytics import counterfactual_strategies
+                # Pass settled recs only — counterfactual_strategies
+                # filters by settled==1 internally, and using only
+                # settled rows here means avg_kelly is a stable
+                # historical mean rather than being skewed by whatever
+                # active recs happen to be open right now.
+                _settled_recs_df = get_settled_recommendations(league)
+                cf_df = counterfactual_strategies(all_preds, _settled_recs_df)
+            except Exception as exc:
+                logger.warning("counterfactual_strategies failed: %s", exc)
+                cf_df = pd.DataFrame()
+
+            if not cf_df.empty:
+                # Table rows — one per strategy. We render the CIs inline
+                # under each ROI as muted small text so the user reads
+                # "+6.4% (CI -7% to +20%)" as a single visual unit.
+                cf_table_rows = []
+                for _, r in cf_df.iterrows():
+                    if pd.isna(r["roi"]):
+                        roi_cell = "—"
+                        wr_cell = "—"
+                        pl_cell = "—"
+                    else:
+                        roi_cell = html.Div([
+                            html.Div(f"{r['roi']*100:+.2f}%",
+                                     style={"fontWeight": "bold",
+                                            "color": "#69db7c" if r["roi"] > 0 else "#ff6b6b"}),
+                            html.Div(
+                                f"CI {r['roi_lo']*100:+.1f}% to {r['roi_hi']*100:+.1f}%"
+                                if not pd.isna(r["roi_lo"]) else "CI —",
+                                style={"fontSize": "10px", "color": "#888",
+                                       "fontStyle": "italic"},
+                            ),
+                        ])
+                        wr_cell = html.Div([
+                            html.Div(f"{r['win_rate']*100:.1f}%",
+                                     style={"fontWeight": "bold"}),
+                            html.Div(
+                                f"CI {r['win_rate_lo']*100:.0f}% – {r['win_rate_hi']*100:.0f}%",
+                                style={"fontSize": "10px", "color": "#888",
+                                       "fontStyle": "italic"},
+                            ),
+                        ])
+                        pl_cell = html.Div(
+                            f"{r['pl_pct']*100:+.2f}%",
+                            style={"color": "#69db7c" if r["pl_pct"] > 0 else "#ff6b6b",
+                                   "fontWeight": "bold"},
+                        )
+                    cf_table_rows.append(html.Tr([
+                        html.Td(r["strategy"], style={"fontWeight": "500"}),
+                        html.Td(int(r["n_bets"]), style={"textAlign": "center"}),
+                        html.Td(wr_cell, style={"textAlign": "center"}),
+                        html.Td(roi_cell, style={"textAlign": "center"}),
+                        html.Td(pl_cell, style={"textAlign": "center"}),
+                    ]))
+
+                cf_table = dbc.Table([
+                    html.Thead(html.Tr([
+                        html.Th("Strategy"),
+                        html.Th("Bets", style={"textAlign": "center"}),
+                        html.Th("Win Rate", style={"textAlign": "center"}),
+                        html.Th("ROI (per £ risked)", style={"textAlign": "center"}),
+                        html.Th("P/L (bankroll)", style={"textAlign": "center"}),
+                    ])),
+                    html.Tbody(cf_table_rows),
+                ], bordered=True, hover=True, color="dark",
+                   className="table-sm mb-2")
+
+                sections.append(html.Div([
+                    html.H5("Strategy Counterfactuals",
+                            className="text-light mt-4 mb-2"),
+                    html.P([
+                        "Same settled outcomes, three strategies. ",
+                        html.Strong("Row 1 vs Row 2"),
+                        " tells you whether Kelly sizing earned its variance. ",
+                        html.Strong("Row 2 vs Row 3"),
+                        " tells you whether the recommendation filter "
+                        "(n_agree, EV-after-vig, Kelly>0) actually picks winners. ",
+                        "Differences within overlapping CIs aren't meaningful yet."
+                    ], className="text-muted small mb-2"),
+                    cf_table,
+                ]))
+
+            # ══════════════════════════════════════════════════════════════
+            # NEW: Cumulative P/L Over Time
+            # Bankroll trajectory from settled recommendations only.
+            # Shape (steady slope vs lucky-spike vs decay) reveals whether
+            # the headline ROI came from a real edge or a single fluke.
+            # ══════════════════════════════════════════════════════════════
+            try:
+                _settled_recs = get_settled_recommendations(league)
+            except Exception:
+                _settled_recs = pd.DataFrame()
+
+            if not _settled_recs.empty and "profit_pct" in _settled_recs.columns:
+                _sr = _settled_recs.copy()
+                _sr["kickoff_dt"] = pd.to_datetime(_sr["kickoff"], errors="coerce")
+                _sr = _sr.dropna(subset=["kickoff_dt", "profit_pct"])
+                _sr = _sr.sort_values("kickoff_dt").reset_index(drop=True)
+
+                if not _sr.empty:
+                    _sr["cum_pl"] = _sr["profit_pct"].cumsum() * 100  # %
+                    # Drawdown: max(running peak - current)
+                    running_peak = _sr["cum_pl"].cummax()
+                    drawdown_series = running_peak - _sr["cum_pl"]
+                    max_dd = float(drawdown_series.max()) if len(drawdown_series) else 0.0
+                    if max_dd > 0:
+                        dd_end_idx = int(drawdown_series.idxmax())
+                        dd_start_idx = int(_sr.loc[:dd_end_idx, "cum_pl"].idxmax())
+                        dd_start = _sr.loc[dd_start_idx, "kickoff_dt"]
+                        dd_end = _sr.loc[dd_end_idx, "kickoff_dt"]
+                        dd_label = (
+                            f"Max drawdown: -{max_dd:.2f}% "
+                            f"({dd_start.strftime('%d %b')} – {dd_end.strftime('%d %b')})"
+                        )
+                    else:
+                        dd_label = "Max drawdown: 0% (no peak yet)"
+
+                    # Counterfactual line: flat-stake all positive edge
+                    if not all_preds.empty:
+                        _ap = all_preds[
+                            (all_preds.get("settled", 0) == 1)
+                            & (all_preds["edge_pct"].fillna(-1) > 0)
+                        ].copy()
+                        _ap["kickoff_dt"] = pd.to_datetime(
+                            _ap["kickoff"], errors="coerce")
+                        _ap = _ap.dropna(subset=["kickoff_dt"])
+                        _ap = _ap.sort_values("kickoff_dt").reset_index(drop=True)
+                        if not _ap.empty:
+                            avg_kelly_for_cf = (
+                                float(_settled_recs["stake_pct"].dropna().mean())
+                                if _settled_recs["stake_pct"].notna().any()
+                                else 0.01
+                            )
+                            won_arr = pd.to_numeric(
+                                _ap["won"], errors="coerce").fillna(0).to_numpy()
+                            odds_arr = pd.to_numeric(
+                                _ap["best_odds"], errors="coerce").fillna(0).to_numpy()
+                            _ap["profit_cf"] = np.where(
+                                won_arr == 1,
+                                (odds_arr - 1) * avg_kelly_for_cf,
+                                -avg_kelly_for_cf,
+                            )
+                            _ap["cum_cf"] = _ap["profit_cf"].cumsum() * 100
+                        else:
+                            _ap = pd.DataFrame()
+                    else:
+                        _ap = pd.DataFrame()
+
+                    fig_cum = go.Figure()
+                    fig_cum.add_trace(go.Scatter(
+                        x=_sr["kickoff_dt"], y=_sr["cum_pl"],
+                        mode="lines+markers", name="Recommended (Kelly)",
+                        line={"color": "#00d4aa", "width": 2.5},
+                        marker={"size": 5},
+                    ))
+                    if not _ap.empty:
+                        fig_cum.add_trace(go.Scatter(
+                            x=_ap["kickoff_dt"], y=_ap["cum_cf"],
+                            mode="lines", name="All +edge (flat)",
+                            line={"color": "#888", "width": 1.5, "dash": "dot"},
+                        ))
+                    fig_cum.add_hline(
+                        y=0, line_dash="dash", line_color="#666",
+                        annotation_text="0%", annotation_position="right",
+                    )
+                    fig_cum.update_layout(
+                        title="Cumulative P/L Over Time (% of bankroll)",
+                        xaxis_title="Kickoff date",
+                        yaxis_title="Cumulative P/L %",
+                        plot_bgcolor=_COLOURS["card"],
+                        paper_bgcolor=_COLOURS["card"],
+                        font={"color": _COLOURS["text"]},
+                        height=350,
+                        margin={"l": 50, "r": 30, "t": 50, "b": 50},
+                        legend={"orientation": "h", "y": -0.18},
+                        annotations=[{
+                            "x": 0.02, "y": 0.95, "xref": "paper", "yref": "paper",
+                            "text": dd_label, "showarrow": False,
+                            "bgcolor": "#2a1a1a",
+                            "bordercolor": "#ff6b6b",
+                            "borderwidth": 1, "borderpad": 6,
+                            "font": {"size": 11, "color": "#ff9999"},
+                        }],
+                    )
+
+                    sections.append(html.Div([
+                        html.H5("Cumulative P/L Over Time",
+                                className="text-light mt-4 mb-2"),
+                        html.P(
+                            "Bankroll trajectory from settled recommendations. "
+                            "Steady upward slope = a real edge being harvested. "
+                            "Flat then a single spike = one lucky match. "
+                            "Peak then decay = model decaying or market caught on. "
+                            "Dotted line is the all-positive-edge counterfactual.",
+                            className="text-muted small mb-2",
+                        ),
+                        dcc.Graph(figure=fig_cum, config={"displayModeBar": False}),
+                    ]))
+
+            # ══════════════════════════════════════════════════════════════
+            # NEW: Closing Line Value (CLV)
+            # Pulled from the same calculator the Bet Tracker uses.
+            # Leading indicator of sustainability — stabilises faster than
+            # ROI, so it's a more honest read at small samples.
+            # ══════════════════════════════════════════════════════════════
+            try:
+                clv_stats = calculate_logged_bet_clv(league)
+            except Exception:
+                clv_stats = {"n_bets": 0}
+
+            if clv_stats.get("n_bets", 0) > 0:
+                clv_cards = []
+                clv_cards.append(_clv_card(
+                    "Mean CLV",
+                    f"{clv_stats['mean_clv_pct']:+.2f}%",
+                    "green" if clv_stats["mean_clv_pct"] > 0 else "red",
+                ))
+                clv_cards.append(_clv_card(
+                    "Beat Close Rate",
+                    f"{clv_stats['beat_close_rate']:.1f}%",
+                    "green" if clv_stats["beat_close_rate"] > 50 else "red",
+                ))
+                if clv_stats.get("pinnacle_clv_pct") is not None:
+                    clv_cards.append(_clv_card(
+                        "Pinnacle CLV",
+                        f"{clv_stats['pinnacle_clv_pct']:+.2f}%",
+                        "green" if clv_stats["pinnacle_clv_pct"] > 0 else "red",
+                    ))
+                if clv_stats.get("actual_roi") is not None:
+                    clv_cards.append(_clv_card(
+                        "Actual ROI",
+                        f"{clv_stats['actual_roi']:+.1f}%",
+                        "green" if clv_stats["actual_roi"] > 0 else "red",
+                    ))
+                clv_cards.append(_clv_card(
+                    "Settled Bets",
+                    str(clv_stats["n_bets"]),
+                    "blue",
+                ))
+
+                sections.append(html.Div([
+                    html.H5("Closing Line Value",
+                            className="text-light mt-4 mb-2"),
+                    html.P(
+                        "Difference between your taken price and the eventual "
+                        "market close. Positive CLV is the strongest leading "
+                        "indicator that ROI will hold up — it stabilises in "
+                        "30-50 bets, while ROI takes 200+. If ROI is flat but "
+                        "CLV is positive, you're unlucky, not edgeless.",
+                        className="text-muted small mb-2",
+                    ),
+                    dbc.Row([dbc.Col(c, md=True) for c in clv_cards]),
+                ]))
 
             # Edge bucket breakdown for predictions
             if "edge_pct" in settled_preds.columns:
@@ -2454,7 +3007,16 @@ def _build_analytics(league: str) -> html.Div:
         ))
 
     # ── Calibration Chart ──
+    # Drops bins with n < 5 (those are pure noise — a single bet can swing
+    # actual win rate from 0% to 100%) and renders a Wilson 95% CI as
+    # vertical error bars on each surviving point. Wide bars = "ignore
+    # this point", tight bars = "this calibration is real".
     cal_df = calibration_curve(settled)
+    if not cal_df.empty:
+        from edge_analytics import wilson_ci
+        # Filter out under-powered bins
+        cal_df = cal_df[cal_df["n_bets"] >= 5].reset_index(drop=True)
+
     if not cal_df.empty:
         fig_cal = go.Figure()
         # Perfect calibration line
@@ -2463,10 +3025,26 @@ def _build_analytics(league: str) -> html.Div:
             mode="lines", name="Perfect",
             line=dict(dash="dash", color=_COLOURS["muted"]),
         ))
-        # Model calibration
+        # Compute Wilson CIs for error bars. Each bin's actual win rate
+        # is wins / n_bets, so we need wins per bin — derive from actual
+        # rate × n_bets (both columns already in cal_df).
+        ci_lo = []
+        ci_hi = []
+        for _, r in cal_df.iterrows():
+            wins = int(round(r["actual"] * r["n_bets"]))
+            lo, hi = wilson_ci(wins, int(r["n_bets"]))
+            ci_lo.append(r["actual"] - lo)
+            ci_hi.append(hi - r["actual"])
+
+        # Model calibration with error bars
         fig_cal.add_trace(go.Scatter(
             x=cal_df["predicted"],
             y=cal_df["actual"],
+            error_y=dict(
+                type="data", symmetric=False,
+                array=ci_hi, arrayminus=ci_lo,
+                color=_COLOURS["accent"], thickness=1.5,
+            ),
             mode="lines+markers", name="Model",
             marker=dict(size=cal_df["n_bets"].clip(upper=20),
                         color=_COLOURS["accent"]),
@@ -2543,11 +3121,22 @@ def _build_analytics(league: str) -> html.Div:
 
     # ── Market Breakdown ──
     if "market" in settled.columns:
+        from edge_analytics import bootstrap_ci, adequacy_label
         market_rows = []
         for market in sorted(settled["market"].dropna().unique()):
             mb = settled[settled["market"] == market]
             st = mb["stake_pct"].sum()
             pr = mb["profit_pct"].sum()
+            # Adequacy badge: per-bet ROI bootstrapped, then flagged by
+            # n + CI width. Stops the "+28% on 18 bets" trap.
+            stake_arr = mb["stake_pct"].fillna(0).to_numpy(dtype=float)
+            profit_arr = mb["profit_pct"].fillna(0).to_numpy(dtype=float)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                per_bet_roi = profit_arr / np.where(stake_arr > 0, stake_arr, np.nan)
+            roi_lo, roi_hi, _ = bootstrap_ci(per_bet_roi)
+            adequacy = adequacy_label(len(mb), roi_lo, roi_hi)
+            badge = {"ok": "🟢 OK", "marginal": "🟡 Marginal",
+                     "noise": "🔴 Noise"}[adequacy]
             market_rows.append({
                 "market": _format_market(market),
                 "n_bets": len(mb),
@@ -2555,11 +3144,21 @@ def _build_analytics(league: str) -> html.Div:
                 "roi": pr / st if st > 0 else 0,
                 "avg_edge": mb["edge"].mean() if "edge" in mb.columns else 0,
                 "avg_odds": mb["odds"].mean(),
+                "adequacy": badge,
             })
         if market_rows:
             market_df = pd.DataFrame(market_rows)
             sections.append(html.Div([
                 html.H6("Market Breakdown", className="text-light mt-4 mb-2"),
+                html.P([
+                    "Adequacy badge: ",
+                    html.Span("🟢 OK", style={"marginRight": "8px"}),
+                    "= CI clears zero (real edge detectable). ",
+                    html.Span("🟡 Marginal", style={"marginRight": "8px"}),
+                    "= n ≥ 30 but CI straddles zero. ",
+                    html.Span("🔴 Noise"),
+                    " = n < 30 or CI wider than ±15pp.",
+                ], className="text-muted small"),
             ]))
             sections.append(_make_analytics_table(
                 market_df, "market-analytics-table",
@@ -2574,6 +3173,7 @@ def _build_analytics(league: str) -> html.Div:
                      "type": "numeric", "format": {"specifier": ".1%"}},
                     {"name": "Avg Odds", "id": "avg_odds",
                      "type": "numeric", "format": {"specifier": ".2f"}},
+                    {"name": "Adequacy", "id": "adequacy"},
                 ],
             ))
 
@@ -2713,6 +3313,17 @@ def create_app() -> Dash:
                            title=("Refresh fixtures + odds for the active "
                                   "league (Odds-API only — OddsPapi week-"
                                   "ahead sweep runs on Sunday).")),
+                # Path B display filter — when off (default), the Match
+                # Centre hides rows whose edge is below
+                # config.EDGE_DISPLAY_THRESHOLD. Toggle on to reveal every
+                # evaluated market for transparency.
+                dbc.Switch(
+                    id="toggle-show-all",
+                    label="Show all markets",
+                    value=False,
+                    className="d-inline-block ms-2 me-2 align-middle",
+                    style={"fontSize": "12px"},
+                ),
                 html.Span(id="status-text", className="text-muted small"),
             ], md=4, className="text-end pt-2"),
         ], className="py-3 border-bottom border-secondary mb-3"),
@@ -2737,7 +3348,16 @@ def create_app() -> Dash:
                     className="bg-dark"),
         ], id="content-tabs", active_tab="tab-matches", className="mt-2"),
 
-        html.Div(id="tab-content", className="mt-3"),
+        # Wrap tab-content in dcc.Loading so any long-running callback
+        # (e.g. the first scan after a clean repo when models haven't
+        # been pickled yet — full pipeline + train can take 3-5 minutes
+        # for EFL) shows a spinner instead of looking frozen.
+        dcc.Loading(
+            id="tab-content-loading",
+            type="circle",
+            color="#00d4aa",
+            children=html.Div(id="tab-content", className="mt-3"),
+        ),
 
         # ── Auto-refresh interval (30 min) ──
         dcc.Interval(id="interval-refresh", interval=30 * 60 * 1000, n_intervals=0),
@@ -2760,9 +3380,10 @@ def create_app() -> Dash:
         [Input("content-tabs", "active_tab"),
          Input("league-selector", "active_tab"),
          Input("btn-scan", "n_clicks"),
-         Input("interval-refresh", "n_intervals")],
+         Input("interval-refresh", "n_intervals"),
+         Input("toggle-show-all", "value")],
     )
-    def update_main(active_tab, league_tab, n_clicks, n_intervals):
+    def update_main(active_tab, league_tab, n_clicks, n_intervals, show_all):
         league = league_tab.replace("league-", "") if league_tab else "PL"
         if league not in LEAGUES:
             league = "PL"
@@ -2787,7 +3408,10 @@ def create_app() -> Dash:
         odds_status = _make_odds_status(league)
 
         if active_tab == "tab-matches":
-            content = _build_match_centre(league)
+            # Path B: pass the show_all toggle through so the Match Centre
+            # can hide low-edge rows by default (clean view) and expose
+            # them when the operator wants transparency.
+            content = _build_match_centre(league, show_all=bool(show_all))
         elif active_tab == "tab-bets":
             content = _build_bet_tracker(league)
         elif active_tab == "tab-performance":
@@ -3528,7 +4152,7 @@ def _run_scan(league: str) -> str:
             return normalize(api_name)
 
         # Run model predictions if no recent data exists for these fixtures.
-        # This ensures clicking "Scan Fixtures" always shows model output.
+        # This ensures clicking "Refresh Odds" always shows model output.
         _scan_fixture_names = set()
         for m in matches:
             _scan_fixture_names.add((
@@ -3537,15 +4161,33 @@ def _run_scan(league: str) -> str:
             ))
 
         # Check if we already have model predictions for ALL scanned fixtures
+        # AND at least one ou15 row for any current fixture. The second check
+        # is a Path B safety net: pre-Path-B scans produced ou25 + btts but
+        # never ou15 (broken bulk alt_totals call), so per-fixture coverage
+        # was misleading. Without this guard, a stale "covered" fixture set
+        # blocks Refresh Odds from ever rerunning the predictor — which
+        # means the selective alt_totals fetch never gets a chance to fire.
         existing_analysis = get_match_analysis(league)
         _fixtures_with_model: set[tuple] = set()
+        _has_any_current_ou15 = False
+        _current_fixture_keys = set(_scan_fixture_names)
         if not existing_analysis.empty:
             for _, _ea in existing_analysis.iterrows():
                 if pd.notna(_ea.get("model_prob")):
                     _fixtures_with_model.add(
                         (_ea["home_team"], _ea["away_team"]))
+                # ou15 rows for any current fixture means Path B selective
+                # fetch has already considered the slate. We don't require
+                # ou15 for *every* current fixture (selective fetch
+                # legitimately skips low-conviction ones).
+                if (_ea.get("market") == "ou15"
+                    and (_ea["home_team"], _ea["away_team"])
+                        in _current_fixture_keys):
+                    _has_any_current_ou15 = True
         _missing_fixtures = _scan_fixture_names - _fixtures_with_model
-        _has_model_data = len(_missing_fixtures) == 0
+        _has_model_data = (
+            len(_missing_fixtures) == 0 and _has_any_current_ou15
+        )
 
         if not _has_model_data:
             try:
@@ -3556,16 +4198,26 @@ def _run_scan(league: str) -> str:
                 if league == "EFL":
                     from championship_predict import ChampionshipPredictor
                     _predictor = ChampionshipPredictor(verbose=False)
-                    _predictor.load_data()
-                    _predictor.train()
+                    # Mirror the PL fast-path: load pickled trained state
+                    # if it exists (~seconds), otherwise fall back to a
+                    # full pipeline + train + save (~3-5 minutes — only
+                    # happens once, on first scan after a clean repo).
+                    # EFL's generate_recommendations doesn't yet accept
+                    # prefetched_matches, so it will hit its own EFL odds
+                    # cache (already warm from the scan above).
+                    if not _predictor.load_trained_state():
+                        _predictor.load_data()
+                        _predictor.train()
+                        _predictor.save_trained_state()
+                    else:
+                        if not _predictor.load_pipeline_cache():
+                            _predictor.load_data()
+                            _predictor.save_pipeline_cache()
                     _recs = _predictor.generate_recommendations()
                 else:
                     from predict import LivePredictor
                     _predictor = LivePredictor(verbose=False)
-                    # Use light_refresh path: loads saved model state
-                    # from disk instead of retraining (~seconds vs
-                    # ~3 minutes). Falls back to full train if no
-                    # saved state exists.
+                    # Same fast-path as EFL above.
                     if not _predictor.load_trained_state():
                         _predictor.load_data()
                         _predictor.train()
