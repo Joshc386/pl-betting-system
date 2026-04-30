@@ -652,6 +652,66 @@ DEFAULT_SNAPSHOT_TYPE = "refresh"
 # that hit the API. Set True only for diagnostic use.
 DASHBOARD_FETCH_ODDSPAPI = False
 
+# Hard quota guardrail. When this fraction of either provider's monthly cap
+# is reached, the fetch sites refuse to send further requests until the
+# month rolls over or the operator swaps the API key. The dashboard widget
+# colours quota red at >=0.90 — set guardrail slightly above so the operator
+# has a window to react before the system stops fetching entirely.
+QUOTA_GUARDRAIL_THRESHOLD = 0.95
+
+# ── Path B selective per-event fetching ──
+# Per-event Odds API calls cost 1 credit each. Rather than fetching every
+# market for every fixture, we let the model decide which fixtures are worth
+# spending credits on. The thresholds below define "model conviction"
+# windows where edge is plausible enough to spend a credit on real odds.
+#
+# Tuning notes:
+#   - Stricter (closer to 0.5 / further from 1) → fewer fetches, fewer bets.
+#   - More permissive → more fetches, higher API cost, more bet candidates.
+#   - Live ROI feedback over a few weeks should drive these higher or lower.
+
+# BTTS: fetch only when |model_prob − 0.50| > BTTS_FETCH_PROB_DELTA.
+# A delta of 0.10 means we fetch when model says <40% or >60%. Below that,
+# the BTTS market is essentially a coin flip and bookies price it tightly.
+BTTS_FETCH_PROB_DELTA = 0.10
+
+# O/U 1.5: fetch only when model_prob (Over) > threshold.
+# Under is disabled per ALT_LINES_OVER_ONLY, so we only care about Over edge.
+# Per-league because the two leagues have different scoring profiles:
+#   - PL: training base rate ~0.78. Books offer 1.15-1.30 (implied 77-87%).
+#     Need model_prob > 0.82 to leave room for >2% edge.
+#   - EFL: training base rate ~0.73. Books offer 1.25-1.50 (implied 67-80%).
+#     Need model_prob > 0.70 to leave room for >2% edge.
+# A single global threshold either over-fetches in PL or never fires in EFL.
+OU15_FETCH_PROB_THRESHOLD: dict[str, float] = {
+    "PL":  0.82,
+    "EFL": 0.70,
+}
+
+# ── Path B Match Centre display filter ──
+# By default the Match Centre hides rows where edge is far below break-even.
+# The toggle in the UI flips this off to show every evaluated market for
+# transparency (so the operator can see what the model considered and
+# rejected). EDGE_DISPLAY_THRESHOLD is the minimum edge_pct (in %) for a
+# row to be shown by default. -2.0 means "show all rows with edge >= -2%",
+# i.e. include near-misses but hide definitely-no rows.
+EDGE_DISPLAY_THRESHOLD = -2.0
+
+# ── Phase 4a baseline ROI per (league, market) cell ──
+# Source: scripts/run_phase4a_matrix.py, validated April 2026.
+# These are the simulated ROI numbers from the historical OOF cache —
+# the dashboard's "Live ROI vs Simulation" panel uses them as the
+# benchmark to detect live drift. Trigger Phase 4b re-spin when any cell
+# drifts > 3pp below baseline for two consecutive months.
+PHASE_4A_BASELINE_ROI: dict[tuple[str, str], float] = {
+    ("PL",  "ou25"): 0.0804,   # +8.04%
+    ("PL",  "btts"): 0.0649,   # +6.49%
+    ("PL",  "ou15"): -0.0203,  # -2.03%  (under-performing cell — watch closely)
+    ("EFL", "ou25"): 0.0120,   # +1.20%
+    ("EFL", "ou15"): 0.0035,   # +0.35%
+    ("EFL", "btts"): 0.1384,   # +13.84%
+}
+
 # ── API Keys ──
 # football-data.org: sign up at https://www.football-data.org/ for free key
 FOOTBALL_DATA_API_KEY = os.environ.get("FOOTBALL_DATA_API_KEY", "")

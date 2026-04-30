@@ -126,6 +126,19 @@ def _api_get(endpoint: str, params: dict | None = None, max_retries: int = 2) ->
         logger.error("ODDSPAPI_KEY not set in environment")
         return None
 
+    # Hard quota guardrail. OddsPapi has a tighter cap (250) and no header
+    # to read live, so the client-side counter is our only signal. When
+    # used >= threshold * limit, refuse further calls until rollover.
+    from api.quota_tracker import is_quota_safe
+    from config import QUOTA_GUARDRAIL_THRESHOLD
+    if not is_quota_safe("oddspapi", QUOTA_GUARDRAIL_THRESHOLD):
+        logger.warning(
+            "OddsPapi: SKIPPED %s — quota guardrail (%.0f%%) tripped. "
+            "Wait for monthly rollover or raise the limit.",
+            endpoint, QUOTA_GUARDRAIL_THRESHOLD * 100,
+        )
+        return None
+
     url = f"{BASE_URL}{endpoint}"
     all_params = {"apiKey": API_KEY}
     if params:

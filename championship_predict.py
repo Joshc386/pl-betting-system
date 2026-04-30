@@ -735,6 +735,102 @@ class ChampionshipPredictor:
         target_logit = np.log(adjusted_rate / (1 - adjusted_rate + 1e-10))
         return float(val_mean_logit - target_logit), adjusted_rate, is_shifted
 
+    def _fetch_selective_alt_totals(self, matches: list[dict]) -> None:
+        """Fetch per-event alt_totals only for fixtures where the EFL DC
+        model has high O/U 1.5 Over conviction.
+
+        Same rationale as the PL counterpart in predict.py — Odds API
+        removed bulk alternate_totals (April 2026), per-event is the only
+        path and costs 1 credit per call. We gate on a quick DC-Poisson
+        estimate of P(total goals > 1.5).
+
+        Mutates ``matches`` in place by enriching candidate fixtures'
+        ``bookmakers`` dicts with alt-line entries.
+        """
+        from config import OU15_FETCH_PROB_THRESHOLD, DC_LAMBDA_MIN, DC_LAMBDA_MAX
+        from api.odds_api import (
+            fetch_alt_totals_for_events,
+            merge_alt_totals_into_match,
+        )
+        from scipy.stats import poisson as _poisson
+
+        if not self._ou15_models or "dc" not in self._ou15_models:
+            return  # No OU1.5 DC model loaded — can't gate
+
+        # EFL-specific threshold (lower than PL because EFL fixtures cluster
+        # at a lower P(Over 1.5) baseline — see config notes).
+        threshold = (
+            OU15_FETCH_PROB_THRESHOLD.get("EFL", 0.70)
+            if isinstance(OU15_FETCH_PROB_THRESHOLD, dict)
+            else float(OU15_FETCH_PROB_THRESHOLD)
+        )
+
+        dc = self._ou15_models["dc"]
+        sqrt_gamma = float(np.sqrt(dc.gamma))
+
+        candidate_lookup: dict[str, dict] = {}
+        for match in matches:
+            home, away = _match_champ_teams(match, self._our_teams)
+            if home is None or away is None:
+                continue
+            try:
+                h_att = dc.attack_home.get(home, dc.PRIORS["attack_home"])
+                a_def = dc.defence_away.get(away, dc.PRIORS["defence_away"])
+                a_att = dc.attack_away.get(away, dc.PRIORS["attack_away"])
+                h_def = dc.defence_home.get(home, dc.PRIORS["defence_home"])
+                home_lam = float(np.clip(h_att * a_def * dc.mu * sqrt_gamma,
+                                         DC_LAMBDA_MIN, DC_LAMBDA_MAX))
+                away_lam = float(np.clip(a_att * h_def * dc.mu / sqrt_gamma,
+                                         DC_LAMBDA_MIN, DC_LAMBDA_MAX))
+            except Exception:
+                continue
+            # P(total <= 1) under independent Poisson — same approximation
+            # as PL helper. Tau correction skipped for the gate decision.
+            p_le_1 = (
+                _poisson.pmf(0, home_lam) * _poisson.pmf(0, away_lam)
+                + _poisson.pmf(1, home_lam) * _poisson.pmf(0, away_lam)
+                + _poisson.pmf(0, home_lam) * _poisson.pmf(1, away_lam)
+            )
+            p_over_15 = 1.0 - float(p_le_1)
+            if p_over_15 > threshold:
+                eid = match.get("id", "")
+                if eid:
+                    candidate_lookup[eid] = match
+
+        if not candidate_lookup:
+            self._log(
+                f"OU 1.5 selective fetch: 0/{len(matches)} fixtures cleared "
+                f"the {threshold:.2f} conviction threshold")
+            return
+
+        self._log(
+            f"OU 1.5 selective fetch: {len(candidate_lookup)}/{len(matches)} "
+            f"fixtures (threshold {threshold:.2f}) -- "
+            f"fetching per-event alt_totals")
+
+        # Critical: the per-event alt_totals call uses the module-level
+        # SPORT constant, which defaults to "soccer_epl". For EFL we must
+        # temporarily swap to "soccer_efl_champ" so the request hits the
+        # right endpoint — without this, EFL event IDs are submitted to
+        # the PL sport and the API returns no usable data.
+        original_sport = odds_api_module.SPORT
+        try:
+            odds_api_module.SPORT = LEAGUE_CFG["odds_api_sport"]
+            alt_data = fetch_alt_totals_for_events(
+                list(candidate_lookup.keys()))
+        except Exception as e:
+            logger.warning("Selective alt_totals fetch failed: %s", e)
+            return
+        finally:
+            odds_api_module.SPORT = original_sport
+
+        for eid, data in alt_data.items():
+            if eid in candidate_lookup:
+                merge_alt_totals_into_match(candidate_lookup[eid], data)
+        self._log(
+            f"OU 1.5 selective fetch: enriched {len(alt_data)} EFL matches "
+            f"with alt-line data")
+
     def _predict_3model(
         self,
         fixture_row: pd.Series,
@@ -997,6 +1093,12 @@ class ChampionshipPredictor:
             self._log(
                 f"OddsPapi skipped (snapshot_type={self.snapshot_type!r}, "
                 "Option β-tight)")
+
+        # ── Path B: selective per-event alt_totals fetch ──
+        # Same rationale as the PL counterpart — Odds API removed bulk
+        # alternate_totals; we fetch per-event only when the EFL DC model
+        # is highly confident on O/U 1.5 Over.
+        self._fetch_selective_alt_totals(matches)
 
         # Build fixture features
         df = self._full_df

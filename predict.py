@@ -664,6 +664,88 @@ class LivePredictor:
         away_lambda = np.clip(a_att * h_def * dc.mu / sqrt_gamma, DC_LAMBDA_MIN, DC_LAMBDA_MAX)
         return float(home_lambda), float(away_lambda)
 
+    def _fetch_selective_alt_totals(self, matches: list[dict]) -> None:
+        """Fetch per-event alt_totals only for fixtures with high O/U 1.5 conviction.
+
+        Path B (April 2026): the Odds API removed alternate_totals from its
+        bulk endpoint, leaving per-event as the only path. Each per-event
+        call costs 1 credit, so we gate on a quick DC-Poisson estimate of
+        P(total goals > 1.5) — only fetch when the model thinks the Over
+        is highly likely (above ``OU15_FETCH_PROB_THRESHOLD``).
+
+        The function MUTATES the ``matches`` list in place by enriching each
+        candidate match's ``bookmakers`` dict with alt-line entries. The
+        downstream ``get_best_odds_all_lines`` reads from that structure
+        unchanged.
+
+        Args:
+            matches: The-Odds-API match dicts (with totals already merged).
+        """
+        from config import OU15_FETCH_PROB_THRESHOLD
+        from api.odds_api import (
+            fetch_alt_totals_for_events,
+            merge_alt_totals_into_match,
+        )
+        from scipy.stats import poisson as _poisson
+
+        if not self._ou_models or "dc" not in self._ou_models:
+            return  # No DC model loaded — can't gate
+
+        # Per-league threshold lookup. Falls back to a sane default if the
+        # config dict is missing the key (e.g. a third league added later).
+        threshold = (
+            OU15_FETCH_PROB_THRESHOLD.get("PL", 0.82)
+            if isinstance(OU15_FETCH_PROB_THRESHOLD, dict)
+            else float(OU15_FETCH_PROB_THRESHOLD)  # backward-compat
+        )
+
+        candidate_lookup: dict[str, dict] = {}
+        for match in matches:
+            home_mapped, away_mapped = match_to_our_teams(match, self._our_teams)
+            if home_mapped is None or away_mapped is None:
+                continue
+            try:
+                home_lam, away_lam = self._get_dc_lambdas(home_mapped, away_mapped)
+            except Exception:
+                continue
+            # P(total goals <= 1) = P(0,0) + P(1,0) + P(0,1) under independent
+            # Poissons. Ignoring DC's tau correction (small-score correlation)
+            # is fine for a gate — we want a rough conviction signal, not the
+            # final edge calc.
+            p_le_1 = (
+                _poisson.pmf(0, home_lam) * _poisson.pmf(0, away_lam)
+                + _poisson.pmf(1, home_lam) * _poisson.pmf(0, away_lam)
+                + _poisson.pmf(0, home_lam) * _poisson.pmf(1, away_lam)
+            )
+            p_over_15 = 1.0 - float(p_le_1)
+            if p_over_15 > threshold:
+                eid = match.get("id", "")
+                if eid:
+                    candidate_lookup[eid] = match
+
+        if not candidate_lookup:
+            self._log(
+                f"OU 1.5 selective fetch: 0/{len(matches)} fixtures cleared "
+                f"the {threshold:.2f} conviction threshold")
+            return
+
+        self._log(
+            f"OU 1.5 selective fetch: {len(candidate_lookup)}/{len(matches)} "
+            f"fixtures (threshold {threshold:.2f}) -- "
+            f"fetching per-event alt_totals")
+        try:
+            alt_data = fetch_alt_totals_for_events(list(candidate_lookup.keys()))
+        except Exception as e:
+            logger.warning("Selective alt_totals fetch failed: %s", e)
+            return
+
+        for eid, data in alt_data.items():
+            if eid in candidate_lookup:
+                merge_alt_totals_into_match(candidate_lookup[eid], data)
+        self._log(
+            f"OU 1.5 selective fetch: enriched {len(alt_data)} matches "
+            f"with alt-line data")
+
     def _predict_btts(self, fixture_row: pd.Series) -> dict:
         """Generate BTTS probability from all 4 models for a single fixture.
 
@@ -878,6 +960,15 @@ class LivePredictor:
             self._log(
                 f"OddsPapi skipped (snapshot_type={self.snapshot_type!r}, "
                 "Option β-tight)")
+
+        # ── Path B: selective per-event alt_totals fetch ──
+        # The Odds API removed alternate_totals from its bulk endpoint
+        # (April 2026); the only working path is per-event, which costs
+        # 1 credit per fixture. So we fetch only for fixtures where the
+        # DC model is highly confident on O/U 1.5 Over — books price
+        # short prices tightly so without high conviction there's no
+        # edge to find anyway.
+        self._fetch_selective_alt_totals(matches)
 
         # Build fixture features from historical data
         df = self._full_df

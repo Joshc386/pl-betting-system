@@ -87,6 +87,18 @@ def _fetch_market(market_key: str) -> list[dict]:
         "oddsFormat": "decimal",
     }
 
+    # Hard quota guardrail: refuse to fire if we're inside the threshold
+    # window. Returns empty list — the caller's existing stale-cache fallback
+    # path takes over and the dashboard's red quota widget tells the
+    # operator to swap the API key.
+    from api.quota_tracker import is_quota_safe
+    from config import QUOTA_GUARDRAIL_THRESHOLD
+    if not is_quota_safe("odds_api", QUOTA_GUARDRAIL_THRESHOLD):
+        print(f"  Odds API [{market_key}]: SKIPPED — quota guardrail "
+              f"({QUOTA_GUARDRAIL_THRESHOLD:.0%}) tripped. Swap API key "
+              "or wait for monthly rollover.")
+        return []
+
     try:
         resp = requests.get(url, params=params, timeout=15)
         remaining = resp.headers.get("x-requests-remaining", "?")
@@ -136,6 +148,13 @@ def _fetch_event_market(event_id: str, market_key: str) -> dict | None:
         "oddsFormat": "decimal",
     }
 
+    # Hard quota guardrail (per-event endpoint is the heavy consumer —
+    # one credit per fixture). See _fetch_market for rationale.
+    from api.quota_tracker import is_quota_safe
+    from config import QUOTA_GUARDRAIL_THRESHOLD
+    if not is_quota_safe("odds_api", QUOTA_GUARDRAIL_THRESHOLD):
+        return None
+
     try:
         resp = requests.get(url, params=params, timeout=15)
         # Per-event endpoint also returns quota headers — track them so
@@ -154,6 +173,234 @@ def _fetch_event_market(event_id: str, market_key: str) -> dict | None:
         return resp.json()
     except requests.RequestException:
         return None
+
+
+def fetch_event_alt_totals(event_id: str) -> dict | None:
+    """Fetch alternate_totals odds for a single event via per-event endpoint.
+
+    Replaces the broken bulk alternate_totals call on /sports/{sport}/odds/.
+    Costs 1 API credit per call — the predictor decides which fixtures are
+    worth fetching based on model conviction (see config.OU15_FETCH_PROB
+    _THRESHOLD).
+
+    Args:
+        event_id: The-Odds-API event ID.
+
+    Returns:
+        Dict shaped::
+
+            {
+              bookmaker_key: {
+                "title": "...",
+                "lines": {1.5: {"over": 1.20, "under": 4.50}, ...},
+              },
+              ...
+            }
+
+        Returns None on fetch failure. Bookmakers offering only one side
+        (Over without Under or vice versa) are silently dropped — we only
+        retain "complete" lines.
+    """
+    raw = _fetch_event_market(event_id, "alternate_totals")
+    if not raw:
+        return None
+
+    out: dict[str, dict] = {}
+    for bm in raw.get("bookmakers", []):
+        bm_key = bm.get("key", "")
+        if not bm_key:
+            continue
+        bm_lines: dict[float, dict] = {}
+        for mkt in bm.get("markets", []):
+            if mkt.get("key") != "alternate_totals":
+                continue
+            for outcome in mkt.get("outcomes", []):
+                pt = outcome.get("point")
+                if pt is None:
+                    continue
+                pt = float(pt)
+                if pt not in bm_lines:
+                    bm_lines[pt] = {}
+                name = (outcome.get("name") or "").lower()
+                price = outcome.get("price")
+                if name == "over" and price:
+                    bm_lines[pt]["over"] = price
+                elif name == "under" and price:
+                    bm_lines[pt]["under"] = price
+        # Keep only lines with both sides — incomplete entries can't be priced
+        complete = {pt: sides for pt, sides in bm_lines.items()
+                    if "over" in sides and "under" in sides}
+        if complete:
+            out[bm_key] = {
+                "title": bm.get("title", bm_key),
+                "lines": complete,
+            }
+    return out
+
+
+def merge_alt_totals_into_match(match: dict, alt_data: dict) -> None:
+    """Integrate per-event alt_totals data into an existing match dict.
+
+    The downstream consumer (``get_best_odds_all_lines``) reads from
+    ``match["bookmakers"][bm_key]["all_lines"]``. This function preserves
+    that structure so callers don't need to know about the new fetch path.
+
+    For bookmakers already present in match (from the totals fetch), the
+    new alt-totals points are merged into their ``all_lines`` dict
+    without overwriting existing 2.5 entries. Bookmakers appearing only
+    in alt_totals (no main 2.5 line) get a fresh entry with whatever
+    2.5 they offer (or zeros if they only carry alt lines).
+    """
+    if not alt_data:
+        return
+    for bm_key, bm_data in alt_data.items():
+        new_lines = bm_data.get("lines", {})
+        if not new_lines:
+            continue
+        if bm_key in match["bookmakers"]:
+            existing = match["bookmakers"][bm_key].get("all_lines", {}) or {}
+            for pt, sides in new_lines.items():
+                if pt not in existing:
+                    existing[pt] = sides
+            match["bookmakers"][bm_key]["all_lines"] = existing
+        else:
+            over_25 = new_lines.get(2.5, {}).get("over")
+            under_25 = new_lines.get(2.5, {}).get("under")
+            match["bookmakers"][bm_key] = {
+                "title": bm_data.get("title", bm_key),
+                "over": over_25 or 0,
+                "under": under_25 or 0,
+                "is_sharp": bm_key in SHARP_BOOKS,
+                "is_major": bm_key in MAJOR_BOOKS,
+                "all_lines": new_lines,
+            }
+
+
+def fetch_alt_totals_for_events(
+    event_ids: list[str],
+    sleep_between: float = 0.0,
+) -> dict[str, dict]:
+    """Batch helper: fetch alt_totals for a list of event IDs.
+
+    Loops over event IDs and calls ``fetch_event_alt_totals`` for each.
+    Each call costs 1 API credit, so callers should pre-filter the list
+    aggressively (typically just fixtures where the model has conviction
+    on O/U 1.5 Over).
+
+    Args:
+        event_ids: List of The-Odds-API event IDs to fetch.
+        sleep_between: Optional delay (seconds) between calls — defaults
+            to zero. Pass a small value (e.g. 0.2) if you want to be
+            extra polite to the API on large batches.
+
+    Returns:
+        Dict ``{event_id: {bookmaker_key: {"title", "lines"}}}``.
+        Events that returned no usable data are omitted from the result.
+    """
+    out: dict[str, dict] = {}
+    for eid in event_ids:
+        data = fetch_event_alt_totals(eid)
+        if data:
+            out[eid] = data
+        if sleep_between > 0:
+            time.sleep(sleep_between)
+    return out
+
+
+def fetch_event_btts_odds(event_id: str) -> dict | None:
+    """Fetch BTTS odds for a single event via per-event endpoint.
+
+    BTTS has always been per-event-only (unlike totals which is bulk).
+    The legacy ``fetch_epl_odds`` calls this for every fixture; we now
+    expose it directly so the predictor can pre-filter and skip
+    coin-flip fixtures (where edge is statistically unlikely).
+
+    Returns:
+        Dict shaped::
+
+            {
+              bookmaker_key: {
+                "title": "...",
+                "yes": 1.85,
+                "no": 1.95,
+                "is_sharp": bool,
+                "is_major": bool,
+              },
+              ...
+            }
+
+        Returns None on fetch failure, or {} if no books offered usable
+        BTTS markets.
+    """
+    raw = _fetch_event_market(event_id, "btts")
+    if not raw:
+        return None
+
+    out: dict[str, dict] = {}
+    for bm in raw.get("bookmakers", []):
+        bm_key = bm.get("key", "")
+        if not bm_key:
+            continue
+        for mkt in bm.get("markets", []):
+            if mkt.get("key") != "btts":
+                continue
+            yes_price = None
+            no_price = None
+            for outcome in mkt.get("outcomes", []):
+                name = outcome.get("name", "")
+                price = outcome.get("price")
+                if name == "Yes":
+                    yes_price = price
+                elif name == "No":
+                    no_price = price
+            if yes_price and no_price and yes_price > 1 and no_price > 1:
+                out[bm_key] = {
+                    "title": bm.get("title", bm_key),
+                    "yes": yes_price,
+                    "no": no_price,
+                    "is_sharp": bm_key in SHARP_BOOKS,
+                    "is_major": bm_key in MAJOR_BOOKS,
+                }
+    return out
+
+
+def merge_btts_into_match(match: dict, btts_data: dict) -> None:
+    """Integrate per-event BTTS data into an existing match dict's
+    ``btts_bookmakers`` field. Idempotent — incoming entries with the
+    same bookmaker key replace any pre-existing value (latest wins).
+    """
+    if not btts_data:
+        return
+    for bm_key, bm_entry in btts_data.items():
+        match.setdefault("btts_bookmakers", {})[bm_key] = bm_entry
+
+
+def fetch_btts_for_events(
+    event_ids: list[str],
+    sleep_between: float = 0.0,
+) -> dict[str, dict]:
+    """Batch helper: fetch BTTS for a list of event IDs.
+
+    Each call costs 1 API credit. Pre-filter the list to only fixtures
+    where the model has meaningful conviction (model_prob far from 0.5),
+    since coin-flip range rarely yields edge.
+
+    Args:
+        event_ids: List of event IDs.
+        sleep_between: Optional inter-call delay.
+
+    Returns:
+        ``{event_id: {bookmaker_key: btts_entry}}``. Events with no usable
+        data are omitted.
+    """
+    out: dict[str, dict] = {}
+    for eid in event_ids:
+        data = fetch_event_btts_odds(eid)
+        if data:
+            out[eid] = data
+        if sleep_between > 0:
+            time.sleep(sleep_between)
+    return out
 
 
 def fetch_epl_odds(
@@ -237,61 +484,15 @@ def fetch_epl_odds(
                         "all_lines": complete_lines,
                     }
 
-    # Fetch alternate totals (O/U 1.5, 3.5, 4.5 etc.) — 1 extra API request
-    alt_raw = _fetch_market("alternate_totals")
-    if alt_raw:
-        for event in alt_raw:
-            eid = event.get("id", "")
-            if eid not in matches_by_id:
-                continue
-            match = matches_by_id[eid]
-
-            for bm in event.get("bookmakers", []):
-                bm_key = bm.get("key", "")
-                bm_title = bm.get("title", bm_key)
-
-                for market in bm.get("markets", []):
-                    if market.get("key") != "alternate_totals":
-                        continue
-
-                    alt_lines: dict = {}
-                    for outcome in market.get("outcomes", []):
-                        point = outcome.get("point")
-                        if point is None:
-                            continue
-                        point = float(point)
-                        if point not in alt_lines:
-                            alt_lines[point] = {}
-                        if outcome.get("name") == "Over":
-                            alt_lines[point]["over"] = outcome.get("price")
-                        elif outcome.get("name") == "Under":
-                            alt_lines[point]["under"] = outcome.get("price")
-
-                    complete = {pt: lo for pt, lo in alt_lines.items()
-                                if "over" in lo and "under" in lo}
-                    if not complete:
-                        continue
-
-                    # Merge into existing bookmaker entry or create new one
-                    if bm_key in match["bookmakers"]:
-                        existing_lines = match["bookmakers"][bm_key].get(
-                            "all_lines", {})
-                        for pt, lo in complete.items():
-                            if pt not in existing_lines:
-                                existing_lines[pt] = lo
-                        match["bookmakers"][bm_key]["all_lines"] = existing_lines
-                    else:
-                        # Book only has alt totals (not the main 2.5 line)
-                        over_25 = complete.get(2.5, {}).get("over")
-                        under_25 = complete.get(2.5, {}).get("under")
-                        match["bookmakers"][bm_key] = {
-                            "title": bm_title,
-                            "over": over_25 or 0,
-                            "under": under_25 or 0,
-                            "is_sharp": bm_key in SHARP_BOOKS,
-                            "is_major": bm_key in MAJOR_BOOKS,
-                            "all_lines": complete,
-                        }
+    # NOTE: bulk alternate_totals removed (April 2026) — Odds API returns
+    # HTTP 422 "Markets not supported by this endpoint: alternate_totals"
+    # on the bulk /sports/{sport}/odds/ endpoint. Alt totals are now only
+    # available on the per-event /events/{id}/odds endpoint.
+    #
+    # Use ``fetch_event_alt_totals(event_id)`` (defined below) selectively —
+    # the predictor calls it only for fixtures where the model probability
+    # for O/U 1.5 Over crosses the conviction threshold, since pre-event
+    # calls cost 1 credit each.
 
     # Fetch BTTS per event (not available on bulk endpoint)
     event_ids = list(matches_by_id.keys())
