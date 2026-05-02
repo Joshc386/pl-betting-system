@@ -1981,7 +1981,7 @@ def _make_live_vs_sim_panel(league: str, settled: pd.DataFrame) -> html.Div:
             html.Th("Status"),
         ])),
         html.Tbody(table_rows),
-    ], dark=True, hover=True, size="sm", className="mb-2")
+    ], color="dark", hover=True, size="sm", className="mb-2")
 
     # Caveat line: written so a reviewer can interpret the table without
     # context. The two thresholds are config constants — change there.

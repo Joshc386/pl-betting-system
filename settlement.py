@@ -112,76 +112,97 @@ def settle_bets(days_back: int = 7, verbose: bool = True) -> dict:
         key = (m["home_team"], m["away_team"])
         result_lookup[key] = m
 
-    db_path = LEAGUE_DB_PATHS.get(ACTIVE_LEAGUE, LEAGUE_DB_PATHS["PL"])
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    # Iterate all configured leagues so EFL/PL/etc. all settle in one
+    # pass. Previously this only touched ACTIVE_LEAGUE's DB, which silently
+    # left non-active leagues with past-kickoff recommendations stuck at
+    # settled=0 forever. Mirrors the per-league loop already used by
+    # settle_predictions below.
+    settled_count = 0
+    won_count = 0
+    lost_count = 0
+    total_profit = 0.0
+    now = datetime.now().isoformat()
 
-    try:
-        unsettled = conn.execute(
-            "SELECT * FROM recommendations WHERE settled=0"
-        ).fetchall()
+    for league, db_path in LEAGUE_DB_PATHS.items():
+        if not os.path.exists(db_path):
+            continue
 
-        if not unsettled:
-            if verbose:
-                print("No unsettled bets to process.")
-            return {"settled": 0, "won": 0, "lost": 0, "profit": 0.0}
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
 
-        settled_count = 0
-        won_count = 0
-        lost_count = 0
-        total_profit = 0.0
-        now = datetime.now().isoformat()
+        try:
+            unsettled = conn.execute(
+                "SELECT * FROM recommendations WHERE settled=0"
+            ).fetchall()
 
-        for bet in unsettled:
-            key = (bet["home_team"], bet["away_team"])
-            result = result_lookup.get(key)
-
-            if result is None:
+            if not unsettled:
+                if verbose:
+                    print(f"[{league}] No unsettled bets to process.")
                 continue
 
-            won, result_str = _determine_outcome(
-                bet["market"], bet["side"],
-                result["home_goals"], result["away_goals"],
-            )
+            league_settled = 0
+            league_won = 0
+            league_lost = 0
+            league_profit = 0.0
 
-            stake = bet["stake_pct"] or 0
-            odds = bet["odds"] or 0
-            profit = stake * (odds - 1) if won else -stake
+            for bet in unsettled:
+                key = (bet["home_team"], bet["away_team"])
+                result = result_lookup.get(key)
 
-            conn.execute(
-                """UPDATE recommendations
-                   SET settled=1, won=?, profit_pct=?, actual_result=?, settled_at=?
-                   WHERE id=?""",
-                (int(won), profit, result_str, now, bet["id"]),
-            )
+                if result is None:
+                    continue
 
-            settled_count += 1
-            if won:
-                won_count += 1
-            else:
-                lost_count += 1
-            total_profit += profit
+                won, result_str = _determine_outcome(
+                    bet["market"], bet["side"],
+                    result["home_goals"], result["away_goals"],
+                )
 
-            if verbose:
-                status = "WON" if won else "LOST"
-                print(f"  [{status}] {bet['home_team']} v {bet['away_team']} | "
-                      f"{bet['market'].upper()} {bet['side']} @ {odds:.2f} | "
-                      f"{result_str} | P/L: {profit:+.4f}")
+                stake = bet["stake_pct"] or 0
+                odds = bet["odds"] or 0
+                profit = stake * (odds - 1) if won else -stake
 
-        conn.commit()
+                conn.execute(
+                    """UPDATE recommendations
+                       SET settled=1, won=?, profit_pct=?, actual_result=?, settled_at=?
+                       WHERE id=?""",
+                    (int(won), profit, result_str, now, bet["id"]),
+                )
 
-        if settled_count > 0:
-            last_balance = conn.execute(
-                "SELECT balance FROM bankroll ORDER BY id DESC LIMIT 1"
-            ).fetchone()
-            current_balance = (last_balance["balance"] if last_balance else 1.0) + total_profit
-            conn.execute(
-                "INSERT INTO bankroll (timestamp, balance, event) VALUES (?, ?, ?)",
-                (now, current_balance, f"Settled {settled_count} bets ({won_count}W/{lost_count}L)"),
-            )
+                league_settled += 1
+                if won:
+                    league_won += 1
+                else:
+                    league_lost += 1
+                league_profit += profit
+
+                if verbose:
+                    status = "WON" if won else "LOST"
+                    print(f"  [{league}][{status}] {bet['home_team']} v {bet['away_team']} | "
+                          f"{bet['market'].upper()} {bet['side']} @ {odds:.2f} | "
+                          f"{result_str} | P/L: {profit:+.4f}")
+
             conn.commit()
-    finally:
-        conn.close()
+
+            # Per-league bankroll: each league has its own DB and its own
+            # cumulative bankroll, so this insert continues from the right
+            # previous balance and won't cross-contaminate.
+            if league_settled > 0:
+                last_balance = conn.execute(
+                    "SELECT balance FROM bankroll ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                current_balance = (last_balance["balance"] if last_balance else 1.0) + league_profit
+                conn.execute(
+                    "INSERT INTO bankroll (timestamp, balance, event) VALUES (?, ?, ?)",
+                    (now, current_balance, f"Settled {league_settled} bets ({league_won}W/{league_lost}L)"),
+                )
+                conn.commit()
+
+            settled_count += league_settled
+            won_count += league_won
+            lost_count += league_lost
+            total_profit += league_profit
+        finally:
+            conn.close()
 
     summary = {
         "settled": settled_count,
@@ -191,7 +212,7 @@ def settle_bets(days_back: int = 7, verbose: bool = True) -> dict:
     }
 
     if verbose:
-        print(f"\nSettlement complete: {settled_count} bets settled")
+        print(f"\nSettlement complete: {settled_count} bets settled across {len(LEAGUE_DB_PATHS)} leagues")
         print(f"  Won: {won_count} | Lost: {lost_count}")
         print(f"  Profit: {total_profit:+.4f} units")
 
