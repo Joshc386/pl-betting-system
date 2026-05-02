@@ -200,3 +200,19 @@ Spin up: Data Pipeline Agent + Documentation Agent (global) + Code Review Agent 
 - Audit all files and identify what is actively used vs dead code
 - Document the current architecture
 - Propose a cleanup plan for approval before deleting anything
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues at `Joshc386/pl-betting-system` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical defaults — `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout — `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
