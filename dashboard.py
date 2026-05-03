@@ -15,6 +15,15 @@ import sqlite3
 import logging
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+# Kickoff timestamps are stored in UTC (ISO with trailing 'Z'). All UK
+# football fixtures kick off in UK local time, so display conversion to
+# Europe/London is required — during BST this adds 1 hour, during GMT
+# no offset. Otherwise the dashboard shows times 1 hour before actual
+# kickoff during BST (the entire football season's first half is BST).
+_UK_TZ = ZoneInfo("Europe/London")
+_UTC_TZ = ZoneInfo("UTC")
 from typing import Optional
 
 import numpy as np
@@ -1523,11 +1532,21 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
 
 
 def _format_kickoff(kickoff_str: str) -> str:
-    """Format kickoff datetime to short display string."""
+    """Format kickoff datetime to short display string in UK local time.
+
+    Stored kickoffs are UTC (e.g. '2026-04-11T11:30:00Z'); we convert to
+    Europe/London so the displayed clock time matches the actual UK
+    kickoff. During BST that's +1 hour; during GMT no offset. The DB
+    column itself stays in UTC — only the display layer shifts.
+    """
     if not kickoff_str:
         return "--"
     try:
         dt = datetime.fromisoformat(kickoff_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            # Defensive: rows missing 'Z' are assumed UTC, never naive-local.
+            dt = dt.replace(tzinfo=_UTC_TZ)
+        dt = dt.astimezone(_UK_TZ)
         return dt.strftime("%a %d %b %H:%M")
     except (ValueError, TypeError):
         return kickoff_str[:16] if len(kickoff_str) > 16 else kickoff_str
@@ -2838,12 +2857,18 @@ def _build_analytics(league: str) -> html.Div:
             # ── Fixture-level results ──────────────────────────────────
             fixture_rows = []
             for _, p in settled_preds.iterrows():
-                # Parse kickoff to short date
+                # Parse kickoff to short date in UK local time. Date-only
+                # display still cares about timezone for fixtures near
+                # midnight UTC (rare but possible) — keeps consistency
+                # with `_format_kickoff` above.
                 ko = p.get("kickoff", "")
                 try:
                     ko_dt = datetime.fromisoformat(
                         str(ko).replace("Z", "+00:00")
                     )
+                    if ko_dt.tzinfo is None:
+                        ko_dt = ko_dt.replace(tzinfo=_UTC_TZ)
+                    ko_dt = ko_dt.astimezone(_UK_TZ)
                     date_str = ko_dt.strftime("%d %b %Y")
                 except (ValueError, TypeError):
                     date_str = str(ko)[:10] if ko else ""
