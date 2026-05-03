@@ -1022,6 +1022,53 @@ def _make_stats_row(league: str) -> html.Div:
 
 # ── Match Centre ──
 
+def _match_centre_legend() -> html.Div:
+    """Inline colour-coding legend rendered above the Match Centre table.
+
+    Mirrors the rules in the match-centre-table's `style_data_conditional`
+    block (currently dashboard.py:1363-1431). When you change a threshold
+    or a hex colour there, update the corresponding swatch here so the
+    legend stays truthful — there is no programmatic derivation.
+    """
+    def swatch(bg: str, text: str | None = None) -> html.Span:
+        # Filled square in the actual hex used by the table. For Edge tiers
+        # the colour is the *text* colour (cells aren't tinted), so we still
+        # render a filled swatch for visual clarity rather than a tiny
+        # coloured letter.
+        style = {
+            "display": "inline-block", "width": "12px", "height": "12px",
+            "borderRadius": "2px", "backgroundColor": bg,
+            "marginRight": "5px", "verticalAlign": "middle",
+            "border": "1px solid #2d3a4a",
+        }
+        return html.Span(style=style)
+
+    def item(bg: str, label: str) -> html.Span:
+        return html.Span([
+            swatch(bg),
+            html.Span(label, className="text-muted small me-3",
+                      style={"verticalAlign": "middle"}),
+        ])
+
+    return html.Div([
+        html.Div([
+            html.Span("Edge:", className="text-muted small me-2",
+                      style={"fontWeight": "600"}),
+            item("#00d4aa", ">4%"),
+            item("#69db7c", "0–4%"),
+            item("#ff6b6b", "negative"),
+        ], className="mb-1"),
+        html.Div([
+            html.Span("Stake:", className="text-muted small me-2",
+                      style={"fontWeight": "600"}),
+            item("#1a3322", "<1%"),
+            item("#1f4a2c", "1–3%"),
+            item("#1a5e36", "3–5%"),
+            item("#5e4a1a", "≥5% ⚠"),
+        ]),
+    ], className="text-end")
+
+
 def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
     """Build the Match Centre view showing all fixtures and markets.
 
@@ -1334,6 +1381,13 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
                 ]),
             ], width=3, className="text-end"),
         ], className="mb-3 align-items-center"),
+
+        # Colour-coding legend — right-aligned, sits between the controls row
+        # and the table. See `_match_centre_legend` for the swatch source of
+        # truth (kept in sync by hand with `style_data_conditional` below).
+        dbc.Row([
+            dbc.Col(_match_centre_legend()),
+        ], className="mb-2"),
 
         # Hidden store for the full unfiltered data (used by Edges Only toggle)
         dcc.Store(id="match-centre-full-data", data=display_rows),
