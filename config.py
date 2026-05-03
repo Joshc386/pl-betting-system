@@ -463,6 +463,21 @@ DASHBOARD_DB_PATH = LEAGUE_CFG["db_path"]
 ALLOWED_ALT_LINES = {1.5}
 ALT_LINES_OVER_ONLY = True  # Only Over bets — backtest showed Under has no edge
 
+# ── Off-season retrain gates ──
+# Each league exposes an explicit boolean that the weekly retrain job
+# checks before running its block. Flip to False during the off-season
+# (no new match data → retraining wastes CPU and risks model drift on
+# stale features). Flip back to True a few weeks before the new season
+# kicks off so the model has a fresh fit before live betting resumes.
+#
+# 2025-26 timeline:
+#   - EFL season ended ~2026-05-02 → EFL_RETRAIN_ENABLED set False
+#   - PL season ends ~2026-05-23   → flip PL_RETRAIN_ENABLED False after
+#                                    final settlement
+#   - Both restart ~mid-August 2026 → flip both back to True end-of-July
+PL_RETRAIN_ENABLED = True
+EFL_RETRAIN_ENABLED = False
+
 # ── Selective Market Targeting ──
 # De-vigged soft-book edges are noisier than Pinnacle-derived edges.
 # Discount multiplier applied to the *edge* when edge_source == "devig"

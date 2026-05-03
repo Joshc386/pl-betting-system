@@ -42,61 +42,76 @@ def job_weekly_retrain() -> None:
     logger.info("Starting weekly retrain...")
     print(f"[{datetime.now():%H:%M:%S}] Weekly retrain starting...")
 
+    # Off-season gates: each league has an explicit boolean in config.py.
+    # Skipping a league here is the supported way to pause retraining over
+    # the summer break — no new match data means a retrain would refit on
+    # stale features and waste CPU. Flip the flag back to True a few weeks
+    # before the new season kicks off.
+    from config import PL_RETRAIN_ENABLED, EFL_RETRAIN_ENABLED
+
     # ── PL ──
-    try:
-        from predict import LivePredictor
-        from dashboard import (save_recommendations, save_match_analysis,
-                               log_predictions)
+    if not PL_RETRAIN_ENABLED:
+        logger.info("PL retrain skipped — PL_RETRAIN_ENABLED is False (off-season)")
+        print(f"[{datetime.now():%H:%M:%S}] PL retrain SKIPPED (off-season gate)")
+    else:
+        try:
+            from predict import LivePredictor
+            from dashboard import (save_recommendations, save_match_analysis,
+                                   log_predictions)
 
-        # Option β-tight: weekly retrain IS the week-ahead snapshot — fetch
-        # the full OddsPapi sweep here so bet selection has 300+ bookmaker
-        # best-price coverage. Matchday refreshes go Odds-API only.
-        predictor = LivePredictor(verbose=True, snapshot_type="week_ahead")
-        predictor.load_data()
-        predictor.train()
-        predictor.save_trained_state()
-        predictor.save_pipeline_cache()
+            # Option β-tight: weekly retrain IS the week-ahead snapshot — fetch
+            # the full OddsPapi sweep here so bet selection has 300+ bookmaker
+            # best-price coverage. Matchday refreshes go Odds-API only.
+            predictor = LivePredictor(verbose=True, snapshot_type="week_ahead")
+            predictor.load_data()
+            predictor.train()
+            predictor.save_trained_state()
+            predictor.save_pipeline_cache()
 
-        recs = predictor.generate_recommendations()
-        n_saved = save_recommendations(recs)
-        analysis = getattr(predictor, "_match_analysis", [])
-        if analysis:
-            save_match_analysis(analysis, league="PL")
-            log_predictions(analysis, league="PL")
+            recs = predictor.generate_recommendations()
+            n_saved = save_recommendations(recs)
+            analysis = getattr(predictor, "_match_analysis", [])
+            if analysis:
+                save_match_analysis(analysis, league="PL")
+                log_predictions(analysis, league="PL")
 
-        logger.info(f"PL retrain complete: {len(recs)} recs, {n_saved} saved")
-        print(f"[{datetime.now():%H:%M:%S}] PL retrain: {len(recs)} recs, "
-              f"{n_saved} saved")
-    except Exception as e:
-        logger.error(f"PL retrain failed: {e}", exc_info=True)
-        print(f"[{datetime.now():%H:%M:%S}] PL retrain FAILED: {e}")
+            logger.info(f"PL retrain complete: {len(recs)} recs, {n_saved} saved")
+            print(f"[{datetime.now():%H:%M:%S}] PL retrain: {len(recs)} recs, "
+                  f"{n_saved} saved")
+        except Exception as e:
+            logger.error(f"PL retrain failed: {e}", exc_info=True)
+            print(f"[{datetime.now():%H:%M:%S}] PL retrain FAILED: {e}")
 
     # ── Championship ──
-    try:
-        from championship_predict import ChampionshipPredictor
-        from dashboard import (save_recommendations, save_match_analysis,
-                               log_predictions)
+    if not EFL_RETRAIN_ENABLED:
+        logger.info("EFL retrain skipped — EFL_RETRAIN_ENABLED is False (off-season)")
+        print(f"[{datetime.now():%H:%M:%S}] EFL retrain SKIPPED (off-season gate)")
+    else:
+        try:
+            from championship_predict import ChampionshipPredictor
+            from dashboard import (save_recommendations, save_match_analysis,
+                                   log_predictions)
 
-        # Option β-tight: weekly retrain = week-ahead snapshot (see PL above).
-        champ = ChampionshipPredictor(verbose=True, snapshot_type="week_ahead")
-        champ.load_data()
-        champ.train()
-        champ.save_trained_state()
-        champ.save_pipeline_cache()
+            # Option β-tight: weekly retrain = week-ahead snapshot (see PL above).
+            champ = ChampionshipPredictor(verbose=True, snapshot_type="week_ahead")
+            champ.load_data()
+            champ.train()
+            champ.save_trained_state()
+            champ.save_pipeline_cache()
 
-        recs = champ.generate_recommendations()
-        n_saved = save_recommendations(recs, league="EFL")
-        analysis = getattr(champ, "_match_analysis", [])
-        if analysis:
-            save_match_analysis(analysis, league="EFL")
-            log_predictions(analysis, league="EFL")
+            recs = champ.generate_recommendations()
+            n_saved = save_recommendations(recs, league="EFL")
+            analysis = getattr(champ, "_match_analysis", [])
+            if analysis:
+                save_match_analysis(analysis, league="EFL")
+                log_predictions(analysis, league="EFL")
 
-        logger.info(f"EFL retrain complete: {len(recs)} recs, {n_saved} saved")
-        print(f"[{datetime.now():%H:%M:%S}] EFL retrain: {len(recs)} recs, "
-              f"{n_saved} saved")
-    except Exception as e:
-        logger.error(f"EFL retrain failed: {e}", exc_info=True)
-        print(f"[{datetime.now():%H:%M:%S}] EFL retrain FAILED: {e}")
+            logger.info(f"EFL retrain complete: {len(recs)} recs, {n_saved} saved")
+            print(f"[{datetime.now():%H:%M:%S}] EFL retrain: {len(recs)} recs, "
+                  f"{n_saved} saved")
+        except Exception as e:
+            logger.error(f"EFL retrain failed: {e}", exc_info=True)
+            print(f"[{datetime.now():%H:%M:%S}] EFL retrain FAILED: {e}")
 
     print(f"[{datetime.now():%H:%M:%S}] Weekly retrain complete.")
 
