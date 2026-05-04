@@ -5,6 +5,7 @@ Usage:
     python run.py              — Start dashboard + scheduler
     python run.py predict      — Run predictions once (no server)
     python run.py settle       — Run settlement once (no server)
+    python run.py refresh      — Run data refresh (player data + match results)
     python run.py dashboard    — Start dashboard only (no scheduler)
 """
 import sys
@@ -67,6 +68,11 @@ def main():
         print(f"\n  Running light fetch for {league}...\n")
         job_matchday_fetch(league=league)
 
+    elif action == "refresh":
+        from scheduler import job_daily_data_refresh
+        print("\n  Running data refresh (player data + match results)...\n")
+        job_daily_data_refresh()
+
     elif action in ("all", "start"):
         print("=" * 60)
         print("  Premier League & Championship Betting System")
@@ -98,7 +104,7 @@ def main():
             print("  Done.")
 
     else:
-        print("Usage: python run.py [all|predict|settle|dashboard|retrain|fetch]")
+        print("Usage: python run.py [all|predict|settle|refresh|dashboard|retrain|fetch]")
 
 
 if __name__ == "__main__":

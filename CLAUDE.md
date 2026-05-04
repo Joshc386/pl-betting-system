@@ -45,10 +45,8 @@ A statistical betting system for Premier League football markets. Uses a 4-model
 - `settlement.py` — Post-match bet settlement via football-data.org API
 
 ### Scheduling & Entry Points
-- `run.py` — Main entry point (dashboard + scheduler)
-- `scheduler.py` — APScheduler for automated predictions & settlements
-- `auto_update.py` — Legacy auto-updater (still in use via Task Scheduler)
-- `OverUnderDash.py` — Legacy dashboard (still referenced by auto_update.py)
+- `run.py` — Main entry point (dashboard + scheduler + CLI actions)
+- `scheduler.py` — APScheduler: daily data refresh, fixture-aware matchday fetching, weekly retrain, settlement
 
 ### API Integrations (`api/`)
 - `odds_api.py` — The-Odds-API (bulk O/U 2.5 + BTTS)

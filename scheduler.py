@@ -33,14 +33,119 @@ _scheduler: BackgroundScheduler | None = None
 # Tier 1: Heavy Retrain (Weekly)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _refresh_player_data() -> None:
+    """Refresh squad availability data from FPL-Core-Insights.
+
+    Downloads latest player data and rebuilds the squad features CSV.
+    Non-critical — failures are logged as warnings and do not block
+    downstream jobs.
+    """
+    try:
+        from api.player_features import (
+            download_latest_player_data,
+            build_squad_features_csv,
+        )
+        download_latest_player_data()
+        build_squad_features_csv()
+        logger.info("Player data refreshed and squad features recomputed")
+        print(f"[{datetime.now():%H:%M:%S}] Player data refreshed")
+    except Exception as e:
+        logger.warning(f"Player data refresh failed (non-critical): {e}")
+        print(f"[{datetime.now():%H:%M:%S}] Player data refresh FAILED "
+              f"(non-critical): {e}")
+
+
+def _fetch_latest_matches() -> bool:
+    """Fetch newly completed matches from Understat and update the dataset.
+
+    Returns:
+        True if new matches were found and appended, False otherwise.
+    """
+    try:
+        from data.live_updater import update_dataset, get_current_season_year
+        season_year = get_current_season_year()
+        result = update_dataset(season_year)
+        if result is None:
+            logger.info("No new matches found on Understat")
+            print(f"[{datetime.now():%H:%M:%S}] No new matches found")
+            return False
+        new_count = len(
+            result[result["SeasonIndex"] == (season_year - 2000)]
+        )
+        logger.info(f"Dataset updated: season {season_year}/{season_year + 1}, "
+                     f"{new_count} matches")
+        print(f"[{datetime.now():%H:%M:%S}] Dataset updated: {new_count} matches "
+              f"in {season_year}/{season_year + 1}")
+        return True
+    except Exception as e:
+        logger.warning(f"Understat match fetch failed (non-critical): {e}")
+        print(f"[{datetime.now():%H:%M:%S}] Match fetch FAILED "
+              f"(non-critical): {e}")
+        return False
+
+
+def _retrain_squad_adjuster() -> None:
+    """Retrain the squad availability adjuster model.
+
+    Learns the relationship between squad disruption features and match
+    outcomes. Only retrains if sufficient training data exists (>20 rows).
+    Non-critical — failures are logged as warnings.
+    """
+    try:
+        import joblib
+        from squad_adjuster import (
+            build_adjustment_dataset,
+            train_adjuster,
+            ADJUSTER_PATH,
+        )
+        X_train, y_train, X_test, y_test = build_adjustment_dataset()
+        if X_train is not None and len(X_train) > 20:
+            adj = train_adjuster(X_train, y_train)
+            joblib.dump(adj, ADJUSTER_PATH)
+            logger.info("Squad adjuster retrained")
+            print(f"[{datetime.now():%H:%M:%S}] Squad adjuster retrained")
+        else:
+            logger.info("Not enough squad data for adjuster retrain")
+            print(f"[{datetime.now():%H:%M:%S}] Squad adjuster: "
+                  f"insufficient data, skipped")
+    except Exception as e:
+        logger.warning(f"Squad adjuster retrain failed (non-critical): {e}")
+        print(f"[{datetime.now():%H:%M:%S}] Squad adjuster FAILED "
+              f"(non-critical): {e}")
+
+
+def job_daily_data_refresh() -> None:
+    """Daily data ingestion: refresh player data and fetch new match results.
+
+    Runs at 06:30 daily, before the fixture planner (07:00). Ensures
+    matchday predictions use current squad availability and that the
+    dataset includes any matches completed since the last fetch.
+
+    Both steps are non-critical — failures log warnings but do not
+    prevent downstream jobs from running.
+    """
+    logger.info("Starting daily data refresh...")
+    print(f"[{datetime.now():%H:%M:%S}] Daily data refresh starting...")
+
+    _refresh_player_data()
+    _fetch_latest_matches()
+
+    print(f"[{datetime.now():%H:%M:%S}] Daily data refresh complete.")
+
+
 def job_weekly_retrain() -> None:
     """Full retrain + pickle save for both PL and Championship.
 
-    Runs pipeline feature engineering, trains all models, saves trained
-    state and pipeline cache to disk for fast matchday loading.
+    Runs data ingestion first (Understat matches + player data) to
+    guarantee fresh inputs, then retrains all models, saves trained
+    state and pipeline cache, and retrains the squad adjuster.
     """
     logger.info("Starting weekly retrain...")
     print(f"[{datetime.now():%H:%M:%S}] Weekly retrain starting...")
+
+    # ── Data ingestion (guarantees fresh inputs before training) ──
+    _fetch_latest_matches()
+    _refresh_player_data()
 
     # Off-season gates: each league has an explicit boolean in config.py.
     # Skipping a league here is the supported way to pause retraining over
@@ -112,6 +217,9 @@ def job_weekly_retrain() -> None:
         except Exception as e:
             logger.error(f"EFL retrain failed: {e}", exc_info=True)
             print(f"[{datetime.now():%H:%M:%S}] EFL retrain FAILED: {e}")
+
+    # ── Squad adjuster ──
+    _retrain_squad_adjuster()
 
     print(f"[{datetime.now():%H:%M:%S}] Weekly retrain complete.")
 
@@ -431,6 +539,16 @@ def job_generate_champ_predictions() -> None:
 
 # Static jobs that run regardless of fixtures
 STATIC_SCHEDULE = {
+    "daily_data_refresh": {
+        "func": job_daily_data_refresh,
+        "trigger": CronTrigger(
+            day_of_week="mon,tue,wed,thu,fri,sat,sun",
+            hour=6,
+            minute=30,
+            timezone=UK_TZ,
+        ),
+        "description": "Daily data refresh — player data + match results (06:30)",
+    },
     "weekly_retrain": {
         "func": job_weekly_retrain,
         "trigger": CronTrigger(
@@ -514,7 +632,7 @@ def run_now(job_name: str) -> None:
     Args:
         job_name: One of 'predict', 'predict-champ', 'settle',
                   'retrain', 'plan', 'fetch-pl', 'fetch-efl',
-                  'closing-odds'.
+                  'closing-odds', 'refresh'.
     """
     jobs = {
         "predict": job_generate_predictions,
@@ -525,6 +643,7 @@ def run_now(job_name: str) -> None:
         "fetch-pl": lambda: job_matchday_fetch("PL"),
         "fetch-efl": lambda: job_matchday_fetch("EFL"),
         "closing-odds": job_fetch_closing_odds,
+        "refresh": job_daily_data_refresh,
     }
     func = jobs.get(job_name)
     if func is None:
@@ -570,6 +689,8 @@ def main() -> None:
                               lambda: job_matchday_fetch("EFL")),
             "run-closing-odds": ("Fetching closing odds for logged bets...",
                                  job_fetch_closing_odds),
+            "run-refresh": ("Running daily data refresh...",
+                            job_daily_data_refresh),
             "run-all": ("Running all predictions...", None),
         }
 
@@ -587,7 +708,8 @@ def main() -> None:
             pass  # Fall through to start scheduler
         else:
             print(f"Usage: python scheduler.py [schedule|run-predict|run-settle|"
-                  f"run-champ|run-retrain|run-plan|run-fetch-pl|run-fetch-efl|run-all]")
+                  f"run-champ|run-retrain|run-plan|run-fetch-pl|run-fetch-efl|"
+                  f"run-refresh|run-all]")
             return
 
     # Start scheduler
