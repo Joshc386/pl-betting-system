@@ -484,8 +484,8 @@ class TestDashboardEFL:
         self._patcher.stop()
 
     def test_efl_db_created_with_tables(self):
-        from dashboard import _get_db
-        with _get_db("EFL") as conn:
+        from db import get_db
+        with get_db("EFL") as conn:
             cursor = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'")
             tables = {row[0] for row in cursor.fetchall()}
@@ -495,14 +495,14 @@ class TestDashboardEFL:
         assert "bankroll" in tables
 
     def test_bookmaker_odds_json_column_exists(self):
-        from dashboard import _get_db
-        with _get_db("EFL") as conn:
+        from db import get_db
+        with get_db("EFL") as conn:
             cursor = conn.execute("PRAGMA table_info(match_analysis)")
             cols = [row[1] for row in cursor.fetchall()]
         assert "bookmaker_odds_json" in cols
 
     def test_save_and_retrieve_match_analysis(self):
-        from dashboard import save_match_analysis, get_match_analysis
+        from db import save_match_analysis, get_match_analysis
         rows = [
             {
                 "home_team": "Leeds", "away_team": "Burnley",
@@ -523,7 +523,7 @@ class TestDashboardEFL:
         assert df.iloc[0]["market"] == "ou25"
 
     def test_bookmaker_odds_round_trip(self):
-        from dashboard import save_match_analysis, get_match_analysis
+        from db import save_match_analysis, get_match_analysis
         bm_odds = {"Bet365": 2.10, "Paddy Power": 2.05, "Pinnacle": 2.08}
         rows = [{
             "home_team": "QPR", "away_team": "West Brom",
@@ -537,7 +537,7 @@ class TestDashboardEFL:
         assert stored == bm_odds
 
     def test_save_replaces_previous_data(self):
-        from dashboard import save_match_analysis, get_match_analysis
+        from db import save_match_analysis, get_match_analysis
         rows1 = [{"home_team": "A", "away_team": "B", "market": "ou25",
                    "side": "over"}]
         rows2 = [{"home_team": "C", "away_team": "D", "market": "btts",
@@ -549,7 +549,7 @@ class TestDashboardEFL:
         assert df.iloc[0]["home_team"] == "C"
 
     def test_save_recommendations_efl(self):
-        from dashboard import save_recommendations, get_active_recommendations
+        from db import save_recommendations, get_active_recommendations
         recs = [{
             "home_team": "Leeds", "away_team": "Sheffield Weds",
             "kickoff": "2026-04-12T15:00:00Z",

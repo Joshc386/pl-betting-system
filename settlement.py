@@ -2,20 +2,18 @@
 Bet settlement: pulls completed match results and settles open recommendations.
 
 Uses ESPN public API for match scores (no API key required). Determines
-win/loss for each unsettled bet and updates the dashboard database.
+win/loss for each unsettled bet and updates the database via the ``db``
+module (no raw SQLite connections here).
 """
 import logging
-import os
-import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 import pandas as pd
 
 from api.espn_scores import fetch_completed_matches
 from api.team_mapping import normalize
-from dashboard import LEAGUE_DB_PATHS
-from config import ACTIVE_LEAGUE
+from db import LEAGUE_DB_PATHS, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +71,10 @@ def _determine_outcome(
         try:
             line = int(market[2:]) / 10.0
         except (ValueError, IndexError):
-            logger.warning("Failed to parse goal line from market '%s', defaulting to 2.5", market)
+            logger.warning(
+                "Failed to parse goal line from market '%s', defaulting to 2.5",
+                market,
+            )
             line = 2.5
         actual = "over" if total_goals > line else "under"
         won = (side == actual)
@@ -115,22 +116,15 @@ def settle_bets(days_back: int = 7, verbose: bool = True) -> dict:
     # Iterate all configured leagues so EFL/PL/etc. all settle in one
     # pass. Previously this only touched ACTIVE_LEAGUE's DB, which silently
     # left non-active leagues with past-kickoff recommendations stuck at
-    # settled=0 forever. Mirrors the per-league loop already used by
-    # settle_predictions below.
+    # settled=0 forever.
     settled_count = 0
     won_count = 0
     lost_count = 0
     total_profit = 0.0
     now = datetime.now().isoformat()
 
-    for league, db_path in LEAGUE_DB_PATHS.items():
-        if not os.path.exists(db_path):
-            continue
-
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-
-        try:
+    for league in LEAGUE_DB_PATHS:
+        with get_db(league) as conn:
             unsettled = conn.execute(
                 "SELECT * FROM recommendations WHERE settled=0"
             ).fetchall()
@@ -163,7 +157,8 @@ def settle_bets(days_back: int = 7, verbose: bool = True) -> dict:
 
                 conn.execute(
                     """UPDATE recommendations
-                       SET settled=1, won=?, profit_pct=?, actual_result=?, settled_at=?
+                       SET settled=1, won=?, profit_pct=?, actual_result=?,
+                           settled_at=?
                        WHERE id=?""",
                     (int(won), profit, result_str, now, bet["id"]),
                 )
@@ -177,9 +172,12 @@ def settle_bets(days_back: int = 7, verbose: bool = True) -> dict:
 
                 if verbose:
                     status = "WON" if won else "LOST"
-                    print(f"  [{league}][{status}] {bet['home_team']} v {bet['away_team']} | "
-                          f"{bet['market'].upper()} {bet['side']} @ {odds:.2f} | "
-                          f"{result_str} | P/L: {profit:+.4f}")
+                    print(
+                        f"  [{league}][{status}] {bet['home_team']} v "
+                        f"{bet['away_team']} | "
+                        f"{bet['market'].upper()} {bet['side']} @ {odds:.2f} | "
+                        f"{result_str} | P/L: {profit:+.4f}"
+                    )
 
             conn.commit()
 
@@ -190,10 +188,19 @@ def settle_bets(days_back: int = 7, verbose: bool = True) -> dict:
                 last_balance = conn.execute(
                     "SELECT balance FROM bankroll ORDER BY id DESC LIMIT 1"
                 ).fetchone()
-                current_balance = (last_balance["balance"] if last_balance else 1.0) + league_profit
+                current_balance = (
+                    (last_balance["balance"] if last_balance else 1.0)
+                    + league_profit
+                )
                 conn.execute(
-                    "INSERT INTO bankroll (timestamp, balance, event) VALUES (?, ?, ?)",
-                    (now, current_balance, f"Settled {league_settled} bets ({league_won}W/{league_lost}L)"),
+                    "INSERT INTO bankroll (timestamp, balance, event) "
+                    "VALUES (?, ?, ?)",
+                    (
+                        now,
+                        current_balance,
+                        f"Settled {league_settled} bets "
+                        f"({league_won}W/{league_lost}L)",
+                    ),
                 )
                 conn.commit()
 
@@ -201,8 +208,6 @@ def settle_bets(days_back: int = 7, verbose: bool = True) -> dict:
             won_count += league_won
             lost_count += league_lost
             total_profit += league_profit
-        finally:
-            conn.close()
 
     summary = {
         "settled": settled_count,
@@ -212,7 +217,10 @@ def settle_bets(days_back: int = 7, verbose: bool = True) -> dict:
     }
 
     if verbose:
-        print(f"\nSettlement complete: {settled_count} bets settled across {len(LEAGUE_DB_PATHS)} leagues")
+        print(
+            f"\nSettlement complete: {settled_count} bets settled "
+            f"across {len(LEAGUE_DB_PATHS)} leagues"
+        )
         print(f"  Won: {won_count} | Lost: {lost_count}")
         print(f"  Profit: {total_profit:+.4f} units")
 
@@ -249,21 +257,8 @@ def settle_predictions(days_back: int = 7, verbose: bool = True) -> dict:
     lost_count = 0
     now = datetime.now().isoformat()
 
-    for league, db_path in LEAGUE_DB_PATHS.items():
-        if not os.path.exists(db_path):
-            continue
-
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-
-        try:
-            # Check if predictions table exists
-            tables = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='predictions'"
-            ).fetchone()
-            if not tables:
-                continue
-
+    for league in LEAGUE_DB_PATHS:
+        with get_db(league) as conn:
             unsettled = conn.execute(
                 "SELECT * FROM predictions WHERE settled=0"
             ).fetchall()
@@ -295,16 +290,19 @@ def settle_predictions(days_back: int = 7, verbose: bool = True) -> dict:
                 if verbose:
                     status_str = "WON" if won else "LOST"
                     taken = " [TAKEN]" if pred["taken"] else ""
-                    edge_str = (f"{pred['edge_pct']:.1f}%"
-                                if pred['edge_pct'] is not None else "N/A")
-                    print(f"  [{status_str}]{taken} {pred['home_team']} v "
-                          f"{pred['away_team']} | "
-                          f"{pred['market'].upper()} {pred['side']} | "
-                          f"Edge: {edge_str} | {result_str}")
+                    edge_str = (
+                        f"{pred['edge_pct']:.1f}%"
+                        if pred["edge_pct"] is not None
+                        else "N/A"
+                    )
+                    print(
+                        f"  [{status_str}]{taken} {pred['home_team']} v "
+                        f"{pred['away_team']} | "
+                        f"{pred['market'].upper()} {pred['side']} | "
+                        f"Edge: {edge_str} | {result_str}"
+                    )
 
             conn.commit()
-        finally:
-            conn.close()
 
     summary = {
         "settled": settled_count,
@@ -315,8 +313,10 @@ def settle_predictions(days_back: int = 7, verbose: bool = True) -> dict:
     if verbose:
         print(f"\nPrediction settlement: {settled_count} predictions settled")
         if settled_count > 0:
-            print(f"  Won: {won_count} | Lost: {lost_count} | "
-                  f"Hit rate: {won_count/settled_count:.1%}")
+            print(
+                f"  Won: {won_count} | Lost: {lost_count} | "
+                f"Hit rate: {won_count/settled_count:.1%}"
+            )
 
     return summary
 

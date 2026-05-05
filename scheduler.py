@@ -161,7 +161,7 @@ def job_weekly_retrain() -> None:
     else:
         try:
             from predict import LivePredictor
-            from dashboard import (save_recommendations, save_match_analysis,
+            from db import (save_recommendations, save_match_analysis,
                                    log_predictions)
 
             # Option β-tight: weekly retrain IS the week-ahead snapshot — fetch
@@ -194,7 +194,7 @@ def job_weekly_retrain() -> None:
     else:
         try:
             from championship_predict import ChampionshipPredictor
-            from dashboard import (save_recommendations, save_match_analysis,
+            from db import (save_recommendations, save_match_analysis,
                                    log_predictions)
 
             # Option β-tight: weekly retrain = week-ahead snapshot (see PL above).
@@ -240,7 +240,7 @@ def job_matchday_fetch(
     """
     logger.info(f"Matchday fetch for {league} (markets={markets})...")
     try:
-        from dashboard import (save_recommendations, save_match_analysis,
+        from db import (save_recommendations, save_match_analysis,
                                log_predictions)
 
         # Option β-tight: matchday morning + KO-1h refreshes use Odds-API
@@ -287,7 +287,7 @@ def job_fetch_closing_odds() -> None:
     """
     logger.info("Fetching closing odds for logged bets...")
     try:
-        from dashboard import fetch_closing_odds_for_logged_bets
+        from db import fetch_closing_odds_for_logged_bets
 
         total = 0
         for league in ("PL", "EFL"):
@@ -475,7 +475,7 @@ def job_generate_predictions() -> None:
     logger.info("Starting PL prediction generation...")
     try:
         from predict import LivePredictor
-        from dashboard import (save_recommendations, save_match_analysis,
+        from db import (save_recommendations, save_match_analysis,
                                log_predictions)
 
         # CLI run-predict is treated as a week-ahead sweep (operator running
@@ -507,7 +507,7 @@ def job_generate_champ_predictions() -> None:
     logger.info("Starting Championship prediction generation...")
     try:
         from championship_predict import ChampionshipPredictor
-        from dashboard import (save_recommendations, save_match_analysis,
+        from db import (save_recommendations, save_match_analysis,
                                log_predictions)
 
         # CLI run-champ is treated as a week-ahead sweep (see PL above).

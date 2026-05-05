@@ -6,8 +6,9 @@ import tempfile
 import pytest
 from unittest.mock import patch
 
-from dashboard import (
-    _format_market, save_recommendations, _get_db, LEAGUE_DB_PATHS,
+from dashboard import _format_market
+from db import (
+    save_recommendations, get_db, LEAGUE_DB_PATHS,
     log_predictions, get_predictions, toggle_prediction_taken,
 )
 

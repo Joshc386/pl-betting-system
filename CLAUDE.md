@@ -40,8 +40,9 @@ A statistical betting system for Premier League football markets. Uses a 4-model
 - `corners_data.py` — Corners O/U odds from Betfair
 - `alt_lines_data.py` — Betfair goal O/U odds merger
 
-### Dashboard & Settlement
-- `dashboard.py` — Dash web UI (port 8050) with active picks, history, performance
+### Database & Dashboard
+- `db.py` — Database layer: SQLite connection management, schema creation, all CRUD for recommendations, predictions, match analysis, logged bets, bankroll
+- `dashboard.py` — Dash web UI (port 8050) with active picks, history, performance (imports DB layer from db.py)
 - `settlement.py` — Post-match bet settlement via football-data.org API
 
 ### Scheduling & Entry Points

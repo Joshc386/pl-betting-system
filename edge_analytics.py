@@ -531,12 +531,12 @@ def analyse_live_recommendations(
         Dict of analysis name → DataFrame.
     """
     try:
-        from dashboard import _get_db
+        from db import get_db
     except ImportError:
-        print("Cannot import dashboard — run from project root.")
+        print("Cannot import db — run from project root.")
         return {}
 
-    with _get_db(league) as conn:
+    with get_db(league) as conn:
         df = pd.read_sql_query(
             "SELECT * FROM recommendations WHERE settled = 1",
             conn,

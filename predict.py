@@ -1449,7 +1449,7 @@ if __name__ == "__main__":
                   f"{r['best_bookmaker']:<15}")
 
     # Save to dashboard database
-    from dashboard import save_recommendations, save_match_analysis
+    from db import save_recommendations, save_match_analysis
     n_saved = save_recommendations(recs)
     print(f"\nSaved {n_saved} new recommendations to dashboard DB")
 
