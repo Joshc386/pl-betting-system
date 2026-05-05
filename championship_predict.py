@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import joblib
 import numpy as np
 import pandas as pd
 from typing import Optional
@@ -45,14 +44,12 @@ from championship_backtest import (
     _calibrate, _calibrate_single,
     DEFAULT_CONFIG,
 )
-from backtest import RegimeDetector
 from staking import decide_bet, apply_portfolio_constraints, EFL_AGREE_SCALE
 from config import (
-    REGIME_CLAMPS, REGIME_WINDOW, REGIME_BLEND_SPEED,
-    REGIME_TRIGGER_THRESHOLD, REGIME_MIN_MATCHES,
     EARLY_SEASON_MATCHES, EARLY_BLEND_WEIGHT,
     EARLY_MIN_EDGE, EARLY_KELLY_FRACTION,
 )
+from predictor_utils import save_pickle, load_pickle, compute_regime_shift
 from model import DixonColesPredictor
 from league_config import get_league_config
 from api.odds_api import (
@@ -375,8 +372,6 @@ class ChampionshipPredictor:
         Args:
             path: Override path for the pickle file.
         """
-        path = path or self._STATE_PATH
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         state = {
             "ou_models": self._ou_models,
             "ou15_models": self._ou15_models,
@@ -394,8 +389,8 @@ class ChampionshipPredictor:
             "cal_shifts": self._cal_shifts,
             "val_mean_logits": self._val_mean_logits,
         }
-        joblib.dump(state, path)
-        self._log(f"Trained state saved to {path}")
+        save_pickle(state, path, self._STATE_PATH, self._log,
+                     label="Trained state")
 
     def load_trained_state(self, path: str | None = None) -> bool:
         """Load pre-trained models from disk. Skips full retraining.
@@ -406,11 +401,10 @@ class ChampionshipPredictor:
         Returns:
             True if loaded successfully, False if file missing.
         """
-        path = path or self._STATE_PATH
-        if not os.path.exists(path):
-            self._log(f"No trained state at {path}")
+        state = load_pickle(path, self._STATE_PATH, self._log,
+                            label="Trained state")
+        if state is None:
             return False
-        state = joblib.load(path)
         self._ou_models = state["ou_models"]
         self._ou15_models = state["ou15_models"]
         self._btts_models = state["btts_models"]
@@ -428,7 +422,6 @@ class ChampionshipPredictor:
         self._our_teams = state["our_teams"]
         self._cal_shifts = state.get("cal_shifts", {})
         self._val_mean_logits = state.get("val_mean_logits", {})
-        self._log(f"Trained state loaded from {path}")
         if self._cal_shifts:
             self._log(f"  Calibration shifts: {self._cal_shifts}")
         else:
@@ -441,16 +434,17 @@ class ChampionshipPredictor:
         Args:
             path: Override path for the pickle file.
         """
-        path = path or self._PIPELINE_CACHE_PATH
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        joblib.dump({
-            "full_df": self._full_df,
-            "ou_features": self._ou_features,
-            "ou15_features": self._ou15_features,
-            "btts_features": self._btts_features,
-            "our_teams": self._our_teams,
-        }, path)
-        self._log(f"Pipeline cache saved to {path}")
+        save_pickle(
+            {
+                "full_df": self._full_df,
+                "ou_features": self._ou_features,
+                "ou15_features": self._ou15_features,
+                "btts_features": self._btts_features,
+                "our_teams": self._our_teams,
+            },
+            path, self._PIPELINE_CACHE_PATH, self._log,
+            label="Pipeline cache",
+        )
 
     def load_pipeline_cache(self, path: str | None = None) -> bool:
         """Load cached pipeline DataFrame. Skips feature engineering.
@@ -461,16 +455,15 @@ class ChampionshipPredictor:
         Returns:
             True if loaded successfully, False if file missing.
         """
-        path = path or self._PIPELINE_CACHE_PATH
-        if not os.path.exists(path):
+        cache = load_pickle(path, self._PIPELINE_CACHE_PATH, self._log,
+                            label="Pipeline cache")
+        if cache is None:
             return False
-        cache = joblib.load(path)
         self._full_df = cache["full_df"]
         self._ou_features = cache["ou_features"]
         self._ou15_features = cache["ou15_features"]
         self._btts_features = cache["btts_features"]
         self._our_teams = cache["our_teams"]
-        self._log(f"Pipeline cache loaded from {path}")
         return True
 
     def light_refresh(
@@ -704,36 +697,13 @@ class ChampionshipPredictor:
     ) -> tuple[float, float, bool]:
         """Compute a regime-adjusted logit shift for one EFL market.
 
-        Returns (new_shift, adjusted_rate, is_shifted). When regime is
-        disabled for the market or there's insufficient data, returns the
-        shift derived from the training base rate unchanged.
+        Delegates to the shared ``compute_regime_shift`` in
+        ``predictor_utils``.  See that function for full documentation.
         """
-        if clamp_key not in REGIME_CLAMPS:
-            target_logit = np.log(base_rate / (1 - base_rate + 1e-10))
-            return val_mean_logit - target_logit, base_rate, False
-
-        settled = self._current_season_matches()
-        if len(settled) < REGIME_MIN_MATCHES:
-            target_logit = np.log(base_rate / (1 - base_rate + 1e-10))
-            return val_mean_logit - target_logit, base_rate, False
-
-        clamp_lo, clamp_hi = REGIME_CLAMPS[clamp_key]
-        detector = RegimeDetector(
-            prior_base_rate=base_rate,
-            window=REGIME_WINDOW,
-            blend_speed=REGIME_BLEND_SPEED,
-            trigger_threshold=REGIME_TRIGGER_THRESHOLD,
-            min_matches=REGIME_MIN_MATCHES,
-            clamp_lo=clamp_lo,
-            clamp_hi=clamp_hi,
+        return compute_regime_shift(
+            self._current_season_matches(),
+            clamp_key, base_rate, val_mean_logit, outcome_fn,
         )
-        for o in outcome_fn(settled).astype(int).tolist():
-            detector.update(o)
-
-        adjusted_rate = float(detector.get_adjusted_base_rate())
-        is_shifted = bool(detector.regime_shift_detected())
-        target_logit = np.log(adjusted_rate / (1 - adjusted_rate + 1e-10))
-        return float(val_mean_logit - target_logit), adjusted_rate, is_shifted
 
     def _fetch_selective_alt_totals(self, matches: list[dict]) -> None:
         """Fetch per-event alt_totals only for fixtures where the EFL DC

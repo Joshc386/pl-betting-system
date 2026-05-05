@@ -11,7 +11,6 @@ Markets evaluated:
 """
 import logging
 import os
-import joblib
 import numpy as np
 import pandas as pd
 from typing import Optional
@@ -22,11 +21,10 @@ from config import (
     ALLOWED_ALT_LINES, ALT_LINES_OVER_ONLY,
     DC_LAMBDA_MIN, DC_LAMBDA_MAX,
     MODEL_DIR,
-    REGIME_CLAMPS, REGIME_WINDOW, REGIME_BLEND_SPEED,
-    REGIME_TRIGGER_THRESHOLD, REGIME_MIN_MATCHES,
     EARLY_SEASON_MATCHES, EARLY_BLEND_WEIGHT,
     EARLY_MIN_EDGE, EARLY_KELLY_FRACTION,
 )
+from predictor_utils import save_pickle, load_pickle, compute_regime_shift
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, brier_score_loss
 from model import (
@@ -36,7 +34,6 @@ from model import (
 )
 from backtest import (
     _calibrate, _calibrate_single, _lr_predict, DEFAULT_CONFIG,
-    RegimeDetector,
 )
 from staking import decide_bet, apply_portfolio_constraints, PL_AGREE_SCALE
 from btts_backtest import BTTS_DEFAULT_CONFIG
@@ -170,8 +167,6 @@ class LivePredictor:
         Args:
             path: Override path for the pickle file.
         """
-        path = path or self._STATE_PATH
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         state = {
             "ou_models": self._ou_models,
             "btts_models": self._btts_models,
@@ -188,8 +183,8 @@ class LivePredictor:
             "ou_val_mean_logit": self._ou_val_mean_logit,
             "btts_cal_shifts": self._btts_cal_shifts,
         }
-        joblib.dump(state, path)
-        self._log(f"Trained state saved to {path}")
+        save_pickle(state, path, self._STATE_PATH, self._log,
+                     label="Trained state")
 
     def load_trained_state(self, path: Optional[str] = None) -> bool:
         """Load pre-trained models from disk. Skips full retraining.
@@ -200,11 +195,10 @@ class LivePredictor:
         Returns:
             True if loaded successfully, False if file missing.
         """
-        path = path or self._STATE_PATH
-        if not os.path.exists(path):
-            self._log(f"No trained state at {path}")
+        state = load_pickle(path, self._STATE_PATH, self._log,
+                            label="Trained state")
+        if state is None:
             return False
-        state = joblib.load(path)
         self._ou_models = state["ou_models"]
         self._btts_models = state["btts_models"]
         self._ou_features = state["ou_features"]
@@ -222,7 +216,6 @@ class LivePredictor:
         self._ou_logit_shift = state.get("ou_logit_shift", 0.0)
         self._ou_val_mean_logit = state.get("ou_val_mean_logit", 0.0)
         self._btts_cal_shifts = state.get("btts_cal_shifts")
-        self._log(f"Trained state loaded from {path}")
         if self._ou_stacker is not None:
             self._log(f"  Stacker loaded (logit_shift={self._ou_logit_shift:.4f})")
         else:
@@ -235,16 +228,17 @@ class LivePredictor:
         Args:
             path: Override path for the pickle file.
         """
-        path = path or self._PIPELINE_CACHE_PATH
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        joblib.dump({
-            "full_df": self._full_df,
-            "train_medians": self._train_medians,
-            "ou_features": self._ou_features,
-            "btts_features": self._btts_features,
-            "our_teams": self._our_teams,
-        }, path)
-        self._log(f"Pipeline cache saved to {path}")
+        save_pickle(
+            {
+                "full_df": self._full_df,
+                "train_medians": self._train_medians,
+                "ou_features": self._ou_features,
+                "btts_features": self._btts_features,
+                "our_teams": self._our_teams,
+            },
+            path, self._PIPELINE_CACHE_PATH, self._log,
+            label="Pipeline cache",
+        )
 
     def load_pipeline_cache(self, path: Optional[str] = None) -> bool:
         """Load cached pipeline DataFrame. Skips 60-120s feature engineering.
@@ -255,16 +249,15 @@ class LivePredictor:
         Returns:
             True if loaded successfully, False if file missing.
         """
-        path = path or self._PIPELINE_CACHE_PATH
-        if not os.path.exists(path):
+        cache = load_pickle(path, self._PIPELINE_CACHE_PATH, self._log,
+                            label="Pipeline cache")
+        if cache is None:
             return False
-        cache = joblib.load(path)
         self._full_df = cache["full_df"]
         self._train_medians = cache["train_medians"]
         self._ou_features = cache["ou_features"]
         self._btts_features = cache["btts_features"]
         self._our_teams = cache["our_teams"]
-        self._log(f"Pipeline cache loaded from {path}")
         return True
 
     def light_refresh(self, markets: tuple[str, ...] = ("totals", "btts")) -> list[dict]:
@@ -556,49 +549,13 @@ class LivePredictor:
     ) -> tuple[float, float, bool]:
         """Compute a regime-adjusted logit shift for a single market.
 
-        Args:
-            clamp_key: Key into REGIME_CLAMPS (e.g. "ou25_pl").
-            base_rate: Training base rate (calibration prior).
-            val_mean_logit: Mean logit of val-set predictions, stored in train().
-            outcome_fn: Callable taking the settled DataFrame and returning a
-                binary Series of market outcomes (1=Over/Yes, 0=Under/No).
-
-        Returns:
-            (adjusted_shift, adjusted_rate, is_shifted).
-            If regime is disabled for this market, or there's insufficient
-            data, returns (original_shift, base_rate, False).
+        Delegates to the shared ``compute_regime_shift`` in
+        ``predictor_utils``.  See that function for full documentation.
         """
-        if clamp_key not in REGIME_CLAMPS:
-            # Regime disabled for this market
-            target_logit = np.log(base_rate / (1 - base_rate + 1e-10))
-            return val_mean_logit - target_logit, base_rate, False
-
-        settled = self._current_season_matches()
-        if len(settled) < REGIME_MIN_MATCHES:
-            target_logit = np.log(base_rate / (1 - base_rate + 1e-10))
-            return val_mean_logit - target_logit, base_rate, False
-
-        clamp_lo, clamp_hi = REGIME_CLAMPS[clamp_key]
-        detector = RegimeDetector(
-            prior_base_rate=base_rate,
-            window=REGIME_WINDOW,
-            blend_speed=REGIME_BLEND_SPEED,
-            trigger_threshold=REGIME_TRIGGER_THRESHOLD,
-            min_matches=REGIME_MIN_MATCHES,
-            clamp_lo=clamp_lo,
-            clamp_hi=clamp_hi,
+        return compute_regime_shift(
+            self._current_season_matches(),
+            clamp_key, base_rate, val_mean_logit, outcome_fn,
         )
-        # Feed all current-season results into the detector in chronological
-        # order (same pattern the backtest uses, just replayed at predict time)
-        outcomes = outcome_fn(settled).astype(int).tolist()
-        for o in outcomes:
-            detector.update(o)
-
-        adjusted_rate = float(detector.get_adjusted_base_rate())
-        is_shifted = bool(detector.regime_shift_detected())
-        target_logit = np.log(adjusted_rate / (1 - adjusted_rate + 1e-10))
-        new_shift = float(val_mean_logit - target_logit)
-        return new_shift, adjusted_rate, is_shifted
 
     def _predict_ou(self, fixture_row: pd.Series) -> dict:
         """Generate O/U 2.5 probability from all models for a single fixture.

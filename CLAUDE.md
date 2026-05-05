@@ -28,6 +28,7 @@ A statistical betting system for Premier League football markets. Uses a 4-model
 - `pipeline.py` — PL feature engineering (150+ features from CSV, xG, FPL, Understat, weather)
 - `championship_pipeline.py` — EFL feature engineering (80+ features, Elo, half-time, computed strengths)
 - `features/common.py` — Shared feature functions used by both pipelines (congestion, discipline)
+- `predictor_utils.py` — Shared predictor infrastructure (pickle save/load, regime shift computation)
 - `model.py` — 4-model ensemble (XGBoost + LightGBM + LogReg + Dixon-Coles) with walk-forward CV
 
 ### Prediction & Betting
