@@ -25,7 +25,9 @@ A statistical betting system for Premier League football markets. Uses a 4-model
 
 ### Core Pipeline
 - `config.py` — Centralised configuration (paths, features, seasons, API keys, alt line settings)
-- `pipeline.py` — Feature engineering (150+ features from CSV, xG, FPL, Understat, weather)
+- `pipeline.py` — PL feature engineering (150+ features from CSV, xG, FPL, Understat, weather)
+- `championship_pipeline.py` — EFL feature engineering (80+ features, Elo, half-time, computed strengths)
+- `features/common.py` — Shared feature functions used by both pipelines (congestion, discipline)
 - `model.py` — 4-model ensemble (XGBoost + LightGBM + LogReg + Dixon-Coles) with walk-forward CV
 
 ### Prediction & Betting
@@ -40,10 +42,11 @@ A statistical betting system for Premier League football markets. Uses a 4-model
 - `corners_data.py` — Corners O/U odds from Betfair
 - `alt_lines_data.py` — Betfair goal O/U odds merger
 
-### Database & Dashboard
+### Database, Dashboard & Scan
 - `db.py` — Database layer: SQLite connection management, schema creation, all CRUD for recommendations, predictions, match analysis, logged bets, bankroll
-- `dashboard.py` — Dash web UI (port 8050) with active picks, history, performance (imports DB layer from db.py)
-- `settlement.py` — Post-match bet settlement via football-data.org API
+- `scan.py` — Odds scan pipeline: fetch odds → OddsPapi merge → team resolution → predictor trigger → save analysis
+- `dashboard.py` — Dash web UI (port 8050) with active picks, history, performance (imports DB layer from db.py, scan from scan.py)
+- `settlement.py` — Post-match bet settlement via ESPN scores API
 
 ### Scheduling & Entry Points
 - `run.py` — Main entry point (dashboard + scheduler + CLI actions)

@@ -17,6 +17,10 @@ from scipy.stats import poisson as poisson_dist
 
 import os
 
+from features.common import (
+    add_congestion_features,
+    add_discipline_features,
+)
 from league_config import get_league_config
 from api.computed_strengths import compute_team_strengths, merge_strengths
 
@@ -97,115 +101,6 @@ def add_derived_features(df: pd.DataFrame) -> pd.DataFrame:
             df.at[idx, "Away_RestDays"] = (dt - last_match[away]).days
         last_match[home] = dt
         last_match[away] = dt
-
-    return df
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Congestion features
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def add_congestion_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute fixture congestion features beyond simple rest days.
-
-    Championship has heavy midweek scheduling (46 games + playoffs + cup runs),
-    making congestion a stronger signal than in the PL.
-
-    Features:
-        - MatchesLast14Days: games in the last 14 days (high = congested)
-        - AvgRest3: average rest across last 3 matches (low = congested)
-    """
-    home_m14: list[int] = []
-    away_m14: list[int] = []
-    home_avgrest3: list[float] = []
-    away_avgrest3: list[float] = []
-
-    team_dates: dict[str, list[pd.Timestamp]] = {}
-
-    for _, row in df.iterrows():
-        home = row["Home_Team"]
-        away = row["Away_Team"]
-        date = row["Date"]
-
-        for team, m14_list, avgrest_list in [
-            (home, home_m14, home_avgrest3),
-            (away, away_m14, away_avgrest3),
-        ]:
-            if team not in team_dates:
-                team_dates[team] = []
-
-            past = team_dates[team]
-
-            # Matches in last 14 days
-            recent = [d for d in past if (date - d).days <= 14]
-            m14_list.append(len(recent))
-
-            # Average rest across last 3 matches
-            if len(past) >= 3:
-                last3 = past[-3:]
-                gaps = [(date - last3[-1]).days]
-                for i in range(len(last3) - 1, 0, -1):
-                    gaps.append((last3[i] - last3[i - 1]).days)
-                avgrest_list.append(float(np.mean(gaps)))
-            elif len(past) >= 1:
-                avgrest_list.append(float((date - past[-1]).days))
-            else:
-                avgrest_list.append(np.nan)
-
-            team_dates[team].append(date)
-
-    df["Home_MatchesLast14Days"] = home_m14
-    df["Away_MatchesLast14Days"] = away_m14
-    df["Home_AvgRest3"] = home_avgrest3
-    df["Away_AvgRest3"] = away_avgrest3
-    return df
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Discipline features
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def add_discipline_features(df: pd.DataFrame, window: int = 5) -> pd.DataFrame:
-    """Compute rolling discipline/card features from HY, AY, HR, AR, HF, AF.
-
-    Cards and fouls capture match tempo and aggression — high-foul matches
-    produce more set pieces which correlate with goals. Championship is
-    notoriously more physical than the PL.
-    """
-    if "HY" not in df.columns:
-        return df
-
-    # Build long format
-    home_long = df[["Date", "Home_Team", "HY", "HR", "HF"]].copy()
-    home_long.columns = ["Date", "Team", "YellowCards", "RedCards", "Fouls"]
-    away_long = df[["Date", "Away_Team", "AY", "AR", "AF"]].copy()
-    away_long.columns = ["Date", "Team", "YellowCards", "RedCards", "Fouls"]
-    long = pd.concat([home_long, away_long]).sort_values(
-        ["Team", "Date"]
-    ).reset_index(drop=True)
-
-    g = long.groupby("Team")
-    long["YellowCards_5"] = g["YellowCards"].transform(
-        lambda x: x.shift(1).rolling(window, min_periods=2).mean()
-    )
-    long["RedCards_10"] = g["RedCards"].transform(
-        lambda x: x.shift(1).rolling(10, min_periods=3).mean()
-    )
-    long["Fouls_5"] = g["Fouls"].transform(
-        lambda x: x.shift(1).rolling(window, min_periods=2).mean()
-    )
-
-    new_cols = ["YellowCards_5", "RedCards_10", "Fouls_5"]
-    feat_long = long[["Date", "Team"] + new_cols].drop_duplicates(["Date", "Team"])
-
-    for prefix in ["Home", "Away"]:
-        renamed = feat_long.rename(columns={c: f"{prefix}_{c}" for c in new_cols})
-        df = df.merge(
-            renamed,
-            left_on=["Date", f"{prefix}_Team"],
-            right_on=["Date", "Team"],
-            how="left",
-        ).drop(columns=["Team"], errors="ignore")
 
     return df
 
