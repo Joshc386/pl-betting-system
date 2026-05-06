@@ -158,8 +158,15 @@ def generate_pl_btts(seasons: range, odds_source: str = "footiqo") -> pd.DataFra
               " ...")
         bf = pd.read_csv(PROJECT_ROOT / "data" / "betfair_pl_btts.csv")
         bf["_date"] = pd.to_datetime(bf["Date"]).dt.date
-        bf = bf[["_date", "Home_Team", "Away_Team", "yes_ltp", "no_ltp"]]
-        bf = bf.rename(columns={"yes_ltp": "BTTSY", "no_ltp": "BTTSN"})
+        # Price preference: _pre (last pre-kickoff) > _first (earliest trade).
+        # yes_ltp/no_ltp are in-play contaminated. See roi_findings.md A5.
+        if "yes_ltp_pre" in bf.columns:
+            bf["BTTSY"] = bf["yes_ltp_pre"].fillna(bf["yes_ltp_first"])
+            bf["BTTSN"] = bf["no_ltp_pre"].fillna(bf["no_ltp_first"])
+        else:
+            bf["BTTSY"] = bf["yes_ltp_first"]
+            bf["BTTSN"] = bf["no_ltp_first"]
+        bf = bf[["_date", "Home_Team", "Away_Team", "BTTSY", "BTTSN"]]
         full_df["_date"] = pd.to_datetime(full_df["Date"]).dt.date
         full_df = full_df.merge(bf, on=["_date", "Home_Team", "Away_Team"],
                                 how="left")
@@ -422,8 +429,16 @@ def generate_efl_ou15(seasons: range) -> pd.DataFrame:
     print("[EFL ou15] Merging Betfair EFL O/U 1.5 odds ...")
     bf = pd.read_csv(PROJECT_ROOT / "data" / "betfair_efl_ou15.csv")
     bf["_date"] = pd.to_datetime(bf["Date"]).dt.date
-    bf = bf[["_date", "Home_Team", "Away_Team", "over_ltp", "under_ltp"]]
-    bf = bf.rename(columns={"over_ltp": "O15", "under_ltp": "U15"})
+    # Use first-trade proxy — over_ltp/under_ltp are in-play contaminated.
+    # Price preference: _pre (last pre-kickoff) > _first (earliest trade).
+    # See roi_findings.md action A5.
+    if "over_ltp_pre" in bf.columns:
+        bf["O15"] = bf["over_ltp_pre"].fillna(bf["over_ltp_first"])
+        bf["U15"] = bf["under_ltp_pre"].fillna(bf["under_ltp_first"])
+    else:
+        bf["O15"] = bf["over_ltp_first"]
+        bf["U15"] = bf["under_ltp_first"]
+    bf = bf[["_date", "Home_Team", "Away_Team", "O15", "U15"]]
     full_df["_date"] = pd.to_datetime(full_df["Date"]).dt.date
     full_df = full_df.merge(bf, on=["_date", "Home_Team", "Away_Team"],
                              how="left")
@@ -487,13 +502,17 @@ def generate_efl_btts(seasons: range) -> pd.DataFrame:
     print(f"  ...loaded {len(full_df):,} rows, {len(features)} BTTS features "
           f"in {time.time()-t0:.0f}s")
 
-    # Merge Betfair BTTS odds (first-trade proxy for pre-match)
-    print("[EFL btts] Merging Betfair BTTS odds (first-trade proxy) ...")
+    # Merge Betfair BTTS odds — prefer _pre (last pre-kickoff trade)
+    print("[EFL btts] Merging Betfair BTTS odds (pre-match proxy) ...")
     bf = pd.read_csv(PROJECT_ROOT / "data" / "betfair_efl_btts.csv")
     bf["_date"] = pd.to_datetime(bf["Date"]).dt.date
-    bf = bf[["_date", "Home_Team", "Away_Team",
-             "yes_ltp_first", "no_ltp_first"]].rename(
-        columns={"yes_ltp_first": "BTTSY", "no_ltp_first": "BTTSN"})
+    if "yes_ltp_pre" in bf.columns:
+        bf["BTTSY"] = bf["yes_ltp_pre"].fillna(bf["yes_ltp_first"])
+        bf["BTTSN"] = bf["no_ltp_pre"].fillna(bf["no_ltp_first"])
+    else:
+        bf["BTTSY"] = bf["yes_ltp_first"]
+        bf["BTTSN"] = bf["no_ltp_first"]
+    bf = bf[["_date", "Home_Team", "Away_Team", "BTTSY", "BTTSN"]]
     full_df["_date"] = pd.to_datetime(full_df["Date"]).dt.date
     full_df = full_df.merge(bf, on=["_date", "Home_Team", "Away_Team"],
                              how="left")

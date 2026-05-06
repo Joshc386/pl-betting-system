@@ -15,7 +15,7 @@ Key differences from PL predict.py:
   - Championship-specific team name mapping (CSV uses short names)
   - Odds-API sport key: soccer_efl_champ
   - OddsPapi tournament ID: 18 (Championship)
-  - No alt lines yet (backtest validation needed first)
+  - Alt O/U lines via DC Poisson (O/U 3.5 only — dedup guard skips 1.5/2.5)
 """
 from __future__ import annotations
 
@@ -48,14 +48,19 @@ from staking import decide_bet, apply_portfolio_constraints, EFL_AGREE_SCALE
 from config import (
     EARLY_SEASON_MATCHES, EARLY_BLEND_WEIGHT,
     EARLY_MIN_EDGE, EARLY_KELLY_FRACTION,
+    EFL_ALLOWED_ALT_LINES, EFL_ALT_LINES_OVER_ONLY,
+    MARKET_MULTIPLIERS, DEVIG_DISCOUNT,
+    DC_LAMBDA_MIN, DC_LAMBDA_MAX,
 )
 from predictor_utils import save_pickle, load_pickle, compute_regime_shift
 from model import DixonColesPredictor
 from league_config import get_league_config
 from api.odds_api import (
     fetch_epl_odds, get_best_odds, get_best_btts_odds,
+    get_best_odds_all_lines,
     match_to_our_teams,
 )
+from alt_lines import scan_all_lines, get_value_bets
 from predict import _extract_bookmaker_odds
 from api.oddspapi import (
     fetch_epl_all_odds as fetch_oddspapi_odds,
@@ -705,6 +710,37 @@ class ChampionshipPredictor:
             clamp_key, base_rate, val_mean_logit, outcome_fn,
         )
 
+    def _get_dc_lambdas(
+        self, home_team: str, away_team: str,
+    ) -> tuple[float, float]:
+        """Extract home/away goal lambdas from the DC model for alt-line evaluation.
+
+        Uses the O/U 2.5 DC model (same as PL predict.py).
+
+        Args:
+            home_team: Home team name (our dataset format).
+            away_team: Away team name (our dataset format).
+
+        Returns:
+            Tuple of (home_lambda, away_lambda).
+        """
+        dc = self._ou_models["dc"]
+        h_att = dc.attack_home.get(home_team, dc.PRIORS["attack_home"])
+        a_def = dc.defence_away.get(away_team, dc.PRIORS["defence_away"])
+        a_att = dc.attack_away.get(away_team, dc.PRIORS["attack_away"])
+        h_def = dc.defence_home.get(home_team, dc.PRIORS["defence_home"])
+
+        sqrt_gamma = np.sqrt(dc.gamma)
+        home_lambda = np.clip(
+            h_att * a_def * dc.mu * sqrt_gamma,
+            DC_LAMBDA_MIN, DC_LAMBDA_MAX,
+        )
+        away_lambda = np.clip(
+            a_att * h_def * dc.mu / sqrt_gamma,
+            DC_LAMBDA_MIN, DC_LAMBDA_MAX,
+        )
+        return float(home_lambda), float(away_lambda)
+
     def _fetch_selective_alt_totals(self, matches: list[dict]) -> None:
         """Fetch per-event alt_totals only for fixtures where the EFL DC
         model has high O/U 1.5 Over conviction.
@@ -717,7 +753,7 @@ class ChampionshipPredictor:
         Mutates ``matches`` in place by enriching candidate fixtures'
         ``bookmakers`` dicts with alt-line entries.
         """
-        from config import OU15_FETCH_PROB_THRESHOLD, DC_LAMBDA_MIN, DC_LAMBDA_MAX
+        from config import OU15_FETCH_PROB_THRESHOLD
         from api.odds_api import (
             fetch_alt_totals_for_events,
             merge_alt_totals_into_match,
@@ -1166,6 +1202,172 @@ class ChampionshipPredictor:
                     home, away, kickoff, btts_pred, best_btts,
                     self.btts_config, recommendations, match,
                 )
+
+            # ── Alt O/U Lines (DC Poisson only) ──
+            # Dedup guard: EFL_ALLOWED_ALT_LINES = {3.5} excludes 1.5 and 2.5
+            # which are already handled by dedicated 3-model ensemble paths above.
+            all_line_odds = get_best_odds_all_lines(match)
+
+            # Overlay OddsPapi data if available (more bookmakers, more lines)
+            if op_data and op_data.get("ou_lines"):
+                if all_line_odds is None:
+                    all_line_odds = {}
+                for line, op_ld in op_data["ou_lines"].items():
+                    if line not in all_line_odds:
+                        all_line_odds[line] = op_ld
+                    else:
+                        existing = all_line_odds[line]
+                        if op_ld["best_over"] > existing.get("best_over", 0):
+                            existing["best_over"] = op_ld["best_over"]
+                            existing["best_over_book"] = op_ld["best_over_book"]
+                        if op_ld["best_under"] > existing.get("best_under", 0):
+                            existing["best_under"] = op_ld["best_under"]
+                            existing["best_under_book"] = op_ld["best_under_book"]
+                        if op_ld.get("sharp_fair_over") is not None:
+                            existing["sharp_fair_over"] = op_ld["sharp_fair_over"]
+                            existing["sharp_fair_under"] = op_ld["sharp_fair_under"]
+                        existing["n_books"] = max(
+                            existing.get("n_books", 0),
+                            op_ld.get("n_books", 0),
+                        )
+
+            if all_line_odds:
+                # Dedup: only lines in EFL_ALLOWED_ALT_LINES (currently {3.5})
+                alt_line_odds = {
+                    k: v for k, v in all_line_odds.items()
+                    if float(k) in EFL_ALLOWED_ALT_LINES
+                }
+
+                if alt_line_odds:
+                    home_lam, away_lam = self._get_dc_lambdas(home, away)
+                    dc = self._ou_models["dc"]
+
+                    # Early-season overrides (mirror PL Phase C pattern)
+                    _alt_blend_w = (
+                        EARLY_BLEND_WEIGHT if self._is_early_season
+                        else self.ou_config.get("blend_weight", 0.35)
+                    )
+                    _alt_min_edge = (
+                        EARLY_MIN_EDGE if self._is_early_season
+                        else self.ou_config.get("min_edge", 0.02)
+                    )
+
+                    opps = scan_all_lines(
+                        home_lambda=home_lam,
+                        away_lambda=away_lam,
+                        odds_by_line=alt_line_odds,
+                        rho=dc.rho,
+                        blend_weight=_alt_blend_w,
+                        min_edge=_alt_min_edge,
+                    )
+
+                    # Record ALL alt-line opportunities in match analysis
+                    for opp in opps:
+                        line_label = f"ou{opp['line']:.1f}".replace(".", "")
+                        fair_odds_val = (
+                            1 / opp["fair_prob"]
+                            if opp["fair_prob"] > 0 else None
+                        )
+                        edge_pct = opp["edge"] * 100
+                        _line_data = alt_line_odds.get(opp["line"], {})
+                        _alt_edge_src = (
+                            "pinnacle"
+                            if _line_data.get(f"sharp_fair_{opp['side']}")
+                            is not None else "devig"
+                        )
+                        self._match_analysis.append({
+                            "home_team": home,
+                            "away_team": away,
+                            "kickoff": kickoff,
+                            "market": line_label,
+                            "side": opp["side"],
+                            "best_odds": opp["odds"],
+                            "best_bookmaker": opp["book"],
+                            "model_prob": opp["model_prob"],
+                            "fair_odds": fair_odds_val,
+                            "edge_pct": edge_pct,
+                            "edge_source": _alt_edge_src,
+                            "confidence": (
+                                "high" if edge_pct > 4 else
+                                "medium" if edge_pct > 2.5 else
+                                "low" if edge_pct > 0 else None
+                            ),
+                            "n_books": _line_data.get("n_books", 0),
+                            "per_model_probs": {
+                                "dc_poisson": opp["model_prob"],
+                            },
+                            "league": "EFL",
+                            "bookmaker_odds": _extract_bookmaker_odds(
+                                match, line_label, opp["side"],
+                            ) if match else {},
+                        })
+
+                    value_bets = get_value_bets(
+                        opps, min_edge=_alt_min_edge, min_ev=0.0,
+                    )
+
+                    if EFL_ALT_LINES_OVER_ONLY:
+                        value_bets = [
+                            vb for vb in value_bets
+                            if vb["side"] == "over"
+                        ]
+
+                    for vb in value_bets:
+                        _vb_market = (
+                            f"ou{vb['line']:.1f}".replace(".", "")
+                        )
+                        _vb_line_data = alt_line_odds.get(
+                            vb["line"], {},
+                        )
+                        _vb_edge_src = (
+                            "pinnacle"
+                            if _vb_line_data.get(
+                                f"sharp_fair_{vb['side']}")
+                            is not None else "devig"
+                        )
+                        # Apply de-vig discount to edge
+                        _vb_edge = vb["edge"]
+                        if _vb_edge_src == "devig":
+                            _vb_edge *= DEVIG_DISCOUNT
+                        # Market/side confidence multiplier
+                        _vb_mult = MARKET_MULTIPLIERS.get(
+                            (_vb_market, vb["side"]), 1.0,
+                        )
+                        _vb_stake = vb["kelly"] * _vb_mult
+                        # Early-season Kelly reduction
+                        if self._is_early_season:
+                            _vb_stake *= (EARLY_KELLY_FRACTION / 0.25)
+
+                        recommendations.append({
+                            "home_team": home,
+                            "away_team": away,
+                            "kickoff": kickoff,
+                            "market": _vb_market,
+                            "side": vb["side"],
+                            "model_prob": vb["model_prob"],
+                            "blended_prob": vb["blended_prob"],
+                            "fair_prob": vb["fair_prob"],
+                            "odds": vb["odds"],
+                            "edge": _vb_edge,
+                            "ev": vb["ev"],
+                            "n_agree": 0,  # alt lines use DC only
+                            "stake_pct": _vb_stake,
+                            "edge_source": _vb_edge_src,
+                            "market_multiplier": _vb_mult,
+                            "confidence": (
+                                "high" if _vb_edge > 0.04 else
+                                "medium" if _vb_edge > 0.025 else
+                                "low"
+                            ),
+                            "best_bookmaker": vb["book"],
+                            "n_books": _vb_line_data.get("n_books", 0),
+                            "per_model_probs": {
+                                "dc_poisson": vb["model_prob"],
+                            },
+                            "league": "EFL",
+                            "line": vb["line"],
+                            "line_type": vb["line_type"],
+                        })
 
         # Option 5 Step 1 + 2c: apply same-match correlation discount and
         # matchday portfolio cap. (``apply_portfolio_constraints`` is

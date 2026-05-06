@@ -8,6 +8,13 @@ prices + settlement info, and writes a single CSV.
 Downstream: ``scripts/extract_btts_by_league.py`` splits the output into
 PL-only and EFL-only files using canonical team-name mapping.
 
+Price columns emitted per runner (yes/no):
+  *_ltp_first  — first-ever traded price in the stream (early pre-match)
+  *_ltp_pre    — last traded price BEFORE inPlay flipped True (true
+                 pre-match closing line; best available pre-match price)
+  *_ltp        — last traded price in the entire stream (in-play /
+                 settlement — DO NOT use as a pre-match price)
+
 Run: ``python extract_btts_odds.py``
 """
 from __future__ import annotations
@@ -30,6 +37,7 @@ TARGET_COUNTRY = "GB"
 CSV_FIELDS = [
     "event_name", "market_time", "settled_time",
     "yes_ltp", "no_ltp", "yes_ltp_first", "no_ltp_first",
+    "yes_ltp_pre", "no_ltp_pre",
     "winner", "country_code",
 ]
 
@@ -60,6 +68,9 @@ def _parse_file(path_str: str) -> dict | None:
     no_ltp: float | None = None
     yes_ltp_first: float | None = None
     no_ltp_first: float | None = None
+    yes_ltp_pre: float | None = None
+    no_ltp_pre: float | None = None
+    in_play: bool = False
     winner: str | None = None
 
     for line in lines:
@@ -94,6 +105,10 @@ def _parse_file(path_str: str) -> dict | None:
                     elif rname == "no":
                         no_id = rid
 
+            # Track inPlay transitions — once True, stop updating _pre
+            if "inPlay" in md:
+                in_play = bool(md["inPlay"])
+
             # Settlement
             if md.get("status") == "CLOSED" and md.get("settledTime"):
                 settled_time = md["settledTime"]
@@ -116,10 +131,14 @@ def _parse_file(path_str: str) -> dict | None:
                     if rid == yes_id:
                         if yes_ltp_first is None:
                             yes_ltp_first = ltp
+                        if not in_play:
+                            yes_ltp_pre = ltp
                         yes_ltp = ltp
                     elif rid == no_id:
                         if no_ltp_first is None:
                             no_ltp_first = ltp
+                        if not in_play:
+                            no_ltp_pre = ltp
                         no_ltp = ltp
 
     # Validate
@@ -138,6 +157,8 @@ def _parse_file(path_str: str) -> dict | None:
         "no_ltp": no_ltp,
         "yes_ltp_first": yes_ltp_first,
         "no_ltp_first": no_ltp_first,
+        "yes_ltp_pre": yes_ltp_pre,
+        "no_ltp_pre": no_ltp_pre,
         "winner": winner or "",
         "country_code": "GB",
     }

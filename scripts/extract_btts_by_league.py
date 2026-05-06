@@ -162,6 +162,7 @@ def _join_and_write(
     out_cols = [
         "Date", "SeasonIndex", "Home_Team", "Away_Team",
         "yes_ltp", "no_ltp", "yes_ltp_first", "no_ltp_first",
+        "yes_ltp_pre", "no_ltp_pre",
         "market_time", "settled_time", "BTTS_Result",
     ]
     out = merged[out_cols].sort_values(["Date", "Home_Team"]).reset_index(drop=True)

@@ -457,11 +457,21 @@ FBREF_COMP_ID = LEAGUE_CFG.get("fbref_comp_id")
 # ── Dashboard ──
 DASHBOARD_DB_PATH = LEAGUE_CFG["db_path"]
 
-# ── Alternative O/U Lines ──
+# ── Alternative O/U Lines (PL) ──
 # Only lines with proven backtest edge are evaluated live.
-# O/U 1.5 Over: +92.3% ROI in backtest; O/U 2.5 handled by main model.
+# PL backtest (clean _first prices): O/U 1.5 Over +11.6%, O/U 2.5 Over +10.4%.
+# O/U 2.5 is handled by the main ensemble; alt-lines path adds O/U 1.5.
 ALLOWED_ALT_LINES = {1.5}
-ALT_LINES_OVER_ONLY = True  # Only Over bets — backtest showed Under has no edge
+ALT_LINES_OVER_ONLY = True  # Only Over bets — PL backtest showed Under has no edge
+
+# ── Alternative O/U Lines (EFL) ──
+# EFL backtest (clean _first prices, 9 seasons S16-S24):
+#   O/U 1.5: +4.3% ROI (787 bets), O/U 2.5: +5.6% (874), O/U 3.5: +1.2% (857).
+#   Both sides show edge (Over +2.4%, Under +4.7%).
+# O/U 2.5 and O/U 1.5 are handled by dedicated 3-model ensemble paths;
+# alt-lines path adds O/U 3.5 and provides DC-Poisson match analysis for all.
+EFL_ALLOWED_ALT_LINES = {3.5}  # only lines NOT already handled by dedicated paths
+EFL_ALT_LINES_OVER_ONLY = False  # both sides have edge in EFL
 
 # ── Off-season retrain gates ──
 # Each league exposes an explicit boolean that the weekly retrain job

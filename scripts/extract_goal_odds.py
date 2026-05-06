@@ -7,6 +7,13 @@ to unpack bz2 files to disk.
 Handles goal lines: 0.5, 1.5, 2.5, 3.5, 4.5
 
 Outputs a single CSV with all lines, one row per match-line combination.
+
+Price columns emitted per runner (over/under):
+  *_ltp_first  — first-ever traded price in the stream (early pre-match)
+  *_ltp_pre    — last traded price BEFORE inPlay flipped True (true
+                 pre-match closing line; best available pre-match price)
+  *_ltp        — last traded price in the entire stream (in-play /
+                 settlement — DO NOT use as a pre-match price)
 """
 import bz2
 import csv
@@ -32,7 +39,8 @@ GOAL_MARKETS: dict[str, float] = {
 CSV_FIELDS = [
     "event_name", "market_type", "goal_line", "market_time",
     "settled_time", "over_ltp", "under_ltp", "over_ltp_first",
-    "under_ltp_first", "winner", "country_code",
+    "under_ltp_first", "over_ltp_pre", "under_ltp_pre",
+    "winner", "country_code",
 ]
 
 
@@ -151,6 +159,9 @@ def _parse_bz2_bytes(raw_compressed: bytes) -> dict | None:
     under_ltp: float | None = None
     over_ltp_first: float | None = None
     under_ltp_first: float | None = None
+    over_ltp_pre: float | None = None
+    under_ltp_pre: float | None = None
+    in_play: bool = False
     winner: str | None = None
 
     for line in lines:
@@ -186,6 +197,10 @@ def _parse_bz2_bytes(raw_compressed: bytes) -> dict | None:
                     elif "under" in rname:
                         under_id = rid
 
+            # Track inPlay transitions — once True, stop updating _pre
+            if "inPlay" in md:
+                in_play = bool(md["inPlay"])
+
             # Check settlement
             if md.get("status") == "CLOSED" and md.get("settledTime"):
                 settled_time = md["settledTime"]
@@ -209,10 +224,14 @@ def _parse_bz2_bytes(raw_compressed: bytes) -> dict | None:
                     if rid == over_id:
                         if over_ltp_first is None:
                             over_ltp_first = ltp
+                        if not in_play:
+                            over_ltp_pre = ltp
                         over_ltp = ltp
                     elif rid == under_id:
                         if under_ltp_first is None:
                             under_ltp_first = ltp
+                        if not in_play:
+                            under_ltp_pre = ltp
                         under_ltp = ltp
 
     # Validate
@@ -233,6 +252,8 @@ def _parse_bz2_bytes(raw_compressed: bytes) -> dict | None:
         "under_ltp": under_ltp,
         "over_ltp_first": over_ltp_first,
         "under_ltp_first": under_ltp_first,
+        "over_ltp_pre": over_ltp_pre,
+        "under_ltp_pre": under_ltp_pre,
         "winner": winner or "",
         "country_code": "GB",
     }

@@ -1,15 +1,15 @@
 """
-Alternative goal O/U lines data loader.
+EFL Championship alternative goal O/U lines data loader.
 
-Loads Betfair exchange odds for multiple goal lines (0.5, 1.5, 2.5, 3.5, 4.5, 5.5)
-and merges with the main pipeline data for backtesting.
+Loads Betfair exchange odds for multiple goal lines (0.5, 1.5, 2.5, 3.5, 4.5)
+from the shared betfair_goal_ou.csv and merges with the Championship pipeline
+data for backtesting.
 
-Data source: betfair_goal_ou.csv (extracted by extract_goal_odds.py)
+Mirrors alt_lines_data.py (PL version) but filters to EFL teams.
 """
 import os
 import re
 import logging
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -25,7 +25,7 @@ def _parse_event_name(event_name: str) -> tuple[str | None, str | None]:
     """Parse 'Home Team v Away Team' from Betfair event name.
 
     Args:
-        event_name: Betfair event name, e.g. 'Arsenal v Chelsea'.
+        event_name: Betfair event name, e.g. 'Burnley v Leeds'.
 
     Returns:
         Tuple of (home_team, away_team) normalized, or (None, None).
@@ -36,15 +36,18 @@ def _parse_event_name(event_name: str) -> tuple[str | None, str | None]:
     return normalize(parts[0].strip()), normalize(parts[1].strip())
 
 
-def load_betfair_goal_odds(path: str | None = None) -> pd.DataFrame:
-    """Load and clean Betfair goal O/U odds from extracted CSV.
+def load_betfair_efl_goal_odds(path: str | None = None) -> pd.DataFrame:
+    """Load and clean Betfair goal O/U odds for EFL Championship.
+
+    Loads from the shared betfair_goal_ou.csv (all GB football) and
+    filters to Championship teams only.
 
     Args:
         path: Path to betfair_goal_ou.csv. Uses default if None.
 
     Returns:
         DataFrame with columns: Home_Team, Away_Team, DateOnly, goal_line,
-        Over_Odds, Under_Odds, Winner, market_type.
+        Over_Odds, Under_Odds, Winner.
     """
     if path is None:
         path = DATA_PATH
@@ -100,10 +103,12 @@ def load_betfair_goal_odds(path: str | None = None) -> pd.DataFrame:
     mask_no_over = df["Over_Odds"].isna() & df["Under_Odds"].notna()
     mask_no_under = df["Under_Odds"].isna() & df["Over_Odds"].notna()
     df.loc[mask_no_over, "Over_Odds"] = (
-        df.loc[mask_no_over, "Under_Odds"] / (df.loc[mask_no_over, "Under_Odds"] - 1)
+        df.loc[mask_no_over, "Under_Odds"]
+        / (df.loc[mask_no_over, "Under_Odds"] - 1)
     )
     df.loc[mask_no_under, "Under_Odds"] = (
-        df.loc[mask_no_under, "Over_Odds"] / (df.loc[mask_no_under, "Over_Odds"] - 1)
+        df.loc[mask_no_under, "Over_Odds"]
+        / (df.loc[mask_no_under, "Over_Odds"] - 1)
     )
 
     # Drop rows without odds
@@ -116,53 +121,83 @@ def load_betfair_goal_odds(path: str | None = None) -> pd.DataFrame:
     # Rename winner column
     df["Winner"] = df["winner"].str.lower()
 
-    # Select and rename
+    # Goal line as float
     df["goal_line"] = df["goal_line"].astype(float)
 
     result = df[[
-        "Home_Team", "Away_Team", "DateOnly", "goal_line", "market_type",
+        "Home_Team", "Away_Team", "DateOnly", "goal_line",
         "Over_Odds", "Under_Odds", "Winner",
-        "over_ltp_first", "under_ltp_first",
     ]].copy()
 
-    logger.info(f"Cleaned: {len(result)} records across "
-                f"{result['goal_line'].nunique()} lines")
+    logger.info(
+        f"Cleaned: {len(result)} records across "
+        f"{result['goal_line'].nunique()} lines"
+    )
     return result
 
 
-def _get_epl_teams() -> set[str]:
-    """Get set of EPL team names from the main pipeline data."""
-    from pipeline import load_data
-    df = load_data()
-    return set(df["Home_Team"].unique()) | set(df["Away_Team"].unique())
+def _build_betfair_to_pipeline_map(
+    pipeline_df: pd.DataFrame,
+) -> dict[str, str]:
+    """Build a mapping from Betfair normalized names to pipeline short names.
 
+    The championship pipeline uses short names from Football-Data.org CSVs
+    (e.g. "Blackburn", "Cardiff") while Betfair event names normalize to
+    long forms (e.g. "Blackburn Rovers FC", "Cardiff City FC").
 
-def load_and_merge(pipeline_df: pd.DataFrame,
-                   path: str | None = None) -> pd.DataFrame:
-    """Load Betfair goal odds and merge with pipeline data.
-
-    Adds Over_Odds_{line} and Under_Odds_{line} columns for each goal line
-    available in the Betfair data.
+    This builds the reverse mapping: normalize(short_name) → short_name
+    so Betfair names can be converted to pipeline names for the merge.
 
     Args:
-        pipeline_df: DataFrame from run_pipeline() with DateOnly column.
+        pipeline_df: DataFrame with Home_Team/Away_Team in pipeline format.
+
+    Returns:
+        Dict mapping normalized names to pipeline short names.
+    """
+    pipe_teams = set(pipeline_df["Home_Team"].unique()) | set(
+        pipeline_df["Away_Team"].unique()
+    )
+    return {normalize(t): t for t in pipe_teams}
+
+
+def load_and_merge(
+    pipeline_df: pd.DataFrame,
+    path: str | None = None,
+) -> pd.DataFrame:
+    """Load Betfair goal odds and merge with Championship pipeline data.
+
+    Handles the name format mismatch: Betfair uses long names
+    ("Blackburn Rovers FC") while the pipeline uses short names
+    ("Blackburn"). Builds a reverse mapping via ``normalize()`` to
+    convert Betfair names to pipeline format before merging.
+
+    Args:
+        pipeline_df: DataFrame from championship_pipeline.run_pipeline()
+            with DateOnly column.
         path: Path to betfair_goal_ou.csv.
 
     Returns:
-        Pipeline DataFrame with Betfair odds columns merged.
+        Pipeline DataFrame with BF_Over_{line}, BF_Under_{line},
+        BF_Winner_{line} columns merged for each available goal line.
     """
-    odds_df = load_betfair_goal_odds(path)
+    odds_df = load_betfair_efl_goal_odds(path)
 
-    # Filter to EPL teams only
-    epl_teams = set(pipeline_df["Home_Team"].unique()) | set(
+    # Convert Betfair normalized names → pipeline short names
+    name_map = _build_betfair_to_pipeline_map(pipeline_df)
+    odds_df["Home_Team"] = odds_df["Home_Team"].map(name_map)
+    odds_df["Away_Team"] = odds_df["Away_Team"].map(name_map)
+    odds_df = odds_df.dropna(subset=["Home_Team", "Away_Team"])
+
+    # Filter to EFL teams from the pipeline
+    efl_teams = set(pipeline_df["Home_Team"].unique()) | set(
         pipeline_df["Away_Team"].unique()
     )
     odds_df = odds_df[
-        odds_df["Home_Team"].isin(epl_teams) &
-        odds_df["Away_Team"].isin(epl_teams)
+        odds_df["Home_Team"].isin(efl_teams)
+        & odds_df["Away_Team"].isin(efl_teams)
     ].copy()
 
-    logger.info(f"EPL-filtered: {len(odds_df)} records")
+    logger.info(f"EFL-filtered: {len(odds_df)} records")
 
     # Ensure DateOnly is comparable
     if "DateOnly" not in pipeline_df.columns:
@@ -176,8 +211,8 @@ def load_and_merge(pipeline_df: pd.DataFrame,
 
     for line in lines:
         line_df = odds_df[odds_df["goal_line"] == line][[
-            "Home_Team", "Away_Team", "DateOnly", "Over_Odds", "Under_Odds",
-            "Winner",
+            "Home_Team", "Away_Team", "DateOnly",
+            "Over_Odds", "Under_Odds", "Winner",
         ]].copy()
         line_str = f"{line:.1f}".replace(".", "")  # e.g. "25" for 2.5
         line_df = line_df.rename(columns={
@@ -187,7 +222,7 @@ def load_and_merge(pipeline_df: pd.DataFrame,
         })
         # Drop duplicates on merge keys
         line_df = line_df.drop_duplicates(
-            subset=["Home_Team", "Away_Team", "DateOnly"], keep="last"
+            subset=["Home_Team", "Away_Team", "DateOnly"], keep="last",
         )
 
         merged = merged.merge(
@@ -208,33 +243,18 @@ def load_and_merge(pipeline_df: pd.DataFrame,
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("  Betfair Goal O/U Data Loader")
+    print("  EFL Championship Betfair Goal O/U Data Loader")
     print("=" * 60)
 
     try:
-        df = load_betfair_goal_odds()
+        df = load_betfair_efl_goal_odds()
     except FileNotFoundError as e:
         print(f"\n{e}")
-        print("Run: python extract_goal_odds.py")
         exit(1)
 
-    print(f"\nTotal records: {len(df)}")
+    print(f"\nTotal records (all GB): {len(df)}")
     print(f"Date range: {df['DateOnly'].min()} to {df['DateOnly'].max()}")
 
     print(f"\nRecords per goal line:")
     for line, count in df.groupby("goal_line").size().items():
         print(f"  O/U {line}: {count}")
-
-    # EPL filtering
-    epl_teams = _get_epl_teams()
-    epl_df = df[
-        df["Home_Team"].isin(epl_teams) & df["Away_Team"].isin(epl_teams)
-    ]
-    print(f"\nEPL records: {len(epl_df)}")
-    print(f"EPL records per goal line:")
-    for line, count in epl_df.groupby("goal_line").size().items():
-        print(f"  O/U {line}: {count}")
-
-    # Check settlement coverage
-    settled = epl_df[epl_df["Winner"].isin(["over", "under"])]
-    print(f"\nSettled matches: {len(settled)}/{len(epl_df)}")

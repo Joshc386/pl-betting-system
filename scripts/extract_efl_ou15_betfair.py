@@ -197,6 +197,7 @@ def main() -> int:
     out_cols = [
         "Date", "SeasonIndex", "Home_Team", "Away_Team",
         "over_ltp", "under_ltp", "over_ltp_first", "under_ltp_first",
+        "over_ltp_pre", "under_ltp_pre",
         "market_time", "settled_time", "Over_Goals",
     ]
     out = matched[out_cols].sort_values(["Date", "Home_Team"]).reset_index(drop=True)
