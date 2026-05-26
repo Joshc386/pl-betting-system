@@ -482,10 +482,9 @@ EFL_ALT_LINES_OVER_ONLY = False  # both sides have edge in EFL
 #
 # 2025-26 timeline:
 #   - EFL season ended ~2026-05-02 → EFL_RETRAIN_ENABLED set False
-#   - PL season ends ~2026-05-23   → flip PL_RETRAIN_ENABLED False after
-#                                    final settlement
+#   - PL season ended ~2026-05-25  → PL_RETRAIN_ENABLED set False
 #   - Both restart ~mid-August 2026 → flip both back to True end-of-July
-PL_RETRAIN_ENABLED = True
+PL_RETRAIN_ENABLED = False
 EFL_RETRAIN_ENABLED = False
 
 # ── Selective Market Targeting ──

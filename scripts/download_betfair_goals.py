@@ -20,7 +20,7 @@ from pathlib import Path
 import betfairlightweight
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 # ── Configuration ──
 USERNAME = os.environ.get("BETFAIR_USERNAME", "")
@@ -54,13 +54,15 @@ def create_client() -> betfairlightweight.APIClient:
         print("Required: BETFAIR_USERNAME, BETFAIR_PASSWORD, BETFAIR_APP_KEY")
         sys.exit(1)
 
+    certs_dir = os.path.join(os.path.dirname(__file__), "..", "certs")
     client = betfairlightweight.APIClient(
         username=USERNAME,
         password=PASSWORD,
         app_key=APP_KEY,
+        certs=certs_dir,
     )
 
-    print("Logging in to Betfair...")
+    print("Logging in to Betfair (cert-based)...")
     try:
         client.login()
         print("  Login successful.\n")

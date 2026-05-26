@@ -1,6 +1,7 @@
 .env
 __pycache__/
 *.pyc
+certs/
 
 # Data files (too large / generated / sensitive)
 data/odds_cache.json
