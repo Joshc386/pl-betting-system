@@ -37,8 +37,8 @@ class TestStackerSaveLoad:
         # Set stacker state
         stacker = LogisticRegression(C=1.0, max_iter=100, random_state=42)
         # Fit on dummy data so it's a valid model
-        X_dummy = np.array([[0.5, 0.5, 0.5], [0.6, 0.6, 0.6],
-                            [0.4, 0.4, 0.4], [0.7, 0.3, 0.5]])
+        X_dummy = np.array([[0.5, 0.5, 0.5, 0.5], [0.6, 0.6, 0.6, 0.6],
+                            [0.4, 0.4, 0.4, 0.4], [0.7, 0.3, 0.5, 0.4]])
         y_dummy = np.array([1, 1, 0, 0])
         stacker.fit(X_dummy, y_dummy)
         predictor._ou_stacker = stacker
@@ -52,7 +52,7 @@ class TestStackerSaveLoad:
         assert loaded._ou_stacker is not None
         assert abs(loaded._ou_logit_shift - 0.1234) < 1e-6
         # Verify stacker produces same output
-        test_input = np.array([[0.55, 0.55, 0.55]])
+        test_input = np.array([[0.55, 0.55, 0.55, 0.55]])
         orig = predictor._ou_stacker.predict_proba(test_input)[:, 1]
         reloaded = loaded._ou_stacker.predict_proba(test_input)[:, 1]
         assert abs(orig[0] - reloaded[0]) < 1e-8
@@ -113,9 +113,9 @@ class TestPredictOUCalibration:
 
         # Real stacker
         stacker = LogisticRegression(C=1.0, max_iter=100, random_state=42)
-        X = np.array([[0.5, 0.5, 0.5], [0.6, 0.6, 0.6],
-                      [0.4, 0.4, 0.4], [0.7, 0.7, 0.7],
-                      [0.3, 0.3, 0.3], [0.55, 0.55, 0.55]])
+        X = np.array([[0.5, 0.5, 0.5, 0.5], [0.6, 0.6, 0.6, 0.6],
+                      [0.4, 0.4, 0.4, 0.4], [0.7, 0.7, 0.7, 0.7],
+                      [0.3, 0.3, 0.3, 0.3], [0.55, 0.55, 0.55, 0.55]])
         y = np.array([1, 1, 0, 1, 0, 1])
         stacker.fit(X, y)
         p._ou_stacker = stacker
