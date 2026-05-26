@@ -1269,7 +1269,7 @@ def walk_forward_cv(full_df, features, min_train_season=14, start_val_season=19,
     valid_seasons = [s for s in all_seasons if s >= min_train_season]
 
     fold_metrics = []
-    oof_records = []  # (season, idx, xgb_prob, lgb_prob, dc_prob, y_true)
+    oof_records = []  # (season, idx, xgb_prob, lgb_prob, lr_prob, dc_prob, y_true)
 
     for val_season in range(start_val_season, max(valid_seasons) + 1):
         train_df = full_df[(full_df["SeasonIndex"] >= min_train_season) &
@@ -1292,13 +1292,19 @@ def walk_forward_cv(full_df, features, min_train_season=14, start_val_season=19,
         lgb_m = train_lgb(X_tr, y_tr, X_v, y_v, feature_names=features)
         lgb_p = lgb_m.predict_proba(pd.DataFrame(X_v, columns=features))[:, 1]
 
+        # Logistic Regression
+        lr_m, lr_scaler = train_logreg(X_tr, y_tr)
+        X_v_filled, _ = _fill_nan_median(X_v, medians=lr_m._col_medians)
+        X_v_scaled = _clip_scaled(lr_scaler.transform(X_v_filled))
+        lr_p = lr_m.predict_proba(X_v_scaled)[:, 1]
+
         # Dixon-Coles (uses team attack/defence ratings — fundamentally different model)
         dc_m = DixonColesPredictor(**dc_kwargs)
         dc_m.fit(train_df)
         dc_p = dc_m.predict_proba_df(val_df)
 
-        # Simple average for fold evaluation (3 models)
-        avg_p = (xgb_p + lgb_p + dc_p) / 3
+        # Simple average for fold evaluation (4 models)
+        avg_p = (xgb_p + lgb_p + lr_p + dc_p) / 4
         fold_auc = roc_auc_score(y_v, avg_p)
         fold_acc = accuracy_score(y_v, (avg_p > 0.5).astype(int))
         fold_brier = brier_score_loss(y_v, avg_p)
@@ -1314,7 +1320,7 @@ def walk_forward_cv(full_df, features, min_train_season=14, start_val_season=19,
         for i, idx in enumerate(val_df.index):
             oof_records.append({
                 "idx": idx, "season": val_season,
-                "xgb": xgb_p[i], "lgb": lgb_p[i], "dc": dc_p[i],
+                "xgb": xgb_p[i], "lgb": lgb_p[i], "lr": lr_p[i], "dc": dc_p[i],
                 "y": y_v[i],
             })
 

@@ -3,7 +3,8 @@ Backtest: Walk-forward evaluation of model profitability against Bet365 odds.
 
 Architecture:
   - 4 base models: XGBoost + LightGBM + Logistic Regression + Dixon-Coles
-  - Per-model logit-shift calibration (anchored to recent 2-season base rate)
+  - LogReg stacker meta-learner on walk-forward OOF predictions (all 4 base models)
+  - Logit-shift calibration (anchored to recent 2-season base rate)
   - Model-market blend: final_prob = w*model + (1-w)*market (shrinkage toward bookmaker)
   - Model agreement gating: only bet when N+ models agree on direction vs market
   - Kelly-fraction sizing with configurable cap
@@ -18,8 +19,10 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score
 from pipeline import run_pipeline
+from sklearn.linear_model import LogisticRegression as _StackerLR
 from model import (train_xgb, train_lgb, train_logreg, _fill_nan_median,
-                    _clip_scaled, DixonColesPredictor, tune_dc_params)
+                    _clip_scaled, DixonColesPredictor, tune_dc_params,
+                    walk_forward_cv)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -294,7 +297,43 @@ def backtest_season(train_df, test_df, features, config=None, dc_kwargs=None,
     lr_cal = np.array([_calibrate_single(p, lr_shift) for p in lr_raw])
     dc_cal = np.array([_calibrate_single(p, dc_shift) for p in dc_raw])
 
-    ensemble_p = (xgb_cal + lgb_cal + lr_cal + dc_cal) / 4.0
+    # Train stacker on walk-forward OOF from training data
+    _, oof_df = walk_forward_cv(
+        train_df, features,
+        min_train_season=14, start_val_season=19,
+        dc_kwargs=dc_kwargs,
+    )
+    stacker = None
+    ou_logit_shift = 0.0
+    if len(oof_df) > 100:
+        oof_stack = oof_df[["xgb", "lgb", "lr", "dc"]].values
+        oof_y = oof_df["y"].values
+        stacker = _StackerLR(C=1.0, max_iter=1000, random_state=42)
+        stacker.fit(oof_stack, oof_y)
+
+        # Logit-shift calibration on validation partition
+        val_mask = train_df["SeasonIndex"] == last_season
+        val_df_cal = train_df[val_mask]
+        xgb_val_p = xgb_m.predict_proba(val_df_cal[features].values)[:, 1]
+        lgb_val_p = lgb_m.predict_proba(
+            pd.DataFrame(val_df_cal[features].values, columns=features))[:, 1]
+        lr_val_p = _lr_predict(lr_m, lr_scaler, val_df_cal[features].values)
+        dc_val_p = dc_m.predict_proba_df(val_df_cal)
+        val_stack = np.column_stack([xgb_val_p, lgb_val_p, lr_val_p, dc_val_p])
+        stacker_val_raw = stacker.predict_proba(val_stack)[:, 1]
+        val_mean_logit = np.mean(
+            np.log(stacker_val_raw / (1 - stacker_val_raw + 1e-10)))
+        target_logit = np.log(base_rate / (1 - base_rate + 1e-10))
+        ou_logit_shift = val_mean_logit - target_logit
+
+    # Compute ensemble probabilities via stacker
+    if stacker is not None:
+        test_stack = np.column_stack([xgb_raw, lgb_raw, lr_raw, dc_raw])
+        stacker_raw = stacker.predict_proba(test_stack)[:, 1]
+        logits = np.log(stacker_raw / (1 - stacker_raw + 1e-10))
+        ensemble_p = 1 / (1 + np.exp(-(logits - ou_logit_shift)))
+    else:
+        ensemble_p = (xgb_cal + lgb_cal + lr_cal + dc_cal) / 4.0
 
     # AUC (using initial calibration — before regime adjustments)
     y_test = test_df["Over_2_5"].values
@@ -318,6 +357,14 @@ def backtest_season(train_df, test_df, features, config=None, dc_kwargs=None,
     test_sorted = test_df.sort_values("Date").reset_index(drop=True)
     all_models_over = np.column_stack([xgb_cal, lgb_cal, lr_cal, dc_cal])
 
+    # Precompute stacker logit for regime adjustment
+    if stacker is not None:
+        test_stack_all = np.column_stack([xgb_raw, lgb_raw, lr_raw, dc_raw])
+        stacker_raw_all = stacker.predict_proba(test_stack_all)[:, 1]
+        stacker_logits_all = np.log(stacker_raw_all / (1 - stacker_raw_all + 1e-10))
+        # Store the val_mean_logit for regime re-shifting
+        val_mean_logit = ou_logit_shift + np.log(base_rate / (1 - base_rate + 1e-10))
+
     # Map sorted index back to original prediction index
     original_indices = test_df.sort_values("Date").index
     idx_map = {new_i: orig_i for new_i, orig_i in
@@ -332,16 +379,14 @@ def backtest_season(train_df, test_df, features, config=None, dc_kwargs=None,
         # Update regime detector with this match's actual result
         regime.update(actual)
 
-        # If regime has shifted, recalibrate for this match
+        # Per-model predictions for agreement voting (always uses calibrated)
         if use_regime and regime.regime_shift_detected():
             adj_rate = regime.get_adjusted_base_rate()
-            # Recompute shifts with adjusted base rate
             _, xgb_s_adj = _calibrate(xgb_raw, adj_rate)
             _, lgb_s_adj = _calibrate(lgb_raw, adj_rate)
             _, lr_s_adj = _calibrate(lr_raw, adj_rate)
             _, dc_s_adj = _calibrate(dc_raw, adj_rate)
 
-            # Recalibrate this match's predictions
             xgb_p = _calibrate_single(xgb_raw[pred_idx], xgb_s_adj)
             lgb_p = _calibrate_single(lgb_raw[pred_idx], lgb_s_adj)
             lr_p = _calibrate_single(lr_raw[pred_idx], lr_s_adj)
@@ -354,7 +399,18 @@ def backtest_season(train_df, test_df, features, config=None, dc_kwargs=None,
             dc_p = dc_cal[pred_idx]
 
         per_model = np.array([xgb_p, lgb_p, lr_p, dc_p])
-        model_over = per_model.mean()
+
+        # Ensemble probability via stacker (with regime-adjusted logit-shift)
+        if stacker is not None:
+            logit_i = stacker_logits_all[pred_idx]
+            if use_regime and regime.regime_shift_detected():
+                adj_target = np.log(adj_rate / (1 - adj_rate + 1e-10))
+                shift_i = val_mean_logit - adj_target
+            else:
+                shift_i = ou_logit_shift
+            model_over = float(1 / (1 + np.exp(-(logit_i - shift_i))))
+        else:
+            model_over = per_model.mean()
         model_under = 1 - model_over
 
         odds_over = row.get("B365Greater2.5", np.nan)

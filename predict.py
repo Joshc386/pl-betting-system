@@ -397,7 +397,7 @@ class LivePredictor:
         )
 
         if len(oof_df) > 100:
-            oof_stack = oof_df[["xgb", "lgb", "dc"]].values
+            oof_stack = oof_df[["xgb", "lgb", "lr", "dc"]].values
             oof_y = oof_df["y"].values
 
             self._ou_stacker = LogisticRegression(
@@ -409,7 +409,8 @@ class LivePredictor:
             self._log(f"  Stacker OOF AUC: {oof_auc:.4f}")
             self._log(f"  Stacker coefs: XGB={self._ou_stacker.coef_[0][0]:.3f}, "
                        f"LGB={self._ou_stacker.coef_[0][1]:.3f}, "
-                       f"DC={self._ou_stacker.coef_[0][2]:.3f}")
+                       f"LR={self._ou_stacker.coef_[0][2]:.3f}, "
+                       f"DC={self._ou_stacker.coef_[0][3]:.3f}")
 
             # Logit-shift calibration: compute on validation set (last season)
             val_df = train_df[es_val_mask]
@@ -419,7 +420,9 @@ class LivePredictor:
                 pd.DataFrame(val_df[self._ou_features].values,
                              columns=self._ou_features))[:, 1]
             dc_val_p = ou_dc.predict_proba_df(val_df)
-            val_stack = np.column_stack([xgb_val_p, lgb_val_p, dc_val_p])
+            lr_val_p = _lr_predict(ou_lr, ou_lr_scaler,
+                                   val_df[self._ou_features].values)
+            val_stack = np.column_stack([xgb_val_p, lgb_val_p, lr_val_p, dc_val_p])
             stacker_val_raw = self._ou_stacker.predict_proba(val_stack)[:, 1]
 
             val_mean_logit = np.mean(
@@ -579,11 +582,8 @@ class LivePredictor:
         dc_raw = float(m["dc"].predict_proba_df(
             fixture_row.to_frame().T)[0])
 
-        # Stacker path: feed XGB + LGB + DC into logistic meta-learner,
-        # then apply logit-shift to correct mean probability drift.
-        # This is equivalent to model.py's EnsembleModel.predict_proba().
         if self._ou_stacker is not None:
-            base = np.array([[xgb_raw, lgb_raw, dc_raw]])
+            base = np.array([[xgb_raw, lgb_raw, lr_raw, dc_raw]])
             stacker_p = float(
                 self._ou_stacker.predict_proba(base)[:, 1][0])
             # Apply logit-shift calibration
