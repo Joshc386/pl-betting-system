@@ -162,9 +162,14 @@ def _join_and_write(
     out_cols = [
         "Date", "SeasonIndex", "Home_Team", "Away_Team",
         "yes_ltp", "no_ltp", "yes_ltp_first", "no_ltp_first",
-        "yes_ltp_pre", "no_ltp_pre",
-        "market_time", "settled_time", "BTTS_Result",
     ]
+    # _pre columns were added by the extract_btts_odds.py "A5" fix and may
+    # be absent in master CSVs that pre-date it. Mirror the defensive
+    # pattern used in alt_lines_data.py / generate_oof_cache.py so the
+    # split scripts don't crash when the master CSV is missing them.
+    if "yes_ltp_pre" in merged.columns:
+        out_cols += ["yes_ltp_pre", "no_ltp_pre"]
+    out_cols += ["market_time", "settled_time", "BTTS_Result"]
     out = merged[out_cols].sort_values(["Date", "Home_Team"]).reset_index(drop=True)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(output_csv, index=False)

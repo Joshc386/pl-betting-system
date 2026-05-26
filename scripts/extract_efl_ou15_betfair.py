@@ -197,9 +197,14 @@ def main() -> int:
     out_cols = [
         "Date", "SeasonIndex", "Home_Team", "Away_Team",
         "over_ltp", "under_ltp", "over_ltp_first", "under_ltp_first",
-        "over_ltp_pre", "under_ltp_pre",
-        "market_time", "settled_time", "Over_Goals",
     ]
+    # _pre columns were added by the extract_goal_odds.py "A5" fix and
+    # may be absent in master CSVs that pre-date it. Mirror the defensive
+    # pattern used in alt_lines_data.py / generate_oof_cache.py so the
+    # split script doesn't crash when the master CSV is missing them.
+    if "over_ltp_pre" in matched.columns:
+        out_cols += ["over_ltp_pre", "under_ltp_pre"]
+    out_cols += ["market_time", "settled_time", "Over_Goals"]
     out = matched[out_cols].sort_values(["Date", "Home_Team"]).reset_index(drop=True)
     OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     out.to_csv(OUTPUT_CSV, index=False)
