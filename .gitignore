@@ -44,7 +44,14 @@ data/weather_cache.csv
 logs/
 
 # IDE / editor
-.claude/
+# Claude Code: track project-local agents, commands, and skills only.
+# Everything else under .claude/ (worktrees, all settings, locks, runtime
+# state) stays local — settings may hold machine-specific paths/permissions.
+.claude/*
+!.claude/agents/
+!.claude/commands/
+!.claude/skills/
+.claude/agents/*.json
 .vscode/
 *.swp
 
