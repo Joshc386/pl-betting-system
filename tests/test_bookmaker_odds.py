@@ -120,6 +120,41 @@ class TestExtractBookmakerOdds:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Best-odds consensus (zero-price robustness)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestGetBestOdds:
+    """get_best_odds must survive bookmakers that report 0 for the 2.5 line."""
+
+    def test_zero_priced_book_does_not_crash_consensus(self) -> None:
+        """An alt-only bookmaker reporting over=under=0 (no 2.5 price) must
+        be excluded from the consensus, not trigger a ZeroDivisionError."""
+        from api.odds_api import get_best_odds
+        match = {
+            "bookmakers": {
+                "pinnacle": {"over": 1.95, "under": 1.95, "title": "Pinnacle"},
+                "altonly": {"over": 0, "under": 0, "title": "AltOnly"},
+            }
+        }
+        result = get_best_odds(match)  # must not raise
+        assert result is not None
+        assert result["best_over"] == 1.95
+        assert result["best_under"] == 1.95
+        # Consensus is normalised and computed only from the valid book.
+        assert result["consensus_over"] + result["consensus_under"] == pytest.approx(1.0)
+
+    def test_all_books_zero_priced_returns_none(self) -> None:
+        """If no bookmaker priced the 2.5 line, there is no usable market."""
+        from api.odds_api import get_best_odds
+        match = {
+            "bookmakers": {
+                "altonly": {"over": 0, "under": 0, "title": "AltOnly"},
+            }
+        }
+        assert get_best_odds(match) is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Championship Team Resolution
 # ═══════════════════════════════════════════════════════════════════════════════
 

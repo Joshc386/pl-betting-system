@@ -597,9 +597,16 @@ def get_best_odds(match):
             pinnacle_over = over
             pinnacle_under = under
 
-    # Market consensus: median implied probability across all books
-    over_implied = [1.0 / o for o in all_over]
-    under_implied = [1.0 / u for u in all_under]
+    # Market consensus: median implied probability across books that actually
+    # priced this line. Alt-only books can report 0 for a line they do not
+    # offer; including them would divide by zero and distort the median, so
+    # exclude any non-positive odds (valid decimal odds are always > 1).
+    valid_over = [o for o in all_over if o > 1]
+    valid_under = [u for u in all_under if u > 1]
+    if not valid_over or not valid_under:
+        return None
+    over_implied = [1.0 / o for o in valid_over]
+    under_implied = [1.0 / u for u in valid_under]
     consensus_over = np.median(over_implied)
     consensus_under = np.median(under_implied)
     # Normalise to remove overround
@@ -627,8 +634,8 @@ def get_best_odds(match):
         "consensus_over": consensus_over,
         "consensus_under": consensus_under,
         "n_books": len(books),
-        "median_over": float(np.median(all_over)),
-        "median_under": float(np.median(all_under)),
+        "median_over": float(np.median(valid_over)),
+        "median_under": float(np.median(valid_under)),
     }
 
 
