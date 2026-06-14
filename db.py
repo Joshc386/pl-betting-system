@@ -775,6 +775,27 @@ def save_recommendations(recs: list[dict], league: str = "PL") -> int:
                 (r["home_team"], r["away_team"], r["market"], r["side"]),
             ).fetchone()
             if existing:
+                # KO-1h re-scan: refresh the existing unsettled row in place so
+                # late-scan price/edge/stake moves are not lost. An update is
+                # not a new pick, so it is not counted in the return value.
+                conn.execute(
+                    """UPDATE recommendations SET
+                         kickoff=?, model_prob=?, blended_prob=?, fair_prob=?,
+                         odds=?, edge=?, ev=?, stake_pct=?, confidence=?,
+                         best_bookmaker=?, n_books=?, n_agree=?, per_model_json=?
+                       WHERE id=?""",
+                    (
+                        r.get("kickoff", ""),
+                        r.get("model_prob"), r.get("blended_prob"),
+                        r.get("fair_prob"),
+                        r["odds"], r.get("edge"), r.get("ev"),
+                        r.get("stake_pct"), r.get("confidence"),
+                        r.get("best_bookmaker"),
+                        r.get("n_books"), r.get("n_agree"),
+                        json.dumps(r.get("per_model_probs", {})),
+                        existing[0],
+                    ),
+                )
                 continue
             conn.execute(
                 """INSERT INTO recommendations

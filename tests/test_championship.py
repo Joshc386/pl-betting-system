@@ -536,17 +536,31 @@ class TestDashboardEFL:
         stored = json.loads(df.iloc[0]["bookmaker_odds_json"])
         assert stored == bm_odds
 
-    def test_save_replaces_previous_data(self):
+    def test_save_replaces_same_fixture_preserves_others(self):
+        """Per-fixture replace: re-scanning a fixture replaces only its own
+        rows; fixtures absent from the new scan are preserved. This guards
+        against a depleted API cache wiping out good data (see
+        save_match_analysis docstring)."""
         from db import save_match_analysis, get_match_analysis
-        rows1 = [{"home_team": "A", "away_team": "B", "market": "ou25",
-                   "side": "over"}]
-        rows2 = [{"home_team": "C", "away_team": "D", "market": "btts",
-                   "side": "yes"}]
-        save_match_analysis(rows1, league="EFL")
-        save_match_analysis(rows2, league="EFL")
+        save_match_analysis(
+            [{"home_team": "A", "away_team": "B", "market": "ou25",
+              "side": "over", "best_odds": 1.90}], league="EFL")
+        save_match_analysis(
+            [{"home_team": "C", "away_team": "D", "market": "btts",
+              "side": "yes", "best_odds": 2.00}], league="EFL")
+        # The C/D scan must NOT wipe the A/B fixture.
         df = get_match_analysis("EFL")
-        assert len(df) == 1
-        assert df.iloc[0]["home_team"] == "C"
+        assert len(df) == 2
+
+        # Re-scanning A/B replaces its row in place (no duplicate), fresh odds.
+        save_match_analysis(
+            [{"home_team": "A", "away_team": "B", "market": "ou25",
+              "side": "over", "best_odds": 1.70}], league="EFL")
+        df = get_match_analysis("EFL")
+        assert len(df) == 2  # still two fixtures; A/B replaced, not duplicated
+        ab = df[(df["home_team"] == "A") & (df["away_team"] == "B")]
+        assert len(ab) == 1
+        assert ab.iloc[0]["best_odds"] == 1.70
 
     def test_save_recommendations_efl(self):
         from db import save_recommendations, get_active_recommendations

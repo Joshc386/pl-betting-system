@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from dashboard import _format_market
 from db import (
-    save_recommendations, get_db, LEAGUE_DB_PATHS,
+    save_recommendations, get_active_recommendations, get_db, LEAGUE_DB_PATHS,
     log_predictions, get_predictions, toggle_prediction_taken,
 )
 
@@ -48,8 +48,7 @@ class TestSaveRecommendations:
     def _setup_temp_db(self, tmp_path):
         """Use a temporary database for each test."""
         self.db_path = str(tmp_path / "test.db")
-        patched_paths = {**LEAGUE_DB_PATHS, "PL": self.db_path}
-        self._patcher = patch("dashboard.LEAGUE_DB_PATHS", patched_paths)
+        self._patcher = patch.dict("db.LEAGUE_DB_PATHS", {"PL": self.db_path})
         self._patcher.start()
         yield
         self._patcher.stop()
@@ -87,6 +86,19 @@ class TestSaveRecommendations:
         n = save_recommendations([rec], league="PL")
         assert n == 0  # duplicate, not saved again
 
+    def test_rescan_updates_existing_recommendation(self) -> None:
+        """A KO-1h re-scan must update an existing unsettled row's odds and
+        edge in place rather than skip it, so late-scan price moves are not
+        lost. The return value still counts only NEW inserts (0 here)."""
+        save_recommendations([self._make_rec(odds=1.95, edge=0.05)], league="PL")
+        n = save_recommendations(
+            [self._make_rec(odds=2.10, edge=0.08)], league="PL")
+        assert n == 0  # update, not a new insert
+        active = get_active_recommendations(league="PL")
+        assert len(active) == 1  # row updated in place, not duplicated
+        assert active.iloc[0]["odds"] == 2.10  # odds refreshed
+        assert active.iloc[0]["edge"] == 0.08  # edge refreshed
+
     def test_different_markets_not_duplicated(self) -> None:
         save_recommendations([self._make_rec(market="ou25")], league="PL")
         n = save_recommendations([self._make_rec(market="ou15")], league="PL")
@@ -108,8 +120,7 @@ class TestPredictionTracking:
     @pytest.fixture(autouse=True)
     def _setup_temp_db(self, tmp_path):
         self.db_path = str(tmp_path / "test.db")
-        patched_paths = {**LEAGUE_DB_PATHS, "PL": self.db_path}
-        self._patcher = patch("dashboard.LEAGUE_DB_PATHS", patched_paths)
+        self._patcher = patch.dict("db.LEAGUE_DB_PATHS", {"PL": self.db_path})
         self._patcher.start()
         yield
         self._patcher.stop()
