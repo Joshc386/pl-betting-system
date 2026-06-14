@@ -24,7 +24,7 @@ OUTPUT_PATH = os.path.join(PROJECT_DIR, "CompleteDSChamp_CSV.csv")
 
 # football-data.co.uk season codes: "0001" = 2000/01, "2425" = 2024/25
 FIRST_SEASON = 0   # 2000/01
-LAST_SEASON = 24    # 2024/25
+LAST_SEASON = 25    # 2025/26
 BASE_URL = "https://www.football-data.co.uk/mmz4281/{code}/E1.csv"
 
 # Championship derbies — team names as they appear in football-data.co.uk
@@ -82,6 +82,7 @@ PROMOTED_TEAMS: dict[int, set[str]] = {
     22: {"Sheff Wed", "Ipswich", "Plymouth"},
     23: {"Leyton Orient", "Stevenage", "Carlisle"},  # approximate; adjust
     24: {"Derby", "Portsmouth", "Oxford"},  # 2024/25 promoted from L1
+    25: {"Birmingham", "Wrexham", "Charlton"},  # 2025/26 promoted from L1
 }
 
 
@@ -112,6 +113,11 @@ def download_season(season_idx: int) -> pd.DataFrame | None:
         try:
             df = pd.read_csv(cache_path, encoding="utf-8", on_bad_lines="skip")
             if len(df) > 0:
+                # Apply the same malformed-row filter as the download path,
+                # otherwise a junk row in a cached raw (e.g. E1_1415 has one
+                # all-NaN row) leaks into the canonical.
+                df = df.dropna(subset=["HomeTeam", "AwayTeam", "FTHG", "FTAG"],
+                               how="any")
                 print(f"  Season {code}: loaded from cache ({len(df)} matches)")
                 return df
         except Exception:

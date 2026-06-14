@@ -115,6 +115,8 @@ BETFAIR_TO_CANONICAL: dict[str, str] = {
     "Wigan": "Wigan",
     "Wigan Athletic": "Wigan",
     "Wolves": "Wolves",
+    "Wrexham": "Wrexham",
+    "Wrexham AFC": "Wrexham",
     "Wycombe": "Wycombe",
     "Wycombe Wanderers": "Wycombe",
 }
