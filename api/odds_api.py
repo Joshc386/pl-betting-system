@@ -26,6 +26,11 @@ SPORT = os.environ.get("ODDS_API_SPORT", "soccer_epl")
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 CACHE_FILE = os.path.join(CACHE_DIR, "odds_cache.json")
 CACHE_TTL_MINUTES = 30  # refresh every 30 mins (odds move)
+# Hard upper bound on cache age served on the API-failure fallback path.
+# Odds move constantly; serving prices older than this risks betting into
+# lines that no longer exist. Beyond this age the cache is treated as if it
+# did not exist (caller gets [] and places no bets).
+STALE_TTL_MINUTES = 90
 
 # Bookmaker tiers (for weighting/display)
 SHARP_BOOKS = {"pinnacle"}  # sharpest lines
@@ -33,10 +38,16 @@ MAJOR_BOOKS = {"betfair", "bet365", "williamhill", "unibet", "betsson"}
 
 
 def _load_cache(allow_stale: bool = False):
-    """Load cached odds if still fresh (or any cache if allow_stale).
+    """Load cached odds if within the applicable age bound.
+
+    Two age bounds apply, never unbounded: normal calls serve only cache
+    younger than ``CACHE_TTL_MINUTES`` (30); the API-failure fallback path
+    (``allow_stale=True``) serves cache younger than ``STALE_TTL_MINUTES``
+    (90). A cache with no timestamp has unknown age and is never served.
 
     Args:
-        allow_stale: If True, return cache regardless of age.
+        allow_stale: If True, apply the wider ``STALE_TTL_MINUTES`` bound
+            instead of the normal freshness bound.
     """
     if not os.path.exists(CACHE_FILE):
         return None
@@ -47,13 +58,14 @@ def _load_cache(allow_stale: bool = False):
         # Treat empty data as no cache
         if not data:
             return None
-        if allow_stale:
-            return data
         ts = cache.get("timestamp", "")
+        # Unknown age — never serve, regardless of allow_stale. We cannot
+        # confirm these odds are recent enough to bet on.
         if not ts:
             return None
         cached_at = datetime.fromisoformat(ts)
-        if datetime.now() - cached_at < timedelta(minutes=CACHE_TTL_MINUTES):
+        ttl = STALE_TTL_MINUTES if allow_stale else CACHE_TTL_MINUTES
+        if datetime.now() - cached_at < timedelta(minutes=ttl):
             return data
     except (json.JSONDecodeError, ValueError):
         pass
@@ -99,32 +111,55 @@ def _fetch_market(market_key: str) -> list[dict]:
               "or wait for monthly rollover.")
         return []
 
-    try:
-        resp = requests.get(url, params=params, timeout=15)
-        remaining = resp.headers.get("x-requests-remaining", "?")
-        used = resp.headers.get("x-requests-used", "?")
-        print(f"  Odds API [{market_key}]: {resp.status_code}, "
-              f"quota remaining: {remaining}, used: {used}")
-        # Persist the quota snapshot for the dashboard widget. Best-effort:
-        # any failure inside record_call is swallowed by the tracker itself.
-        from api.quota_tracker import record_call, _try_parse
-        record_call("odds_api",
-                    remaining=_try_parse(remaining),
-                    used=_try_parse(used))
+    # Retry transient failures (5xx, timeouts) with exponential backoff.
+    # Never retry 429 (quota) or other 4xx — those are deterministic and a
+    # retry just burns another credit. Mirrors api/oddspapi._api_get.
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            remaining = resp.headers.get("x-requests-remaining", "?")
+            used = resp.headers.get("x-requests-used", "?")
+            print(f"  Odds API [{market_key}]: {resp.status_code}, "
+                  f"quota remaining: {remaining}, used: {used}")
+            # Persist the quota snapshot for the dashboard widget. Best-effort:
+            # any failure inside record_call is swallowed by the tracker itself.
+            from api.quota_tracker import record_call, _try_parse
+            record_call("odds_api",
+                        remaining=_try_parse(remaining),
+                        used=_try_parse(used))
 
-        if resp.status_code == 429:
-            print("  WARNING: Odds API quota exceeded!")
+            if resp.status_code == 429:
+                print("  WARNING: Odds API quota exceeded!")
+                return []
+
+            if resp.status_code >= 500 and attempt < max_retries:
+                wait = 2 ** attempt
+                print(f"  Odds API [{market_key}] returned "
+                      f"{resp.status_code}, retrying in {wait}s...")
+                time.sleep(wait)
+                continue
+
+            if resp.status_code != 200:
+                print(f"  Odds API [{market_key}] error: {resp.status_code} - "
+                      f"{resp.text[:200]}")
+                return []
+
+            return resp.json()
+        except requests.Timeout:
+            if attempt < max_retries:
+                wait = 2 ** attempt
+                print(f"  Odds API [{market_key}] timed out, "
+                      f"retrying in {wait}s...")
+                time.sleep(wait)
+                continue
+            print(f"  Odds API [{market_key}] timed out after "
+                  f"{max_retries + 1} attempts")
             return []
-
-        if resp.status_code != 200:
-            print(f"  Odds API [{market_key}] error: {resp.status_code} - "
-                  f"{resp.text[:200]}")
+        except requests.RequestException as e:
+            print(f"  Odds API [{market_key}] request failed: {e}")
             return []
-
-        return resp.json()
-    except requests.RequestException as e:
-        print(f"  Odds API [{market_key}] request failed: {e}")
-        return []
+    return []
 
 
 def _fetch_event_market(event_id: str, market_key: str) -> dict | None:

@@ -3,10 +3,28 @@
 Covers:
   - _extract_bookmaker_odds for O/U and BTTS markets
   - _resolve_champ_team for newly promoted teams
+  - _load_cache stale-age bounding (item #4A)
+  - _fetch_market transient-error retry (item #4B)
 """
+import json
+from datetime import datetime, timedelta
+
 import pytest
 
 from predict import _extract_bookmaker_odds
+
+
+def _write_cache(path, *, age_minutes, data=None, omit_timestamp=False) -> None:
+    """Write a cache file aged ``age_minutes`` minutes in the past.
+
+    Mirrors the on-disk shape produced by ``api.odds_api._save_cache``.
+    """
+    payload = {"data": data if data is not None else [{"id": "evt1"}]}
+    if not omit_timestamp:
+        ts = datetime.now() - timedelta(minutes=age_minutes)
+        payload["timestamp"] = ts.isoformat()
+    with open(path, "w") as f:
+        json.dump(payload, f)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -179,6 +197,156 @@ class TestGetBestBttsOdds:
             }
         }
         assert get_best_btts_odds(match) is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Stale-cache age bounding (item #4A)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestLoadCacheStaleBound:
+    """_load_cache must never serve odds older than the bounded stale TTL."""
+
+    def test_beyond_stale_ttl_rejected_even_when_allow_stale(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A cache older than 90 min must not be served, even on the
+        API-failure fallback path. Betting on ancient odds is the failure
+        mode this guard exists to prevent."""
+        from api import odds_api
+        cache_file = tmp_path / "odds_cache.json"
+        _write_cache(cache_file, age_minutes=120)
+        monkeypatch.setattr(odds_api, "CACHE_FILE", str(cache_file))
+
+        assert odds_api._load_cache(allow_stale=True) is None
+
+    def test_fresh_cache_served_on_normal_call(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Cache younger than 30 min is served on a normal (non-stale) call."""
+        from api import odds_api
+        cache_file = tmp_path / "odds_cache.json"
+        _write_cache(cache_file, age_minutes=10, data=[{"id": "fresh"}])
+        monkeypatch.setattr(odds_api, "CACHE_FILE", str(cache_file))
+
+        assert odds_api._load_cache() == [{"id": "fresh"}]
+
+    def test_mid_age_rejected_normal_but_served_when_stale(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A 60-min cache is too old for a normal call but is the exact
+        case the fallback path exists to serve."""
+        from api import odds_api
+        cache_file = tmp_path / "odds_cache.json"
+        _write_cache(cache_file, age_minutes=60, data=[{"id": "mid"}])
+        monkeypatch.setattr(odds_api, "CACHE_FILE", str(cache_file))
+
+        assert odds_api._load_cache() is None
+        assert odds_api._load_cache(allow_stale=True) == [{"id": "mid"}]
+
+    def test_missing_timestamp_rejected(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A cache with no timestamp has unknown age — never served."""
+        from api import odds_api
+        cache_file = tmp_path / "odds_cache.json"
+        _write_cache(cache_file, age_minutes=0, omit_timestamp=True)
+        monkeypatch.setattr(odds_api, "CACHE_FILE", str(cache_file))
+
+        assert odds_api._load_cache() is None
+        assert odds_api._load_cache(allow_stale=True) is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bulk totals fetch retry (item #4B)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class _FakeResp:
+    """Minimal stand-in for a requests.Response."""
+
+    def __init__(self, status_code, json_data=None):
+        self.status_code = status_code
+        self.headers = {"x-requests-remaining": "100", "x-requests-used": "5"}
+        self.text = "error body"
+        self._json = json_data if json_data is not None else []
+
+    def json(self):
+        return self._json
+
+
+class TestFetchMarketRetry:
+    """_fetch_market retries transient 5xx/timeouts but never 429/4xx."""
+
+    @pytest.fixture
+    def patched(self, monkeypatch):
+        """Quota guardrail open, record_call/sleep neutralised, sleep spied."""
+        import requests
+        from api import odds_api, quota_tracker
+
+        monkeypatch.setattr(quota_tracker, "is_quota_safe", lambda *a, **k: True)
+        monkeypatch.setattr(quota_tracker, "record_call", lambda *a, **k: None)
+
+        sleeps: list[float] = []
+        monkeypatch.setattr(odds_api.time, "sleep", lambda s: sleeps.append(s))
+
+        def install(*responses):
+            """Queue successive requests.get results (responses or exceptions)."""
+            queue = list(responses)
+
+            def fake_get(*args, **kwargs):
+                item = queue.pop(0)
+                if isinstance(item, Exception):
+                    raise item
+                return item
+
+            monkeypatch.setattr(odds_api.requests, "get", fake_get)
+            return sleeps
+
+        install.requests = requests  # expose for Timeout construction
+        return install
+
+    def test_500_then_200_retries_and_returns_data(self, patched) -> None:
+        sleeps = patched(
+            _FakeResp(500),
+            _FakeResp(200, json_data=[{"id": "evt1"}]),
+        )
+        from api.odds_api import _fetch_market
+
+        assert _fetch_market("totals") == [{"id": "evt1"}]
+        assert sleeps == [1]  # one backoff of 2**0 == 1s
+
+    def test_timeout_then_200_retries_and_returns_data(self, patched) -> None:
+        requests = patched.requests
+        sleeps = patched(
+            requests.Timeout("slow"),
+            _FakeResp(200, json_data=[{"id": "evt2"}]),
+        )
+        from api.odds_api import _fetch_market
+
+        assert _fetch_market("totals") == [{"id": "evt2"}]
+        assert sleeps == [1]
+
+    def test_persistent_500_exhausts_retries_returns_empty(self, patched) -> None:
+        sleeps = patched(_FakeResp(500), _FakeResp(500), _FakeResp(500))
+        from api.odds_api import _fetch_market
+
+        assert _fetch_market("totals") == []
+        assert sleeps == [1, 2]  # 2**0 then 2**1, then no more retries
+
+    def test_429_returns_empty_without_retry(self, patched) -> None:
+        """A quota error is deterministic — retrying just burns a credit."""
+        sleeps = patched(_FakeResp(429))
+        from api.odds_api import _fetch_market
+
+        assert _fetch_market("totals") == []
+        assert sleeps == []
+
+    def test_4xx_returns_empty_without_retry(self, patched) -> None:
+        """4xx (e.g. 422 unsupported market) is not transient — no retry."""
+        sleeps = patched(_FakeResp(422))
+        from api.odds_api import _fetch_market
+
+        assert _fetch_market("totals") == []
+        assert sleeps == []
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
