@@ -676,9 +676,15 @@ def get_best_btts_odds(match):
             pinnacle_yes = yes_odds
             pinnacle_no = no_odds
 
-    # Market consensus: median implied probability
-    yes_implied = [1.0 / y for y in all_yes]
-    no_implied = [1.0 / n for n in all_no]
+    # Market consensus: median implied probability across books that priced
+    # this market. A book reporting 0 for yes/no would divide by zero and
+    # distort the median, so exclude any non-positive odds.
+    valid_yes = [y for y in all_yes if y > 1]
+    valid_no = [n for n in all_no if n > 1]
+    if not valid_yes or not valid_no:
+        return None
+    yes_implied = [1.0 / y for y in valid_yes]
+    no_implied = [1.0 / n for n in valid_no]
     consensus_yes = np.median(yes_implied)
     consensus_no = np.median(no_implied)
     total = consensus_yes + consensus_no
@@ -705,8 +711,8 @@ def get_best_btts_odds(match):
         "consensus_yes": consensus_yes,
         "consensus_no": consensus_no,
         "n_books": len(books),
-        "median_yes": float(np.median(all_yes)),
-        "median_no": float(np.median(all_no)),
+        "median_yes": float(np.median(valid_yes)),
+        "median_no": float(np.median(valid_no)),
     }
 
 

@@ -154,6 +154,33 @@ class TestGetBestOdds:
         assert get_best_odds(match) is None
 
 
+class TestGetBestBttsOdds:
+    """get_best_btts_odds must survive bookmakers that report 0 for BTTS."""
+
+    def test_zero_priced_book_does_not_crash_consensus(self) -> None:
+        from api.odds_api import get_best_btts_odds
+        match = {
+            "btts_bookmakers": {
+                "pinnacle": {"yes": 1.90, "no": 1.90, "title": "Pinnacle"},
+                "altonly": {"yes": 0, "no": 0, "title": "AltOnly"},
+            }
+        }
+        result = get_best_btts_odds(match)  # must not raise
+        assert result is not None
+        assert result["best_yes"] == 1.90
+        assert result["best_no"] == 1.90
+        assert result["consensus_yes"] + result["consensus_no"] == pytest.approx(1.0)
+
+    def test_all_books_zero_priced_returns_none(self) -> None:
+        from api.odds_api import get_best_btts_odds
+        match = {
+            "btts_bookmakers": {
+                "altonly": {"yes": 0, "no": 0, "title": "AltOnly"},
+            }
+        }
+        assert get_best_btts_odds(match) is None
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Championship Team Resolution
 # ═══════════════════════════════════════════════════════════════════════════════
