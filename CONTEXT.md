@@ -36,6 +36,10 @@ _Avoid_: Total, handicap
 Any Over/Under goals line that is not 2.5. Called "alternative" because O/U 2.5 is the standard line offered by every bookmaker. Alt lines have thinner liquidity, fewer bookmaker prices, and are modelled by Dixon-Coles Poisson alone (not the full ensemble).
 _Avoid_: Exotic, secondary
 
+**Monitored Market**:
+A Market the Ensemble still prices and whose outcomes are settlement-tracked for calibration (to observe whether the model over/under-estimates it), but which **never produces staked Recommendations**. A market is moved to Monitored status when its proven edge is too thin to justify the opportunity cost of tying up capital. The first Monitored Market is **EFL O/U 2.5** (~+1.2% gross ROI, likely negative after exchange commission): kept in the model for diagnostics and possible future re-activation, not bet. Contrast with an **Active (staked) Market**, which can produce Recommendations.
+_Avoid_: Paper market (acceptable synonym), dead market (it is still priced and tracked, not dead)
+
 ## Relationships
 
 - A **Bet** is the superset; all **Picks** are Bets, all **Recommendations** are Picks
@@ -182,7 +186,7 @@ The weighted combination of model probability (35%) and market fair probability 
 _Avoid_: Shrinkage (overloaded — see flagged ambiguities)
 
 **Fair Probability**:
-The market's best estimate of true probability with the bookmaker's margin (overround) removed. Pinnacle is the preferred source (sharpest book, closest to efficient). When Pinnacle is unavailable, derived via proportional de-vig of soft bookmaker odds — but edges from this fallback are discounted (80%) because the margin removal is less reliable.
+The market's best estimate of true probability with the margin (overround) removed — always an estimate of *true price*, never the raw price you execute at. Source hierarchy: **(1) Pinnacle** (preferred — sharpest book, closest to efficient); **(2) the Exchange** de-vigged back/lay midpoint (Betfair/Matchbook) when Pinnacle is unavailable or stale — sharp, but note this is also the Execution Venue, so edge measured against it is structurally limited to what you can post above the midpoint (a circularity we accept only as a fallback); **(3) proportional de-vig of soft bookmaker odds** as a last resort, with edges discounted (80%) because the margin removal is less reliable.
 _Avoid_: True probability, implied probability (the latter still includes margin)
 
 **De-vig**:
@@ -196,6 +200,22 @@ _Avoid_: Efficient (technically correct but less specific)
 **Soft (book)**:
 A bookmaker with higher overround and less efficient pricing. Soft books limit or ban winning bettors, so their odds reflect recreational money rather than informed pricing. Edges derived from de-vigging soft books are discounted (80%) because the fair probability estimate is less reliable.
 _Avoid_: Recreational book
+
+**Execution Venue**:
+Where a bet is actually placed and matched — kept conceptually distinct from the Fair Probability reference. Exchanges (Betfair, Matchbook) are the primary Execution Venue for scaling, because they do not limit winning bettors (they profit on commission regardless of who wins) and allow earlier market access. The exchange's price feeds `odds` → EV → Kelly, **net of commission** — it is *not* the Fair Probability source (except as the rank-2 fallback above), because grading a bet against the price you execute into is circular. Betfair has the deepest liquidity (matters for EFL/alt lines); Matchbook has lower commission but thinner liquidity. **Execution is advisory/manual**: the system computes Minimum Odds + Post Target and surfaces them on each Recommendation; the human places and manages the order on the Exchange. Automated order placement is explicitly out of scope — deferred behind the concurrency hardening (settlement punch-list item #5) and a future security review.
+_Avoid_: Book (a Sharp/Soft book is a price reference; an Exchange is where you transact)
+
+**Commission**:
+The fee an Exchange charges on a winning bet — the price of un-limited execution. Modelled as a first-class, per-venue config constant applied to *net winnings* (reduces effective payout odds, not stake). Working rates: **Betfair 5%** (new account, no discount earned yet) and **Matchbook 2%**. Commission surfaces in exactly two places: **(1) pre-bet** it sets the per-venue **Minimum Odds** shown on the dashboard for *both* exchanges; **(2) post-bet** it is deducted from winnings when a **logged bet** is settled, using the rate of the venue actually chosen, with that rate snapshotted onto the settled row (immutable financial record). The advisory/paper track (`recommendations`, `predictions`) is *not* commission-netted — `logged_bets` is the net-of-fees source of truth for real P&L.
+_Avoid_: Fee, vig/juice (those name the bookmaker overround, a different thing)
+
+**Minimum Odds (break-even)**:
+The commission-aware decimal odds at which a Recommendation's *net* EV equals zero, computed from the **blended probability** and the venue Commission: `O_min = 1 + (1 − p_blended) / (p_blended × (1 − c))`. A hard floor — never accept a price below it. **Computed per venue** (Betfair @ 5%, Matchbook @ 2%) and displayed for *both*, since you choose the venue offering the best price at bet time — the same bet has a higher floor on Betfair than Matchbook. It is an **execution floor for already-qualified Recommendations**, not a selection filter: the Edge and Agreement gates still decide whether a Pick becomes a Recommendation; Minimum Odds only governs the price at which you execute one.
+_Avoid_: Break-even price (acceptable synonym), fair odds (those ignore commission and use fair_prob, not blended)
+
+**Post Target (odds)**:
+The odds at which a limit order is actually posted on the Exchange — strictly *above* the Minimum Odds, chosen to preserve the required edge net of commission after allowing for fill risk and adverse selection. You post at the Post Target; the Minimum Odds is only the line you never let a chase or partial fill drag you under.
+_Avoid_: Ask price, lay price (lay is the opposite side of the exchange)
 
 ## Relationships
 
