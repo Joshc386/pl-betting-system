@@ -93,6 +93,14 @@ _Avoid_: Master file, raw data (the raw `E1_*.csv` season files are a distinct, 
 Re-running the build → pipeline-cache → retrain chain so the models learn from newer match data, **without changing any strategy logic** (blend weights, agreement thresholds, Kelly fraction, DC parameters, model architecture all stay byte-for-byte identical). A data refresh re-fits learned parameters only; it is explicitly *not* a strategy change and does not require the same approval gate. The weekly Sunday retrain is an automated data refresh.
 _Avoid_: Retrain (ambiguous — could imply architecture changes), update
 
+**Betfair GB Feed**:
+The country-wide GB Over/Under + BTTS odds extracted from Betfair **historical** data (Basic plan — last-traded-price only, **no liquidity/volume**). Stored as master CSVs (`betfair_goal_ou.csv`, `betfair_btts.csv`) spanning all GB football, refreshed monthly by an automated Task Scheduler job, then narrowed to PL/EFL via League Split. Distinct from live **exchange** odds. See `docs/betfair_ingestion_scope.md`.
+_Avoid_: Betfair data (ambiguous — could mean the live exchange feed)
+
+**League Split**:
+The derived step that filters the Betfair GB Feed down to one league's fixtures by mapping Betfair team names to the Canonical Dataset and joining on (home, away) + ±1 day. Produces `betfair_pl_*` / `betfair_efl_*` files. Unmapped names (women's, reserves, youth, non-league, overseas) are dropped silently-but-safely — a missing senior team surfaces as reduced per-season coverage, not an error.
+_Avoid_: Filter, league filter (too generic)
+
 ### Fixtures
 
 **Fixture**:
