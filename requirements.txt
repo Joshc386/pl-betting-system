@@ -19,5 +19,8 @@ python-dotenv==1.2.1
 # Scheduling
 APScheduler==3.11.2
 
+# Concurrency (cross-process settle + quota locks)
+filelock==3.25.2
+
 # Testing
 pytest==9.0.2

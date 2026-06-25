@@ -155,13 +155,19 @@ def settle_bets(days_back: int = 7, verbose: bool = True) -> dict:
                 odds = bet["odds"] or 0
                 profit = stake * (odds - 1) if won else -stake
 
-                conn.execute(
+                cur = conn.execute(
                     """UPDATE recommendations
                        SET settled=1, won=?, profit_pct=?, actual_result=?,
                            settled_at=?
-                       WHERE id=?""",
+                       WHERE id=? AND settled=0""",
                     (int(won), profit, result_str, now, bet["id"]),
                 )
+                # WAL allows concurrent readers, so another settle process may
+                # have settled this row in the window since our SELECT. Only
+                # count rows we actually transitioned 0 -> 1 — otherwise the
+                # bankroll would be credited twice for the same bet.
+                if cur.rowcount != 1:
+                    continue
 
                 league_settled += 1
                 if won:

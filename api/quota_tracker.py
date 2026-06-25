@@ -40,11 +40,22 @@ import os
 from datetime import datetime
 from typing import Optional
 
+from filelock import FileLock
+
 logger = logging.getLogger(__name__)
 
 # Resolve relative to project root regardless of cwd
 _PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 QUOTA_FILE = os.path.join(_PROJECT_DIR, "data", "api_quota.json")
+
+# Cross-process + cross-thread lock guarding the read-modify-write in
+# record_call. The OddsPapi counter (calls_this_month += 1) loses increments
+# under concurrent settle/scan paths without it. A single shared instance is
+# required: filelock only guarantees same-process thread mutual exclusion for
+# one instance (per-call instances rely on OS locks, which don't conflict
+# within a process on POSIX). Advisory tracking, so a timeout avoids hanging
+# an API path on a stuck lock — a dropped count is tolerable, a hang is not.
+_QUOTA_LOCK = FileLock(QUOTA_FILE + ".lock", timeout=10)
 
 # Documented monthly caps (free tier). Surfaced for the dashboard widget.
 QUOTA_LIMITS = {
@@ -104,26 +115,31 @@ def record_call(
         return
 
     try:
-        state = _load()
-        month = _now_month()
-        now_iso = datetime.now().isoformat(timespec="seconds")
-        entry = state.get(provider, {})
+        # Serialise the whole read-modify-write so concurrent callers can't
+        # lose increments or collide on the temp-file rename in _save.
+        with _QUOTA_LOCK:
+            state = _load()
+            month = _now_month()
+            now_iso = datetime.now().isoformat(timespec="seconds")
+            entry = state.get(provider, {})
 
-        # Rollover: clear counter when a new calendar month starts
-        if entry.get("month") != month:
-            entry = {"month": month}
+            # Rollover: clear counter when a new calendar month starts
+            if entry.get("month") != month:
+                entry = {"month": month}
 
-        if provider == "odds_api":
-            if remaining is not None:
-                entry["remaining"] = int(remaining)
-            if used is not None:
-                entry["used"] = int(used)
-        else:  # oddspapi — no header, count locally
-            entry["calls_this_month"] = int(entry.get("calls_this_month", 0)) + 1
+            if provider == "odds_api":
+                if remaining is not None:
+                    entry["remaining"] = int(remaining)
+                if used is not None:
+                    entry["used"] = int(used)
+            else:  # oddspapi — no header, count locally
+                entry["calls_this_month"] = (
+                    int(entry.get("calls_this_month", 0)) + 1
+                )
 
-        entry["last_call"] = now_iso
-        state[provider] = entry
-        _save(state)
+            entry["last_call"] = now_iso
+            state[provider] = entry
+            _save(state)
     except Exception as e:  # broad catch — tracking is advisory
         logger.warning("quota_tracker: record_call(%s) failed: %s", provider, e)
 

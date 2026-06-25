@@ -21,12 +21,21 @@ from zoneinfo import ZoneInfo
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
+from filelock import FileLock, Timeout
 
 logger = logging.getLogger("scheduler")
 UK_TZ = ZoneInfo("Europe/London")
 
 # Reference to the global scheduler instance (set in create_scheduler)
 _scheduler: BackgroundScheduler | None = None
+
+# Cross-process lock so the three settle paths — the evening/morning scheduler
+# jobs and daily_settle.bat (-> run.py settle) — never settle concurrently.
+# WAL lets concurrent settles both read settled=0 and double-count the
+# bankroll; if another settle holds this lock, the new run skips.
+_SETTLE_LOCK_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "data", "settle.lock"
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -308,9 +317,24 @@ def job_fetch_closing_odds() -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def job_settle_bets() -> None:
-    """Pull match results and settle open bets + predictions."""
-    logger.info("Starting bet settlement...")
+    """Pull match results and settle open bets + predictions.
+
+    Guarded by a cross-process lock (``_SETTLE_LOCK_PATH``): the evening/morning
+    scheduler jobs and the daily_settle.bat all funnel through here, and WAL
+    lets concurrent settles double-count the bankroll. If another settle holds
+    the lock, this run skips rather than racing it.
+    """
+    os.makedirs(os.path.dirname(_SETTLE_LOCK_PATH), exist_ok=True)
+    lock = FileLock(_SETTLE_LOCK_PATH)
     try:
+        lock.acquire(timeout=0)  # non-blocking — skip if another settle holds it
+    except Timeout:
+        logger.warning("Settlement already in progress (lock held) — skipping.")
+        print(f"[{datetime.now():%H:%M:%S}] Settlement skipped — already running.")
+        return
+
+    try:
+        logger.info("Starting bet settlement...")
         from settlement import settle_bets, settle_predictions
         summary = settle_bets(days_back=3, verbose=True)
         logger.info(f"Settlement complete: {summary}")
@@ -325,6 +349,8 @@ def job_settle_bets() -> None:
     except Exception as e:
         logger.error(f"Settlement failed: {e}", exc_info=True)
         print(f"[{datetime.now():%H:%M:%S}] Settlement FAILED: {e}")
+    finally:
+        lock.release()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -608,6 +634,12 @@ def create_scheduler() -> BackgroundScheduler:
             name=config["description"],
             replace_existing=True,
             misfire_grace_time=3600,
+            # Explicit (these are APScheduler defaults): never stack instances
+            # of one job, and collapse multiple missed runs into one — e.g. a
+            # 09:00 + 23:00 settle catch-up after the laptop wakes. Cross-job
+            # and cross-process overlap are guarded by the settle filelock.
+            max_instances=1,
+            coalesce=True,
         )
 
     _scheduler = scheduler
