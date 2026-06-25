@@ -14,6 +14,7 @@ API budget: ~150 calls/month (well within 500/month free tier).
 """
 import os
 import sys
+import subprocess
 import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -93,6 +94,44 @@ def _fetch_latest_matches() -> bool:
         return False
 
 
+def _refresh_betfair_splits() -> None:
+    """Re-derive the per-league Betfair splits from the master CSVs.
+
+    Runs the two League Split scripts (``extract_btts_by_league.py`` and
+    ``extract_efl_ou15_betfair.py``). They are pure regenerators — they read
+    the Betfair GB master CSVs + the Canonical Datasets and rewrite the
+    ``betfair_pl_*`` / ``betfair_efl_*`` files; no download, no API.
+
+    Running this in the weekly retrain keeps the splits in sync with the
+    canonical even when it is refreshed out-of-band: the monthly Betfair job
+    only re-runs the splits when it downloads new rows, which can lag a manual
+    canonical update by weeks — or months across the off-season.
+
+    Non-critical — each script's failure is logged and does not block the
+    retrain.
+    """
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    scripts_dir = os.path.join(project_dir, "scripts")
+    for name in ("extract_btts_by_league.py", "extract_efl_ou15_betfair.py"):
+        try:
+            subprocess.run(
+                [sys.executable, os.path.join(scripts_dir, name)],
+                cwd=project_dir, check=True, capture_output=True,
+                text=True, timeout=300,
+            )
+            logger.info(f"Betfair split refreshed: {name}")
+            print(f"[{datetime.now():%H:%M:%S}] Betfair split refreshed: {name}")
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Betfair split {name} failed (non-critical): "
+                           f"exit {e.returncode}; {(e.stderr or '')[:300]}")
+            print(f"[{datetime.now():%H:%M:%S}] Betfair split {name} FAILED "
+                  f"(non-critical)")
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Betfair split {name} timed out (non-critical)")
+            print(f"[{datetime.now():%H:%M:%S}] Betfair split {name} TIMED OUT "
+                  f"(non-critical)")
+
+
 def _retrain_squad_adjuster() -> None:
     """Retrain the squad availability adjuster model.
 
@@ -155,6 +194,13 @@ def job_weekly_retrain() -> None:
     # ── Data ingestion (guarantees fresh inputs before training) ──
     _fetch_latest_matches()
     _refresh_player_data()
+
+    # Re-sync the Betfair League Splits to the (possibly out-of-band updated)
+    # Canonical Datasets. Deliberately ungated by the retrain flags below so it
+    # still runs in the off-season — that's exactly when a manual canonical
+    # refresh would otherwise leave the splits stale until the next monthly
+    # Betfair download.
+    _refresh_betfair_splits()
 
     # Off-season gates: each league has an explicit boolean in config.py.
     # Skipping a league here is the supported way to pause retraining over

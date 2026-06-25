@@ -23,7 +23,7 @@ import tarfile
 from pathlib import Path
 
 
-TAR_DIR = Path(r"C:\Users\joshc\OneDrive\Documents\Project\BetFairData")
+TAR_DIR = Path(r"C:\Users\joshc\OneDrive\Documents\Project\BetFairData_OU")
 OUTPUT_DIR = Path(r"C:\Users\joshc\OneDrive\Documents\Project\data")
 OUTPUT_CSV = OUTPUT_DIR / "betfair_goal_ou.csv"
 
@@ -187,6 +187,13 @@ def _parse_bz2_bytes(raw_compressed: bytes) -> dict | None:
                 if market_type not in GOAL_MARKETS:
                     return None
                 if country_code != "GB":
+                    return None
+                # Skip Betfair test/placeholder markets that leak into the GB
+                # feed (e.g. "Test T087 v Test T088", "Team P1 v Team G2",
+                # typically far-future dated).
+                if event_name and event_name.strip().lower().startswith(
+                    ("test", "team ")
+                ):
                     return None
 
                 for r in md.get("runners", []):

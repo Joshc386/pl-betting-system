@@ -273,6 +273,10 @@ def parse_goal_ou_bz2(raw_compressed: bytes) -> dict[str, Any] | None:
                     return None
                 if country_code != "GB":
                     return None
+                if event_name and event_name.strip().lower().startswith(
+                    ("test", "team ")
+                ):
+                    return None  # Betfair test/placeholder market
 
                 for r in md.get("runners", []):
                     rid = r["id"]
@@ -395,6 +399,10 @@ def parse_btts_bz2(raw_compressed: bytes) -> dict[str, Any] | None:
                     return None
                 if country_code != "GB":
                     return None
+                if event_name and event_name.strip().lower().startswith(
+                    ("test", "team ")
+                ):
+                    return None  # Betfair test/placeholder market
 
                 for r in md.get("runners", []):
                     rid = r["id"]
