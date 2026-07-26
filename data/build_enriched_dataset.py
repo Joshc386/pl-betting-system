@@ -103,7 +103,7 @@ def merge_injuries(main_df: pd.DataFrame, injury_df: pd.DataFrame) -> pd.DataFra
     season_map = {
         16: "2016-17", 17: "2017-18", 18: "2018-19", 19: "2019-20",
         20: "2020-21", 21: "2021-22", 22: "2022-23", 23: "2023-24",
-        24: "2024-25",
+        24: "2024-25", 25: "2025-26",
     }
 
     # Build injury lookup: (fpl_season, gw, team) -> metrics
