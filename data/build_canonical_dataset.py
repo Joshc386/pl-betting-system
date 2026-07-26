@@ -1,16 +1,23 @@
 """
-Build CompleteDSChamp_CSV.csv from football-data.co.uk Championship CSVs.
+Build a league's Canonical Dataset from football-data.co.uk season CSVs.
 
-Downloads raw season CSVs (division E1, 2000/01-2024/25), maps columns to
-the PL schema, and computes all rolling features expected by the pipeline.
+Downloads raw season CSVs (division E0 for PL, E1 for EFL), maps columns to
+the canonical schema, and computes all rolling features expected by the
+pipeline. Both leagues emit the identical 72-column schema.
+
+football-data.co.uk is the sole authority for Facts in both leagues — see
+docs/adr/0004-canonical-composition-and-facts-provenance.md.
 
 Usage:
-    python data/build_championship_dataset.py
+    python data/build_canonical_dataset.py --league EFL
+    python data/build_canonical_dataset.py --league PL --output /tmp/pl_dry_run.csv
 """
 from __future__ import annotations
 
+import argparse
 import io
 import os
+import sys
 import time
 from typing import Any
 
@@ -19,16 +26,16 @@ import pandas as pd
 import requests
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RAW_DIR = os.path.join(PROJECT_DIR, "data", "championship_raw")
-OUTPUT_PATH = os.path.join(PROJECT_DIR, "CompleteDSChamp_CSV.csv")
+sys.path.insert(0, PROJECT_DIR)
 
-# football-data.co.uk season codes: "0001" = 2000/01, "2425" = 2024/25
-FIRST_SEASON = 0   # 2000/01
-LAST_SEASON = 25    # 2025/26
-BASE_URL = "https://www.football-data.co.uk/mmz4281/{code}/E1.csv"
+from api.team_mapping import normalize  # noqa: E402
+from league_config import get_league_config  # noqa: E402
 
-# Championship derbies — team names as they appear in football-data.co.uk
-DERBIES_LOCAL: set[tuple[str, str]] = {
+BASE_URL = "https://www.football-data.co.uk/mmz4281/{code}/{div}.csv"
+
+# ── EFL Championship derbies — names as they appear in football-data.co.uk ──
+# (EFL keeps source names verbatim; see _LEAGUES[...]["normalize_names"].)
+_EFL_DERBIES_LOCAL: set[tuple[str, str]] = {
     ("Sheffield Weds", "Sheffield United"),
     ("Nottm Forest", "Derby"),
     ("Leeds", "Sheffield United"),
@@ -40,7 +47,7 @@ DERBIES_LOCAL: set[tuple[str, str]] = {
     ("Watford", "Luton"),
 }
 
-DERBIES_HISTORICAL: set[tuple[str, str]] = {
+_EFL_DERBIES_HISTORICAL: set[tuple[str, str]] = {
     ("West Brom", "Wolves"),
     ("Leeds", "Sheffield Weds"),
     ("Preston", "Blackpool"),
@@ -57,7 +64,7 @@ DERBIES_HISTORICAL: set[tuple[str, str]] = {
 # Promoted teams by season index (from League One into Championship)
 # Key = season index, Value = set of team names that were promoted INTO that season.
 # Sources: historical records.  Empty seasons = no data or not yet mapped.
-PROMOTED_TEAMS: dict[int, set[str]] = {
+_EFL_PROMOTED_TEAMS: dict[int, set[str]] = {
     1:  {"Millwall", "Rotherham", "Blackpool"},
     2:  {"Wigan", "Crewe", "Cardiff"},
     3:  {"Wolves", "Plymouth", "West Ham"},
@@ -85,6 +92,89 @@ PROMOTED_TEAMS: dict[int, set[str]] = {
     25: {"Birmingham", "Wrexham", "Charlton"},  # 2025/26 promoted from L1
 }
 
+# ── Premier League derbies ──
+# In *canonical* form ("Arsenal FC"), because PL normalises team names during
+# column mapping and derby detection runs afterwards. Derived from the derby
+# flags already present in the PL canonical so a rebuild reproduces them.
+_PL_DERBIES_LOCAL: set[tuple[str, str]] = {
+    ("Arsenal FC", "Tottenham Hotspur FC"),
+    ("Aston Villa FC", "Birmingham City FC"),
+    ("Brighton & Hove Albion FC", "Crystal Palace FC"),
+    ("Chelsea FC", "Fulham FC"),
+    ("Everton FC", "Liverpool FC"),
+    ("Manchester City FC", "Manchester United FC"),
+    ("Newcastle United FC", "Sunderland AFC"),
+    ("West Bromwich Albion FC", "Wolverhampton Wanderers FC"),
+}
+
+_PL_DERBIES_HISTORICAL: set[tuple[str, str]] = {
+    ("Arsenal FC", "Chelsea FC"),
+    ("Arsenal FC", "Manchester United FC"),
+    ("Chelsea FC", "Liverpool FC"),
+    ("Chelsea FC", "Manchester United FC"),
+    ("Liverpool FC", "Manchester City FC"),
+    ("Liverpool FC", "Manchester United FC"),
+}
+
+# Promoted INTO the Premier League (from the Championship) by season index.
+# Short forms are fine — _add_promoted_flags matches on substrings, so
+# "Ipswich" resolves against the canonical "Ipswich Town FC".
+_PL_PROMOTED_TEAMS: dict[int, set[str]] = {
+    24: {"Ipswich", "Leicester", "Southampton"},   # 2024/25
+    25: {"Leeds", "Burnley", "Sunderland"},        # 2025/26
+}
+
+# ── Per-league build settings ──
+# Only what is genuinely league-specific lives here; division code, output
+# path and season range come from league_config so there is one source of truth.
+_LEAGUES: dict[str, dict[str, Any]] = {
+    "PL": {
+        "raw_dir": os.path.join(PROJECT_DIR, "data", "pl_raw"),
+        "derbies_local": _PL_DERBIES_LOCAL,
+        "derbies_historical": _PL_DERBIES_HISTORICAL,
+        "promoted": _PL_PROMOTED_TEAMS,
+        # PL canonical uses long-form names ("Arsenal FC"), so source names
+        # must be normalised on the way in.
+        "normalize_names": True,
+    },
+    "EFL": {
+        "raw_dir": os.path.join(PROJECT_DIR, "data", "championship_raw"),
+        "derbies_local": _EFL_DERBIES_LOCAL,
+        "derbies_historical": _EFL_DERBIES_HISTORICAL,
+        "promoted": _EFL_PROMOTED_TEAMS,
+        # EFL canonical uses football-data.co.uk's own short forms
+        # ("Blackburn"). Normalising would rewrite 23 of 24 names and break
+        # the ESPN/odds mappings and the Betfair League Split allowlists.
+        "normalize_names": False,
+    },
+}
+
+
+def _settings(league: str, output: str | None = None) -> dict[str, Any]:
+    """Resolve the build settings for a league.
+
+    Args:
+        league: "PL" or "EFL".
+        output: Override the output CSV path (used for dry runs).
+
+    Returns:
+        Merged settings dict.
+
+    Raises:
+        ValueError: If the league is unknown.
+    """
+    if league not in _LEAGUES:
+        raise ValueError(
+            f"Unknown league {league!r}; expected one of {sorted(_LEAGUES)}")
+    cfg = get_league_config(league)
+    settings = dict(_LEAGUES[league])
+    settings["league"] = league
+    settings["div"] = cfg["football_data_co_uk_div"]
+    settings["output_path"] = output or cfg["csv_path"]
+    settings["first_season"] = cfg["first_season_idx"]
+    settings["last_season"] = cfg["current_season_idx"]
+    return settings
+
 
 def _season_code(season_idx: int) -> str:
     """Convert season index to football-data.co.uk URL code.
@@ -96,20 +186,34 @@ def _season_code(season_idx: int) -> str:
     return f"{start:02d}{end:02d}"
 
 
-def download_season(season_idx: int) -> pd.DataFrame | None:
+def download_season(
+    season_idx: int,
+    div: str,
+    raw_dir: str,
+    use_cache: bool = True,
+) -> pd.DataFrame | None:
     """Download a single season CSV from football-data.co.uk.
+
+    Args:
+        season_idx: Season index (0 = 2000/01).
+        div: football-data.co.uk division code ("E0" PL, "E1" EFL).
+        raw_dir: Directory for the raw-CSV cache.
+        use_cache: Reuse the cached raw if present. Finished seasons are
+            immutable so caching them is always safe; the *current* season
+            gains fixtures every matchday, so its cache must be bypassed or
+            the canonical silently freezes at whenever the cache was written.
 
     Returns:
         DataFrame with raw match data, or None if download fails.
     """
     code = _season_code(season_idx)
-    url = BASE_URL.format(code=code)
+    url = BASE_URL.format(code=code, div=div)
 
-    os.makedirs(RAW_DIR, exist_ok=True)
-    cache_path = os.path.join(RAW_DIR, f"E1_{code}.csv")
+    os.makedirs(raw_dir, exist_ok=True)
+    cache_path = os.path.join(raw_dir, f"{div}_{code}.csv")
 
     # Use cached version if available
-    if os.path.exists(cache_path):
+    if use_cache and os.path.exists(cache_path):
         try:
             df = pd.read_csv(cache_path, encoding="utf-8", on_bad_lines="skip")
             if len(df) > 0:
@@ -148,14 +252,27 @@ def download_season(season_idx: int) -> pd.DataFrame | None:
     return df
 
 
-def _map_columns(df: pd.DataFrame, season_idx: int) -> pd.DataFrame:
-    """Map football-data.co.uk columns to the PL CSV schema."""
+def _map_columns(
+    df: pd.DataFrame,
+    season_idx: int,
+    normalize_names: bool = False,
+) -> pd.DataFrame:
+    """Map football-data.co.uk columns to the canonical schema.
+
+    Args:
+        df: Raw football-data.co.uk season frame.
+        season_idx: Season index to stamp on every row.
+        normalize_names: Map source team names to canonical form (PL only).
+    """
     out = pd.DataFrame()
 
     # Parse date — format varies by season (DD/MM/YY or DD/MM/YYYY)
     out["Date"] = pd.to_datetime(df["Date"], format="mixed", dayfirst=True)
     out["Home_Team"] = df["HomeTeam"].astype(str).str.strip()
     out["Away_Team"] = df["AwayTeam"].astype(str).str.strip()
+    if normalize_names:
+        out["Home_Team"] = out["Home_Team"].map(normalize)
+        out["Away_Team"] = out["Away_Team"].map(normalize)
     out["Home_Goals"] = pd.to_numeric(df["FTHG"], errors="coerce")
     out["Away_Goals"] = pd.to_numeric(df["FTAG"], errors="coerce")
     out["TG"] = out["Home_Goals"] + out["Away_Goals"]
@@ -222,12 +339,15 @@ def _is_derby(home: str, away: str, derby_set: set[tuple[str, str]]) -> bool:
     return False
 
 
-def _add_promoted_flags(df: pd.DataFrame) -> pd.DataFrame:
+def _add_promoted_flags(
+    df: pd.DataFrame,
+    promoted: dict[int, set[str]],
+) -> pd.DataFrame:
     """Add Home_Promoted and Away_Promoted columns."""
     df["Home_Promoted"] = 0
     df["Away_Promoted"] = 0
 
-    for season_idx, teams in PROMOTED_TEAMS.items():
+    for season_idx, teams in promoted.items():
         mask = df["SeasonIndex"] == season_idx
         for team in teams:
             team_low = team.lower()
@@ -241,14 +361,18 @@ def _add_promoted_flags(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _add_derby_flags(df: pd.DataFrame) -> pd.DataFrame:
+def _add_derby_flags(
+    df: pd.DataFrame,
+    derbies_local: set[tuple[str, str]],
+    derbies_historical: set[tuple[str, str]],
+) -> pd.DataFrame:
     """Add Local Derby, Historical Derby, and Not a Derby columns."""
     local = []
     historical = []
     for _, row in df.iterrows():
         h, a = row["Home_Team"], row["Away_Team"]
-        is_local = _is_derby(h, a, DERBIES_LOCAL)
-        is_hist = _is_derby(h, a, DERBIES_HISTORICAL)
+        is_local = _is_derby(h, a, derbies_local)
+        is_hist = _is_derby(h, a, derbies_historical)
         local.append(1 if is_local else 0)
         historical.append(1 if (is_hist and not is_local) else 0)
     df["Local Derby"] = local
@@ -557,20 +681,50 @@ def _add_factor(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def build() -> pd.DataFrame:
-    """Download, merge, and feature-engineer the full Championship dataset."""
-    print("=== Building Championship Dataset ===\n")
+def build(
+    league: str = "EFL",
+    output: str | None = None,
+    refresh_current_season: bool = True,
+) -> pd.DataFrame:
+    """Download, merge, and feature-engineer a league's Canonical Dataset.
+
+    A full rebuild is cheap (~17s for 26 EFL seasons off cached raws), so
+    there is deliberately no incremental-append path: an append is a second
+    implementation of the same contract and drifts from the rebuild unless
+    something forces them to agree. See ADR 0004.
+
+    Args:
+        league: "PL" or "EFL".
+        output: Override output path. Use for dry runs so the live
+            canonical is not overwritten.
+        refresh_current_season: Re-download the current season instead of
+            trusting its cache. Finished seasons are immutable and always
+            cached. Set False for hermetic (offline) test runs.
+
+    Returns:
+        The built DataFrame.
+
+    Raises:
+        RuntimeError: If no season data could be downloaded.
+    """
+    s = _settings(league, output)
+    print(f"=== Building {league} Canonical Dataset "
+          f"(division {s['div']}) ===\n")
 
     # Step 1: Download all seasons
     season_dfs: list[pd.DataFrame] = []
-    for si in range(FIRST_SEASON, LAST_SEASON + 1):
-        raw = download_season(si)
+    for si in range(s["first_season"], s["last_season"] + 1):
+        # The current season gains fixtures every matchday, so its cached raw
+        # goes stale the moment a game is played. Older seasons never change.
+        is_current = si == s["last_season"]
+        use_cache = not (is_current and refresh_current_season)
+        raw = download_season(si, s["div"], s["raw_dir"], use_cache=use_cache)
         if raw is not None and len(raw) > 0:
-            mapped = _map_columns(raw, si)
+            mapped = _map_columns(raw, si, s["normalize_names"])
             season_dfs.append(mapped)
 
     if not season_dfs:
-        raise RuntimeError("No Championship data downloaded.")
+        raise RuntimeError(f"No {league} data downloaded.")
 
     df = pd.concat(season_dfs, ignore_index=True)
     df = df.sort_values("Date").reset_index(drop=True)
@@ -590,19 +744,19 @@ def build() -> pd.DataFrame:
 
     # Step 5: Promoted flags
     print("Adding promoted flags...")
-    df = _add_promoted_flags(df)
+    df = _add_promoted_flags(df, s["promoted"])
 
     # Step 6: Derby flags
     print("Adding derby flags...")
-    df = _add_derby_flags(df)
+    df = _add_derby_flags(df, s["derbies_local"], s["derbies_historical"])
 
     # Step 7: Home/Away Factor
     print("Computing home/away factor...")
     df = _add_factor(df)
 
     # Save
-    df.to_csv(OUTPUT_PATH, index=False)
-    print(f"\nSaved to {OUTPUT_PATH}")
+    df.to_csv(s["output_path"], index=False)
+    print(f"\nSaved to {s['output_path']}")
     print(f"Shape: {df.shape}")
     print(f"Seasons: {df['SeasonIndex'].min()} - {df['SeasonIndex'].max()}")
     print(f"Unique teams: {df['Home_Team'].nunique()}")
@@ -611,5 +765,22 @@ def build() -> pd.DataFrame:
     return df
 
 
+def main() -> None:
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(
+        description="Build a league's Canonical Dataset from football-data.co.uk")
+    parser.add_argument("--league", choices=sorted(_LEAGUES), default="EFL",
+                        help="League to build (default: EFL)")
+    parser.add_argument("--output", default=None,
+                        help="Override output path — use for dry runs so the "
+                             "live canonical is not overwritten")
+    parser.add_argument("--no-refresh", action="store_true",
+                        help="Trust the cached current-season raw instead of "
+                             "re-downloading it (offline/testing)")
+    args = parser.parse_args()
+    build(league=args.league, output=args.output,
+          refresh_current_season=not args.no_refresh)
+
+
 if __name__ == "__main__":
-    build()
+    main()
