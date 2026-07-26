@@ -159,6 +159,51 @@ _Avoid_: Holdout predictions, test predictions
 
 ### Feature philosophy
 
+**Scoring Rate / Scoring Index**:
+Two related but distinct measures of how much a team scores, kept as **separate features** because they answer different questions:
+
+- **Scoring Rate** (`Home_ScoringRate_10` / `Away_ScoringRate_10`) — rolling mean goals scored over the team's last 10 matches. The absolute level.
+- **Scoring Index** (`Home_ScoringIndex_10` / `Away_ScoringIndex_10`) — that same rate divided by the **league average for that season**. Centred on 1.0, so it reads as "this team scores 20% above the division's norm".
+
+They correlate at ~0.99, so the index is not carrying much *extra* information within a season — its value is **cross-era comparability**. The league scoring environment drifts substantially over the dataset: PL ranges from 1.225 goals per team per game (season 6) to 1.637 (season 23), a **33.6% swing**, and the model trains across all 26 seasons at once. 1.4 goals a game is an above-average attack in one era and a below-average one in another; the Rate cannot express that and the Index can. This is the cross-season counterpart to **Regime**, which describes the same drift *within* a season. See [ADR 0007](docs/adr/0007-one-feature-contract-per-name.md).
+
+Retires the name **Factor**, which said nothing about what it measured and — worse — denoted the Rate in the PL canonical and the Index in the EFL one. Same column, two quantities, no way to tell from the name.
+_Avoid_: Factor, Home Factor, Away Factor (superseded — ambiguous, and historically overloaded across the two leagues)
+
+**H2H (Head-to-Head)**:
+The goal-scoring history of *this specific pairing* before the current fixture, as **two features only**: `H2H_AvgGoals_5` (mean total goals over the last 5 meetings) and `H2HAvgGoals` (mean over all prior meetings). Both are uncapped in the sense that matters — the 5 is the window, not a hard limit on history retained.
+
+Deliberately **goal averages, not results**. `H2H_HomeWins` / `H2H_AwayWins` / `H2H_Draws` were dropped: measured against total goals they sit at ±0.01–0.045 correlation, and `H2H_HomeWins` has *opposite signs* in the two leagues (+0.045 PL, −0.012 EFL) — the signature of noise plus a definitional split. They also encode **match result**, which no market this system bets actually asks about.
+
+The goal averages survive the same test: `H2HAvgGoals` correlates +0.051 (PL) and +0.022 (EFL) with total goals, and **retains +0.047 / +0.021 after team form is partialled out** — so it is not a restatement of "these two teams score a lot".
+
+Both leagues must use the same window. Previously PL capped all H2H at 5 meetings while EFL was uncapped, which made `H2H_AvgGoals_5` and `H2HAvgGoals` *the same column* in PL — a duplicate feature nobody noticed because the two implementations were never compared.
+_Avoid_: Rivalry record, historical record (both suggest results matter, which is what the evidence rejects)
+
+**Defensive Strength**:
+How well a team prevents the opposition scoring — deliberately **three separate components**, never one number, because they are driven by different things and a single score hides which one moved:
+
+- **Shot Suppression** — how few shots the team allows (volume), adjusted for the attacking strength of the opponent faced. The most Wheatcroft-aligned of the three.
+- **Chance Quality Allowed** — SOT conceded ÷ shots conceded. How dangerous the chances allowed were; a Facts-only proxy for xG per shot.
+- **Conversion Allowed** — goals conceded ÷ SOT conceded. How many of those chances were finished — keeper quality plus finishing variance, and the noisiest of the three.
+
+The first is computed from Facts; the second and third are what the EFL builder already computed, correctly, under the misleading name `DefensiveStrength_5` / `DefensiveStrength_SOT`. The PL formula (`1 ÷ Σ shots conceded`) was never a defensive metric at all — the reciprocal of a *count* scales with how many matches are in the window, not with how well the team defends.
+
+**Computed in the pipeline, not the Canonical Dataset.** Opponent-adjustment needs Elo, and the xG/lineup variants need enrichment, none of which exist at build time; putting them in the canonical would violate the Facts-only rule for computed columns (ADR 0004).
+
+Defensive data arrives in **three tiers of decreasing coverage**, each a *separately named* set of features rather than one name whose formula varies:
+
+| Tier | Source | Seasons | Leagues |
+|---|---|---|---|
+| 1 — Facts | Canonical Dataset | 0–25 | PL + EFL |
+| 2 — team xG conceded | Understat | 14–25 | PL only |
+| 3 — player & goalkeeper level | FPL-Core-Insights (`xgot_faced`, `goals_prevented`, minutes, positions) | 24–25 | PL only |
+
+A league or era simply has NaN on the tiers it cannot reach — XGBoost handles NaN natively, so coverage degrades gracefully. **The EFL's "different approach" is that it runs on tier 1 alone; it must never mean the same column name computed a different way**, which is the exact defect this vocabulary exists to prevent.
+
+Tier 3 reaches only ~7% of training rows, so it is **provisional**: it ships only if a walk-forward comparison on the final fold shows it improves AUC/Brier. Tier 3's `goals_prevented` is what separates keeper shot-stopping from defensive quality — the confound baked into Conversion Allowed.
+_Avoid_: Defence rating, defensive score (both imply a single number, which is exactly what this is not)
+
 **Wheatcroft Principle**:
 The idea that process-driven indicators from high-frequency match events (shots, shots on target, corners) are more accurate and consistent measures of team strength than raw goals, which are subject to chance. Derived from Wheatcroft's published research (LSE). Core feature engineering philosophy for this system — explains why shot and corner features dominate SHAP importance over goal-based features.
 _Avoid_: N/A (unique term)
@@ -166,6 +211,20 @@ _Avoid_: N/A (unique term)
 **League Position (seeding)**:
 A team's rank in the league table at the point a fixture is played, used as a model feature (`Home_LeaguePosition`, `Away_LeaguePosition`, `LeaguePosition_Diff`). Mid-season it is the live points table (points, then goal difference, then goals scored). At **matchday 1, before any games are played, position is seeded by the previous season's outcome**, not left undefined: returning teams take their finishing position from last season; promoted teams are seeded at the bottom by promotion route — division-below **champions** at 3rd-from-bottom (22nd EFL / 18th PL), **runners-up** at 2nd-from-bottom (23rd EFL / 19th PL), **play-off winners** at the very bottom (24th EFL / 20th PL). The seed is also the natural tie-breaker once games begin (equal points fall back to seed order). See [docs/adr/0002-league-position-previous-season-seeding.md](docs/adr/0002-league-position-previous-season-seeding.md).
 _Avoid_: Table position (ambiguous about timing — must specify "before this match"), form
+
+**Division Movement (Promoted / Relegated)**:
+Whether a team is **new to this division** for the current season, and from which direction. Two independent flags per side (`Home_Promoted`/`Away_Promoted`, `Home_Relegated`/`Away_Relegated`), because the two directions carry **opposite** strength signals: a side relegated from the Premier League is one of the *stronger* teams in the Championship, while a side promoted from League One is one of the *weakest*. Collapsing them into a single "new team" flag — or leaving relegated sides unflagged, so they read as ordinary returning teams — throws that away.
+
+**Derived from the Canonical Datasets, never hand-maintained.** A team present in season N but absent in season N−1 is new to the division; if it appears in the division *above* in season N−1 it was relegated, otherwise it was promoted. Both leagues confirm the expected arrival counts every season (PL +3, EFL +6 = 3 down + 3 up), and the derivation reproduces the previously hand-listed seasons exactly. The hardcoded promoted-team lists are deleted: they went stale precisely because someone had to remember to extend them, and after season 25 nobody did — leaving the flag constant-zero across 24 of 26 PL seasons.
+
+For the PL, `Relegated` is always 0 (there is no division above), so the two leagues keep an identical schema.
+_Avoid_: New team, newcomer (both lose the direction, which is the whole signal)
+
+**Promotion Route**:
+*How* a promoted team came up — division-below **champion**, **runner-up**, or **play-off winner** — used by [ADR 0002](docs/adr/0002-league-position-previous-season-seeding.md) to seed matchday-1 League Position, since route is a real if weak strength signal (champions > runners-up > play-off winners on average).
+
+Availability is asymmetric, and this is a **data-availability fallback, not a per-league formula**: PL's route is read off the EFL Canonical Dataset's final table for season N−1 (verified for all 25 seasons), whereas EFL's promoted teams come from League One, which this system does not hold. EFL therefore takes ADR 0002's neutral promoted seed. One code path, one documented fallback — deliberately not a second implementation, which is the failure mode this vocabulary exists to prevent.
+_Avoid_: Promotion type, promotion method
 
 ### Calibration
 
