@@ -49,6 +49,7 @@ _ALIASES = {
     "Portsmouth FC": ["Portsmouth", "POR"],
     "Blackpool FC": ["Blackpool", "BLP"],
     "Huddersfield Town AFC": ["Huddersfield", "Huddersfield Town", "HUD"],
+    "Bradford City AFC": ["Bradford", "Bradford City", "BRA"],
     # ── Championship-specific teams (not in PL during 2000-2025) ──
     "Millwall FC": ["Millwall", "MIL"],
     "Plymouth Argyle FC": ["Plymouth", "Plymouth Argyle", "PLY"],

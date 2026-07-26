@@ -484,8 +484,9 @@ EFL_ALT_LINES_OVER_ONLY = False  # both sides have edge in EFL
 #   - EFL season ended ~2026-05-02 → EFL_RETRAIN_ENABLED set False
 #   - PL season ended ~2026-05-25  → PL_RETRAIN_ENABLED set False
 #   - Both restart ~mid-August 2026 → flip both back to True end-of-July
-PL_RETRAIN_ENABLED = False
-EFL_RETRAIN_ENABLED = False
+#   - 2026-07-25: both flipped back to True ahead of the 2026-27 restart
+PL_RETRAIN_ENABLED = True
+EFL_RETRAIN_ENABLED = True
 
 # ── Selective Market Targeting ──
 # De-vigged soft-book edges are noisier than Pinnacle-derived edges.
