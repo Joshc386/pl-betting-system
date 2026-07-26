@@ -65,31 +65,35 @@ def _refresh_player_data() -> None:
               f"(non-critical): {e}")
 
 
-def _fetch_latest_matches() -> bool:
-    """Fetch newly completed matches from Understat and update the dataset.
+def _refresh_understat_xg() -> bool:
+    """Refresh the current season's Understat xG enrichment.
+
+    Understat is an **xG source only** — it is not a Facts source. This used to
+    call ``update_dataset()``, which appended goals-only rows to the PL
+    Canonical Dataset with every stat column NaN; running daily, that left
+    season 25 with no shots, corners, half-time or odds. Match results are now
+    ingested from football-data.co.uk by ``scripts/daily_ingest.py``
+    (see ADR 0004).
 
     Returns:
-        True if new matches were found and appended, False otherwise.
+        True if xG was refreshed, False otherwise.
     """
     try:
-        from data.live_updater import update_dataset, get_current_season_year
+        from data.live_updater import refresh_xg, get_current_season_year
         season_year = get_current_season_year()
-        result = update_dataset(season_year)
-        if result is None:
-            logger.info("No new matches found on Understat")
-            print(f"[{datetime.now():%H:%M:%S}] No new matches found")
+        n = refresh_xg(season_year)
+        if not n:
+            logger.info("No Understat matches found for the current season")
+            print(f"[{datetime.now():%H:%M:%S}] No xG matches found")
             return False
-        new_count = len(
-            result[result["SeasonIndex"] == (season_year - 2000)]
-        )
-        logger.info(f"Dataset updated: season {season_year}/{season_year + 1}, "
-                     f"{new_count} matches")
-        print(f"[{datetime.now():%H:%M:%S}] Dataset updated: {new_count} matches "
+        logger.info(f"xG refreshed: season {season_year}/{season_year + 1}, "
+                    f"{n} matches")
+        print(f"[{datetime.now():%H:%M:%S}] xG refreshed: {n} matches "
               f"in {season_year}/{season_year + 1}")
         return True
     except Exception as e:
-        logger.warning(f"Understat match fetch failed (non-critical): {e}")
-        print(f"[{datetime.now():%H:%M:%S}] Match fetch FAILED "
+        logger.warning(f"Understat xG refresh failed (non-critical): {e}")
+        print(f"[{datetime.now():%H:%M:%S}] xG refresh FAILED "
               f"(non-critical): {e}")
         return False
 
@@ -163,11 +167,16 @@ def _retrain_squad_adjuster() -> None:
 
 
 def job_daily_data_refresh() -> None:
-    """Daily data ingestion: refresh player data and fetch new match results.
+    """Daily enrichment refresh: squad availability and Understat xG.
 
     Runs at 06:30 daily, before the fixture planner (07:00). Ensures
-    matchday predictions use current squad availability and that the
-    dataset includes any matches completed since the last fetch.
+    matchday predictions use current squad availability and xG.
+
+    Match **results** are not fetched here — the "Betting Bot Daily Ingest"
+    Task Scheduler job (``scripts/daily_ingest.py``, 06:00) rebuilds each
+    league's Canonical Dataset from football-data.co.uk. Task Scheduler is
+    used for data-critical jobs because it catches up on a missed run,
+    whereas APScheduler silently discards one (ADR 0006).
 
     Both steps are non-critical — failures log warnings but do not
     prevent downstream jobs from running.
@@ -176,7 +185,7 @@ def job_daily_data_refresh() -> None:
     print(f"[{datetime.now():%H:%M:%S}] Daily data refresh starting...")
 
     _refresh_player_data()
-    _fetch_latest_matches()
+    _refresh_understat_xg()
 
     print(f"[{datetime.now():%H:%M:%S}] Daily data refresh complete.")
 
@@ -184,15 +193,19 @@ def job_daily_data_refresh() -> None:
 def job_weekly_retrain() -> None:
     """Full retrain + pickle save for both PL and Championship.
 
-    Runs data ingestion first (Understat matches + player data) to
-    guarantee fresh inputs, then retrains all models, saves trained
-    state and pipeline cache, and retrains the squad adjuster.
+    Refreshes enrichment first (Understat xG + player data) to guarantee
+    fresh inputs, then retrains all models, saves trained state and pipeline
+    cache, and retrains the squad adjuster.
+
+    Match results are *not* refreshed here — ``scripts/daily_ingest.py`` runs
+    from Task Scheduler at 06:00 and has already rebuilt each league's
+    Canonical Dataset by the time this job fires (ADR 0006).
     """
     logger.info("Starting weekly retrain...")
     print(f"[{datetime.now():%H:%M:%S}] Weekly retrain starting...")
 
-    # ── Data ingestion (guarantees fresh inputs before training) ──
-    _fetch_latest_matches()
+    # ── Enrichment refresh (guarantees fresh inputs before training) ──
+    _refresh_understat_xg()
     _refresh_player_data()
 
     # Re-sync the Betfair League Splits to the (possibly out-of-band updated)
