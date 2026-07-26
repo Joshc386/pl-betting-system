@@ -14,6 +14,9 @@ data/*.bz2
 *.xlsm
 *.csv
 *.zip
+# Pre-ingest / pre-rebuild snapshots. The daily ingest job writes one per
+# league per run, so these accumulate; they are data, never source.
+*.bak
 
 # Holding folder used during git surgery (Option β-tight PR split)
 tmp_session_holding/
@@ -26,6 +29,7 @@ reports/
 BTTS_data/
 BetFairData_OU/
 data/championship_raw/
+data/pl_raw/
 data/fpl_historical/
 data/player_data/
 
