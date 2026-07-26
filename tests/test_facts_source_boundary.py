@@ -95,19 +95,7 @@ def test_scheduler_does_not_ingest_results() -> None:
     assert "_refresh_understat_xg" in code
 
 
-@pytest.mark.parametrize("league", [
-    "EFL",
-    # PL season 25 is still goals-only in the live canonical: the Understat
-    # writer has been retired, but the merge that repairs the damage it did
-    # has not been published yet. strict=True so this turns into a failure
-    # the moment the merge lands — that is the signal to delete this marker,
-    # not a reason to loosen the test.
-    pytest.param("PL", marks=pytest.mark.xfail(
-        strict=True,
-        reason="PL canonical not yet repaired — publish the Facts merge, "
-               "then remove this xfail",
-    )),
-])
+@pytest.mark.parametrize("league", sorted(LEAGUES))
 def test_canonical_has_no_facts_only_rows(league: str) -> None:
     """No season may carry goals while every other Fact column is empty.
 

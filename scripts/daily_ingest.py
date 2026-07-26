@@ -49,17 +49,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger("daily_ingest")
 
-# PL is intentionally absent until the ADR 0001 sign-off gate for the PL
-# rebuild has been cleared. Adding it here before then would republish the PL
-# canonical from a new source without the characterised-diff review that
-# ADR 0001 requires — and the Facts diff is not clean: the rebuild corrects
-# five season-24 final scores and ~760 rows of season 0-1 discipline columns,
-# so `_facts_regressed` below would refuse to publish anyway.
+# PL is absent because this job REPLACES the canonical, and for PL a replace
+# is lossy. football-data.co.uk serves only 335 rows for seasons 3 and 4
+# (2003/04, 2004/05) — verified against Content-Length, so it is an upstream
+# gap, not a truncated download — where the PL canonical holds the full 380.
+# It also lacks B365 odds for ~760 early-season fixtures the canonical has.
+# A rebuild therefore drops 90 real fixtures, which is why the corrected
+# Facts were merged onto the canonical rather than replacing it.
+#
+# `_facts_regressed` below fails safe on this ("row count shrank"), so adding
+# "PL" here today would simply error every morning without ingesting.
 #
 # NOTE: with the Understat results path retired from live_updater.py (ADR
 # 0004), PL currently has NO in-season results ingestion. That is safe only
-# while PL is between seasons. Add "PL" here as part of publishing the merged
-# canonical, before the 2026/27 season starts.
+# while PL is between seasons — season 25 ended 2026-05-24 and 2026/27 starts
+# mid-August. Before then, the builder must learn to preserve canonical rows
+# absent upstream; PL joins this list as part of that work (ADR 0007).
 DEFAULT_LEAGUES = ["EFL"]
 
 SPLIT_SCRIPTS = ("extract_btts_by_league.py", "extract_efl_ou15_betfair.py")
