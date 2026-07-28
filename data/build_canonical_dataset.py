@@ -171,6 +171,11 @@ def _settings(league: str, output: str | None = None) -> dict[str, Any]:
     settings["league"] = league
     settings["div"] = cfg["football_data_co_uk_div"]
     settings["output_path"] = output or cfg["csv_path"]
+    # The live canonical is the preservation source and is tracked separately
+    # from output_path: a dry run writes elsewhere but must still read the
+    # real canonical, or it would "reproduce" the build by dropping the very
+    # rows preservation exists to keep.
+    settings["canonical_path"] = cfg["csv_path"]
     settings["first_season"] = cfg["first_season_idx"]
     settings["last_season"] = cfg["current_season_idx"]
     return settings
@@ -681,6 +686,134 @@ def _add_factor(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _preserve_canonical_only_rows(
+    df: pd.DataFrame,
+    canonical_path: str,
+    first_season: int,
+    last_season: int,
+) -> pd.DataFrame:
+    """Re-add matches the canonical holds that the upstream source no longer serves.
+
+    football-data.co.uk does not always serve a complete season forever: `E0`
+    seasons 3 and 4 return 335 rows against the 380 that were actually played,
+    verified against `Content-Length` — an upstream gap, not a truncated
+    download. A rebuild that trusts the source therefore *destroys* 90 real
+    Premier League fixtures, which ADR 0001 forbids.
+
+    This must run *before* feature computation, not after. Rolling windows are
+    computed over whatever rows exist at that moment, so restoring fixtures
+    afterwards would leave correct Facts carrying features derived from a
+    335-match season — the same silent corruption in a subtler form.
+
+    Matching is on (SeasonIndex, Home_Team, Away_Team), which is unique within
+    a double round-robin and, unlike Date, survives a rescheduled fixture.
+
+    Args:
+        df: The freshly mapped upstream frame.
+        canonical_path: The live canonical to preserve from.
+        first_season: First season index the build covers.
+        last_season: Last season index the build covers.
+
+    Returns:
+        *df* plus any canonical-only rows, re-sorted by Date.
+    """
+    if not os.path.exists(canonical_path):
+        print("  No existing canonical — nothing to preserve "
+              f"({canonical_path})")
+        return df
+
+    canonical = pd.read_csv(canonical_path, low_memory=False)
+    canonical = canonical[
+        canonical["SeasonIndex"].between(first_season, last_season)]
+
+    key = ["SeasonIndex", "Home_Team", "Away_Team"]
+    built_keys = set(map(tuple, df[key].itertuples(index=False, name=None)))
+    missing_mask = ~canonical[key].apply(tuple, axis=1).isin(built_keys)
+    missing = canonical[missing_mask]
+
+    if missing.empty:
+        print("  Upstream serves every canonical row — nothing to preserve")
+        return df
+
+    # Carry only the columns the upstream mapping produces; every computed
+    # feature is recomputed downstream over the completed frame.
+    cols = [c for c in df.columns if c in missing.columns]
+    restored = missing[cols].copy()
+    restored["Date"] = pd.to_datetime(restored["Date"], format="mixed",
+                                      dayfirst=True)
+
+    per_season = restored.groupby("SeasonIndex").size().to_dict()
+    print(f"  Preserved {len(restored)} canonical row(s) absent upstream: "
+          f"{ {int(k): int(v) for k, v in per_season.items()} }")
+
+    out = pd.concat([df, restored], ignore_index=True)
+    return out.sort_values("Date").reset_index(drop=True)
+
+
+def _backfill_canonical_values(
+    df: pd.DataFrame,
+    canonical_path: str,
+    first_season: int,
+    last_season: int,
+) -> pd.DataFrame:
+    """Fill cells the source leaves empty but the canonical has a value for.
+
+    Preserving rows is not sufficient. football-data.co.uk carries no B365
+    columns at all for `E0` seasons 0-1, yet the canonical holds 380 match
+    prices for each and 374 O/U prices for season 1 — inherited from the
+    dataset that predates the builder. Those rows *are* served, so row
+    preservation never looks at them, and a rebuild silently blanks the very
+    odds the backtests price against.
+
+    Only gaps are filled. Where the source supplies a value it wins, so a
+    genuine upstream correction is never reverted to a stale canonical one.
+
+    Args:
+        df: The frame being built, after row preservation.
+        canonical_path: The live canonical to backfill from.
+        first_season: First season index the build covers.
+        last_season: Last season index the build covers.
+
+    Returns:
+        *df* with source-column gaps filled where the canonical can fill them.
+    """
+    if not os.path.exists(canonical_path):
+        return df
+
+    canonical = pd.read_csv(canonical_path, low_memory=False)
+    canonical = canonical[
+        canonical["SeasonIndex"].between(first_season, last_season)]
+    if canonical.empty:
+        return df
+
+    key = ["SeasonIndex", "Home_Team", "Away_Team"]
+    fillable = [c for c in df.columns
+                if c in canonical.columns and c not in key and c != "Date"]
+
+    indexed = canonical.set_index(key)
+    indexed = indexed[~indexed.index.duplicated(keep="first")]
+    target = df.set_index(key)
+
+    filled: dict[str, int] = {}
+    for col in fillable:
+        gaps = target[col].isna()
+        if not gaps.any():
+            continue
+        source = indexed[col].reindex(target.index)
+        n = int((gaps & source.notna()).sum())
+        if n:
+            target.loc[gaps, col] = source[gaps]
+            filled[col] = n
+
+    if filled:
+        print(f"  Backfilled {sum(filled.values())} cell(s) the source omits: "
+              f"{filled}")
+    else:
+        print("  No canonical values to backfill")
+
+    return target.reset_index()[df.columns.tolist()]
+
+
 def build(
     league: str = "EFL",
     output: str | None = None,
@@ -728,7 +861,16 @@ def build(
 
     df = pd.concat(season_dfs, ignore_index=True)
     df = df.sort_values("Date").reset_index(drop=True)
-    print(f"\nTotal matches: {len(df)}")
+    print(f"\nTotal matches from source: {len(df)}")
+
+    # Step 1b: Restore matches the source has stopped serving. Must precede
+    # feature computation — see _preserve_canonical_only_rows.
+    print("\nChecking for canonical rows absent upstream...")
+    df = _preserve_canonical_only_rows(
+        df, s["canonical_path"], s["first_season"], s["last_season"])
+    df = _backfill_canonical_values(
+        df, s["canonical_path"], s["first_season"], s["last_season"])
+    print(f"Total matches: {len(df)}")
 
     # Step 2: Add rolling features
     print("\nComputing rolling features...")
