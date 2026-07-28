@@ -61,37 +61,6 @@ _EFL_DERBIES_HISTORICAL: set[tuple[str, str]] = {
     ("Charlton", "Millwall"),
 }
 
-# Promoted teams by season index (from League One into Championship)
-# Key = season index, Value = set of team names that were promoted INTO that season.
-# Sources: historical records.  Empty seasons = no data or not yet mapped.
-_EFL_PROMOTED_TEAMS: dict[int, set[str]] = {
-    1:  {"Millwall", "Rotherham", "Blackpool"},
-    2:  {"Wigan", "Crewe", "Cardiff"},
-    3:  {"Wolves", "Plymouth", "West Ham"},
-    4:  {"Luton", "Hull", "Doncaster"},
-    5:  {"Southend", "Colchester", "Barnsley"},
-    6:  {"Scunthorpe", "Bristol City", "Blackpool"},
-    7:  {"Swansea", "Nott'm Forest", "Doncaster"},
-    8:  {"Leicester", "Peterboro", "Scunthorpe"},
-    9:  {"Norwich", "Leeds", "Millwall"},
-    10: {"Brighton", "Southampton", "Peterboro"},
-    11: {"Charlton", "Sheff Utd", "Huddersfield"},
-    12: {"Doncaster", "Bournemouth", "Yeovil"},
-    13: {"Wolves", "Brentford", "Rotherham"},
-    14: {"Bristol City", "MK Dons", "Preston"},
-    15: {"Wigan", "Burton", "Barnsley"},
-    16: {"Sheffield Weds", "Bolton", "Millwall"},  # approximate
-    17: {"Wigan", "Blackburn", "Rotherham"},  # approximate
-    18: {"Luton", "Charlton", "Barnsley"},  # approximate
-    19: {"Coventry", "Rotherham", "Wycombe"},
-    20: {"Hull", "Peterboro", "Blackpool"},
-    21: {"Wigan", "Rotherham", "Sunderland"},
-    22: {"Sheff Wed", "Ipswich", "Plymouth"},
-    23: {"Leyton Orient", "Stevenage", "Carlisle"},  # approximate; adjust
-    24: {"Derby", "Portsmouth", "Oxford"},  # 2024/25 promoted from L1
-    25: {"Birmingham", "Wrexham", "Charlton"},  # 2025/26 promoted from L1
-}
-
 # ── Premier League derbies ──
 # In *canonical* form ("Arsenal FC"), because PL normalises team names during
 # column mapping and derby detection runs afterwards. Derived from the derby
@@ -116,14 +85,6 @@ _PL_DERBIES_HISTORICAL: set[tuple[str, str]] = {
     ("Liverpool FC", "Manchester United FC"),
 }
 
-# Promoted INTO the Premier League (from the Championship) by season index.
-# Short forms are fine — _add_promoted_flags matches on substrings, so
-# "Ipswich" resolves against the canonical "Ipswich Town FC".
-_PL_PROMOTED_TEAMS: dict[int, set[str]] = {
-    24: {"Ipswich", "Leicester", "Southampton"},   # 2024/25
-    25: {"Leeds", "Burnley", "Sunderland"},        # 2025/26
-}
-
 # ── Per-league build settings ──
 # Only what is genuinely league-specific lives here; division code, output
 # path and season range come from league_config so there is one source of truth.
@@ -132,7 +93,6 @@ _LEAGUES: dict[str, dict[str, Any]] = {
         "raw_dir": os.path.join(PROJECT_DIR, "data", "pl_raw"),
         "derbies_local": _PL_DERBIES_LOCAL,
         "derbies_historical": _PL_DERBIES_HISTORICAL,
-        "promoted": _PL_PROMOTED_TEAMS,
         # PL canonical uses long-form names ("Arsenal FC"), so source names
         # must be normalised on the way in.
         "normalize_names": True,
@@ -141,7 +101,6 @@ _LEAGUES: dict[str, dict[str, Any]] = {
         "raw_dir": os.path.join(PROJECT_DIR, "data", "championship_raw"),
         "derbies_local": _EFL_DERBIES_LOCAL,
         "derbies_historical": _EFL_DERBIES_HISTORICAL,
-        "promoted": _EFL_PROMOTED_TEAMS,
         # EFL canonical uses football-data.co.uk's own short forms
         # ("Blackburn"). Normalising would rewrite 23 of 24 names and break
         # the ESPN/odds mappings and the Betfair League Split allowlists.
@@ -176,6 +135,12 @@ def _settings(league: str, output: str | None = None) -> dict[str, Any]:
     # real canonical, or it would "reproduce" the build by dropping the very
     # rows preservation exists to keep.
     settings["canonical_path"] = cfg["csv_path"]
+    # The EFL split needs the division above: an arrival that was in the PL
+    # last season came *down*, and is one of the division's stronger teams
+    # rather than one of its weakest (ADR 0007 decisions 1-2). The PL needs no
+    # sibling — every arrival there came up.
+    settings["sibling_canonical_path"] = (
+        get_league_config("PL")["csv_path"] if league == "EFL" else None)
     settings["first_season"] = cfg["first_season_idx"]
     settings["last_season"] = cfg["current_season_idx"]
     return settings
@@ -344,25 +309,122 @@ def _is_derby(home: str, away: str, derby_set: set[tuple[str, str]]) -> bool:
     return False
 
 
-def _add_promoted_flags(
+def _season_teams(df: pd.DataFrame, season: int) -> set[str]:
+    """Every team that appears in a season, on either side of a fixture."""
+    rows = df[df["SeasonIndex"] == season]
+    return set(rows["Home_Team"]) | set(rows["Away_Team"])
+
+
+def _down_slots(league: str) -> int:
+    """How many teams drop out of a division each season.
+
+    Equally, how many arrive from the division below — the two are the same
+    number, which is what makes the arrival count checkable.
+    """
+    cfg = get_league_config(league)
+    return cfg["teams_count"] - cfg["relegation_pos"] + 1
+
+
+def _add_promotion_flags(
     df: pd.DataFrame,
-    promoted: dict[int, set[str]],
+    league: str,
+    sibling_canonical_path: str | None,
 ) -> pd.DataFrame:
-    """Add Home_Promoted and Away_Promoted columns."""
+    """Derive Home_/Away_Promoted and Home_/Away_Relegated from the canonicals.
+
+    A team in season N but not in N-1 is new to the division. In the PL that
+    can only mean promotion. In the EFL it is ambiguous, and only the PL
+    canonical separates a side relegated from above (one of the division's
+    *stronger* teams) from one promoted from League One (one of its weakest).
+
+    Args:
+        df: The frame being built, with SeasonIndex and team columns.
+        league: "PL" or "EFL".
+        sibling_canonical_path: The PL canonical, required for the EFL split.
+
+    Returns:
+        *df* with the four flag columns added.
+    """
+    df = df.copy()
     df["Home_Promoted"] = 0
     df["Away_Promoted"] = 0
+    df["Home_Relegated"] = 0
+    df["Away_Relegated"] = 0
 
-    for season_idx, teams in promoted.items():
-        mask = df["SeasonIndex"] == season_idx
-        for team in teams:
-            team_low = team.lower()
-            for idx in df[mask].index:
-                home_low = df.at[idx, "Home_Team"].lower()
-                away_low = df.at[idx, "Away_Team"].lower()
-                if team_low in home_low or home_low in team_low:
-                    df.at[idx, "Home_Promoted"] = 1
-                if team_low in away_low or away_low in team_low:
-                    df.at[idx, "Away_Promoted"] = 1
+    sibling = None
+    if league == "EFL":
+        if sibling_canonical_path and os.path.exists(sibling_canonical_path):
+            sibling = pd.read_csv(sibling_canonical_path, low_memory=False)
+        else:
+            print("  WARNING: no PL canonical available — cannot tell a side "
+                  "relegated into the EFL from one promoted into it. Both "
+                  "flags left null for every season.")
+            df["Home_Promoted"] = np.nan
+            df["Away_Promoted"] = np.nan
+            df["Home_Relegated"] = np.nan
+            df["Away_Relegated"] = np.nan
+            return df
+
+    expected_teams = get_league_config(league)["teams_count"]
+    seasons = sorted(df["SeasonIndex"].dropna().unique())
+
+    def _complete(season: int) -> bool:
+        return len(_season_teams(df, season)) == expected_teams
+
+    # The earliest season has nothing to difference against. Three teams were
+    # promoted into it too; the canonical simply cannot say which, and 0 would
+    # assert they were not.
+    for col in ("Home_Promoted", "Away_Promoted",
+                "Home_Relegated", "Away_Relegated"):
+        df.loc[df["SeasonIndex"] == seasons[0], col] = np.nan
+
+    for season in seasons[1:]:
+        # Arrivals are a difference between two seasons, so both must be whole.
+        # A part-loaded season — the state of season 26 through early August —
+        # cannot say who is new, and guessing would assert something false.
+        if not (_complete(season) and _complete(season - 1)):
+            print(f"  WARNING: season {int(season)} incomplete "
+                  f"({len(_season_teams(df, season))} of {expected_teams} "
+                  f"teams) — promotion flags left null")
+            for col in ("Home_Promoted", "Away_Promoted",
+                        "Home_Relegated", "Away_Relegated"):
+                df.loc[df["SeasonIndex"] == season, col] = np.nan
+            continue
+
+        arrivals = _season_teams(df, season) - _season_teams(df, season - 1)
+
+        relegated: set[str] = set()
+        if sibling is not None:
+            above = _season_teams(sibling, season - 1)
+            relegated = {t for t in arrivals if normalize(t) in above}
+        promoted = arrivals - relegated
+
+        if league == "PL":
+            if len(arrivals) != _down_slots("PL"):
+                raise ValueError(
+                    f"PL season {int(season)}: {len(arrivals)} arrivals, "
+                    f"expected {_down_slots('PL')} — {sorted(arrivals)}. "
+                    f"Either the canonical is corrupt or team names drifted "
+                    f"between seasons.")
+        else:
+            if len(relegated) != _down_slots("PL") or \
+                    len(promoted) != _down_slots("EFL"):
+                raise ValueError(
+                    f"EFL season {int(season)}: {len(relegated)} relegated + "
+                    f"{len(promoted)} promoted, expected "
+                    f"{_down_slots('PL')} + {_down_slots('EFL')}. "
+                    f"Arrivals {sorted(arrivals)}; matched as down from the PL: "
+                    f"{sorted(relegated)}. A shortfall means normalize() failed "
+                    f"to bridge an EFL short form to its PL canonical name.")
+
+        mask = df["SeasonIndex"] == season
+        for team in promoted:
+            df.loc[mask & (df["Home_Team"] == team), "Home_Promoted"] = 1
+            df.loc[mask & (df["Away_Team"] == team), "Away_Promoted"] = 1
+        for team in relegated:
+            df.loc[mask & (df["Home_Team"] == team), "Home_Relegated"] = 1
+            df.loc[mask & (df["Away_Team"] == team), "Away_Relegated"] = 1
+
     return df
 
 
@@ -884,9 +946,9 @@ def build(
     print("Computing H2H stats...")
     df = _add_h2h(df)
 
-    # Step 5: Promoted flags
-    print("Adding promoted flags...")
-    df = _add_promoted_flags(df, s["promoted"])
+    # Step 5: Promotion / relegation flags, derived from the canonicals
+    print("Deriving promotion flags...")
+    df = _add_promotion_flags(df, league, s["sibling_canonical_path"])
 
     # Step 6: Derby flags
     print("Adding derby flags...")

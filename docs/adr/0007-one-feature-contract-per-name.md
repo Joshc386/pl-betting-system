@@ -4,7 +4,23 @@ Date: 2026-07-26
 
 ## Status
 
-Accepted (decisions agreed; implementation pending — see Consequences)
+Accepted. Implementation in progress — decisions **1 and 2 landed 2026-07-28**
+(`Promoted`/`Relegated` derived from the Canonical Datasets; both builder dicts
+deleted). Decisions 3–10 remain pending.
+
+The derived flags reach the models only once the canonicals are rebuilt and
+republished, which happens with the retrain. Until then the published
+canonicals still carry the dead hand-maintained flag, and
+`tests/test_cross_league_features.py` correctly still reports `Promoted` as a
+divergence — it reads the published artefact, not the builder.
+
+`PROMOTED_TEAMS` in `data/add_season.py` is deliberately still present: it is
+consumed by that file's own feature code, which decision 10 deletes as a unit.
+Removing the dict alone would leave the module broken for no gain.
+
+The pre-change baseline — artefact fingerprints, and which models train on
+which diverging features — is recorded in
+[adr0007_baseline.md](../adr0007_baseline.md).
 
 Amends [0002](0002-league-position-previous-season-seeding.md) (replaces the
 hand-maintained `PROMOTED_TEAMS` with derivation, and settles the neutral-seed

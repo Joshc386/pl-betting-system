@@ -80,9 +80,20 @@ def test_per_season_row_counts_unchanged(efl_rebuild, efl_live):
     pd.testing.assert_series_equal(got, want, check_names=False)
 
 
+# Columns the rebuild now emits that the published canonicals do not yet
+# carry. ADR 0007 decision 2 adds Relegated so both leagues keep one schema;
+# the canonicals gain it at their next publish. Empty this set then — the
+# assertion below is strict in both directions, so a stale entry fails.
+PENDING_NEW_COLUMNS = {"Home_Relegated", "Away_Relegated"}
+
+
 def test_schema_unchanged(efl_rebuild, efl_live):
-    """The rebuild must emit exactly the canonical's columns."""
-    assert set(efl_rebuild.columns) == set(efl_live.columns)
+    """The rebuild must lose no column, and add only the ones we intend."""
+    added = set(efl_rebuild.columns) - set(efl_live.columns)
+    lost = set(efl_live.columns) - set(efl_rebuild.columns)
+    assert lost == set(), f"rebuild dropped columns: {sorted(lost)}"
+    assert added == PENDING_NEW_COLUMNS, (
+        f"rebuild added {sorted(added)}, expected {sorted(PENDING_NEW_COLUMNS)}")
 
 
 def test_facts_are_byte_identical(efl_rebuild, efl_live):
