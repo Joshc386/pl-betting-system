@@ -857,35 +857,77 @@ _ODDS_API_TO_DATASET = {
     "Watford": "Watford FC",
     "Luton Town": "Luton Town FC",
     "Sheffield United": "Sheffield United FC",
+    # Promoted for 2026/27 (names as the canonical will hold them once
+    # season 26 is built — see api.team_mapping.normalize).
+    "Coventry City": "Coventry City FC",
+    "Hull City": "Hull City AFC",
 }
+
+# Words too common to identify a club on their own. "City" is shared by
+# Manchester City, Leicester City, Hull City, Coventry City, Norwich City and
+# Stoke City; "United" is no better. A candidate must share something
+# distinctive before a generic word counts towards its score.
+_GENERIC_TEAM_WORDS = frozenset({
+    "city", "united", "town", "albion", "wanderers", "rovers",
+    "athletic", "county", "fc", "afc", "and", "the",
+})
+
+
+def _team_words(name: str) -> set[str]:
+    """Lower-cased word set for comparison, with '&' folded to 'and'."""
+    return {w for w in name.lower().replace("&", " and ").split() if w}
+
+
+def _resolve_by_overlap(api_name: str, our_teams) -> str | None:
+    """Best candidate sharing a distinctive word — None if absent or ambiguous.
+
+    Requiring a distinctive word is what stops "Coventry City" matching
+    "Manchester City FC" on "City" alone. Generic words still break ties, so
+    "Manchester City" beats "Manchester United FC" once "manchester" has
+    qualified both. A tie returns None: no match is recoverable, the wrong
+    match is not.
+    """
+    api_words = _team_words(api_name)
+    distinctive = api_words - _GENERIC_TEAM_WORDS
+    if not distinctive:
+        return None
+
+    scored: list[tuple[int, str]] = []
+    for candidate in our_teams:
+        candidate_words = _team_words(candidate)
+        if not (distinctive & candidate_words):
+            continue
+        scored.append((len(api_words & candidate_words), candidate))
+
+    if not scored:
+        return None
+    best = max(score for score, _ in scored)
+    winners = [team for score, team in scored if score == best]
+    return winners[0] if len(winners) == 1 else None
 
 
 def match_to_our_teams(odds_match, our_teams):
     """Map Odds-API team names to our dataset team names.
 
-    Uses explicit mapping dict, falls back to fuzzy matching.
+    Returns None for a name that cannot be resolved unambiguously. Callers
+    skip those fixtures, which is the intended outcome — pricing the wrong
+    fixture is far worse than pricing none.
     """
     home = odds_match["home_team"]
     away = odds_match["away_team"]
 
     def resolve(api_name):
-        # Exact mapping first
+        # An explicit mapping is authoritative even when the club is not yet
+        # in our_teams. A newly promoted side is unknown until its season is
+        # built into the canonical; downstream logs "no recent data" and skips
+        # it, then starts working by itself once the season lands. Falling
+        # through to the fuzzy path here is what returned Manchester City for
+        # Coventry City.
         if api_name in _ODDS_API_TO_DATASET:
-            mapped = _ODDS_API_TO_DATASET[api_name]
-            if mapped in our_teams:
-                return mapped
-
-        # Fuzzy fallback: find candidate with most word overlap
-        api_words = set(api_name.lower().split())
-        best_score = 0
-        best_candidate = None
-        for c in our_teams:
-            c_words = set(c.lower().replace("fc", "").replace("afc", "").strip().split())
-            overlap = len(api_words & c_words)
-            if overlap > best_score:
-                best_score = overlap
-                best_candidate = c
-        return best_candidate if best_score >= 1 else None
+            return _ODDS_API_TO_DATASET[api_name]
+        if api_name in our_teams:
+            return api_name
+        return _resolve_by_overlap(api_name, our_teams)
 
     return resolve(home), resolve(away)
 

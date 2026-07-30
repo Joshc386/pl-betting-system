@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 from config import ODDSPAPI_CACHE_TTL_MINUTES, ODDSPAPI_SHARP_BOOKS, ODDSPAPI_TIER1_BOOKS
+from api.odds_api import _resolve_by_overlap
 
 logger = logging.getLogger(__name__)
 
@@ -667,6 +668,11 @@ _ODDSPAPI_TO_DATASET = {
     "Wolves": "Wolverhampton Wanderers FC",
     "Watford FC": "Watford FC",
     "Luton Town": "Luton Town FC",
+    # Promoted for 2026/27. OddsPapi drops the suffix for these three, so
+    # "Ipswich Town" never hit the "Ipswich Town FC" key above.
+    "Ipswich Town": "Ipswich Town FC",
+    "Coventry City": "Coventry City FC",
+    "Hull City": "Hull City AFC",
 }
 
 
@@ -680,27 +686,19 @@ def map_team(api_name: str, our_teams: set[str]) -> str | None:
     Returns:
         Matched team name, or None if no match found.
     """
-    # Direct lookup
+    # An explicit mapping is authoritative even when the club is not yet in
+    # our_teams — see the matching note in api.odds_api.match_to_our_teams.
     if api_name in _ODDSPAPI_TO_DATASET:
-        mapped = _ODDSPAPI_TO_DATASET[api_name]
-        if mapped in our_teams:
-            return mapped
+        return _ODDSPAPI_TO_DATASET[api_name]
 
     # Exact match
     if api_name in our_teams:
         return api_name
 
-    # Fuzzy: word overlap
-    api_words = set(api_name.lower().replace("fc", "").replace("afc", "").split())
-    best_score = 0
-    best_match = None
-    for team in our_teams:
-        team_words = set(team.lower().replace("fc", "").replace("afc", "").split())
-        overlap = len(api_words & team_words)
-        if overlap > best_score:
-            best_score = overlap
-            best_match = team
-    return best_match if best_score >= 1 else None
+    # Shared with odds_api deliberately: two copies of the generic-word list
+    # would be two implementations of one contract, and drift is exactly the
+    # failure this resolver exists to prevent.
+    return _resolve_by_overlap(api_name, our_teams)
 
 
 if __name__ == "__main__":
