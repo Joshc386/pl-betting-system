@@ -80,11 +80,12 @@ def test_per_season_row_counts_unchanged(efl_rebuild, efl_live):
     pd.testing.assert_series_equal(got, want, check_names=False)
 
 
-# Columns the rebuild now emits that the published canonicals do not yet
-# carry. ADR 0007 decision 2 adds Relegated so both leagues keep one schema;
-# the canonicals gain it at their next publish. Empty this set then — the
-# assertion below is strict in both directions, so a stale entry fails.
-PENDING_NEW_COLUMNS = {"Home_Relegated", "Away_Relegated"}
+# Columns the rebuild emits that the published canonical does not yet carry.
+# Empty because the EFL canonical caught up: scripts/daily_ingest.py published
+# the Relegated columns on its 2026-07-29 run, the morning after ADR 0007
+# decision 2 landed. The assertion below is strict in both directions, so a
+# stale entry here fails the suite — which is how that publish was noticed.
+PENDING_NEW_COLUMNS: set[str] = set()
 
 
 def test_schema_unchanged(efl_rebuild, efl_live):
