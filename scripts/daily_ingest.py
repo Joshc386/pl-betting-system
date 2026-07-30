@@ -57,14 +57,16 @@ logger = logging.getLogger("daily_ingest")
 # A rebuild therefore drops 90 real fixtures, which is why the corrected
 # Facts were merged onto the canonical rather than replacing it.
 #
-# `_facts_regressed` below fails safe on this ("row count shrank"), so adding
-# "PL" here today would simply error every morning without ingesting.
+# UPDATE 2026-07-28: the builder now preserves canonical rows absent upstream
+# and backfills cells the source omits, so a PL rebuild is verifiably lossless
+# — same 9,880 rows, seasons 3-4 back to 380, no column with less coverage.
+# The technical blocker is gone; adding "PL" here is now a deliberate decision
+# rather than a bug waiting to happen, and it needs the PL canonical
+# republished through the new builder first.
 #
-# NOTE: with the Understat results path retired from live_updater.py (ADR
-# 0004), PL currently has NO in-season results ingestion. That is safe only
-# while PL is between seasons — season 25 ended 2026-05-24 and 2026/27 starts
-# mid-August. Before then, the builder must learn to preserve canonical rows
-# absent upstream; PL joins this list as part of that work (ADR 0007).
+# Until that happens, PL still has NO in-season results ingestion (the
+# Understat path was retired by ADR 0004). That is safe only while PL is
+# between seasons — season 25 ended 2026-05-24 and 2026/27 starts 2026-08-21.
 DEFAULT_LEAGUES = ["EFL"]
 
 SPLIT_SCRIPTS = ("extract_btts_by_league.py", "extract_efl_ou15_betfair.py")
@@ -114,6 +116,41 @@ def _facts_regressed(live_path: str, candidate: pd.DataFrame) -> str | None:
     return None
 
 
+def _schema_changed(live_path: str, candidate: pd.DataFrame) -> str | None:
+    """Compare the candidate's column set against the live canonical's.
+
+    Adding or removing a feature column changes what the models train on, so
+    it belongs with a deliberate retrain rather than arriving overnight by
+    cron. This job published a 74-column EFL canonical on 2026-07-29 the
+    morning after ADR 0007 decision 2 landed — correct work, but unattended,
+    against a model trained on the previous schema.
+
+    Column *order* is not a change; only the set is compared.
+
+    Returns:
+        A description of the difference, or None if the schema is unchanged.
+    """
+    if not os.path.exists(live_path):
+        return None  # first build — nothing to compare against
+
+    live_columns = set(pd.read_csv(live_path, nrows=0).columns)
+    candidate_columns = set(candidate.columns)
+
+    added = sorted(candidate_columns - live_columns)
+    removed = sorted(live_columns - candidate_columns)
+    if not added and not removed:
+        return None
+
+    parts = []
+    if added:
+        parts.append(f"added {added}")
+    if removed:
+        parts.append(f"removed {removed}")
+    return (f"schema changed ({'; '.join(parts)}); a feature-schema change "
+            f"belongs with a retrain — re-run with --allow-schema-change once "
+            f"that is intended")
+
+
 def _prune_backups(live_path: str, keep: int = KEEP_BACKUPS) -> int:
     """Delete all but the newest ``keep`` pre-ingest backups.
 
@@ -138,8 +175,16 @@ def _prune_backups(live_path: str, keep: int = KEEP_BACKUPS) -> int:
     return len(stale)
 
 
-def ingest_league(league: str, dry_run: bool = False) -> bool:
-    """Rebuild one league's canonical and publish it if the Facts are stable.
+def ingest_league(league: str, dry_run: bool = False,
+                  allow_schema_change: bool = False) -> bool:
+    """Rebuild one league's canonical and publish it if it is safe to do so.
+
+    Args:
+        league: League key to ingest.
+        dry_run: Build to a temp path and report, without publishing.
+        allow_schema_change: Permit publishing a canonical whose column set
+            differs from the live one. Off by default: a feature-schema change
+            belongs with a retrain, not with an overnight cron run.
 
     Returns:
         True on success, False on failure.
@@ -160,6 +205,13 @@ def ingest_league(league: str, dry_run: bool = False) -> bool:
         logger.error("%s REFUSED - %s", league, problem)
         logger.error("  candidate left at %s for inspection", tmp_path)
         return False
+
+    if not allow_schema_change:
+        problem = _schema_changed(live_path, df)
+        if problem is not None:
+            logger.error("%s REFUSED - %s", league, problem)
+            logger.error("  candidate left at %s for inspection", tmp_path)
+            return False
 
     latest = pd.to_datetime(df["Date"], format="mixed", dayfirst=True,
                             errors="coerce").max()
@@ -212,10 +264,15 @@ def main() -> int:
                         help="Build and validate but do not publish")
     parser.add_argument("--skip-splits", action="store_true",
                         help="Do not re-derive the Betfair League Splits")
+    parser.add_argument("--allow-schema-change", action="store_true",
+                        help="Publish even if the column set differs from the "
+                             "live canonical. Use when a feature-schema change "
+                             "is intended and a retrain is following it")
     args = parser.parse_args()
 
     logger.info("=== Daily ingest: %s ===", ", ".join(args.leagues))
-    failed = [lg for lg in args.leagues if not ingest_league(lg, args.dry_run)]
+    failed = [lg for lg in args.leagues
+              if not ingest_league(lg, args.dry_run, args.allow_schema_change)]
 
     if not args.skip_splits and not args.dry_run:
         if not refresh_splits():
