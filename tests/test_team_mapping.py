@@ -160,6 +160,51 @@ def test_every_alias_resolves_to_its_canonical() -> None:
     assert not wrong, f"aliases resolving elsewhere: {wrong}"
 
 
+@pytest.mark.parametrize("name,expected", [
+    ("Wrexham", "Wrexham AFC"),        # Championship from 2025/26
+    ("Wrexham AFC", "Wrexham AFC"),    # how the odds feeds spell it
+    ("Tranmere", "Tranmere Rovers FC"),
+])
+def test_clubs_the_table_had_never_been_taught(
+        name: str, expected: str) -> None:
+    """Both sit in the canonical datasets and neither used to resolve.
+
+    Wrexham is the live one: in the EFL canonical for season 25 and in the
+    Championship odds mapping, while `normalize()` handed its name straight
+    back. `efl_alt_lines_data` keys Betfair fixtures on `normalize(short_name)`,
+    so Wrexham's fixtures were dropping out of that merge unnoticed.
+    """
+    assert normalize(name) == expected
+
+
+def test_every_team_in_the_canonical_datasets_resolves() -> None:
+    """The check that would have caught Wrexham.
+
+    A club present in a canonical dataset but absent from this table is the
+    gap that promotion produces every season.
+    """
+    import os
+
+    import pandas as pd
+
+    from league_config import get_league_config
+
+    paths = [get_league_config(lg)["csv_path"] for lg in ("PL", "EFL")]
+    if not all(os.path.exists(p) for p in paths):
+        pytest.skip("canonical datasets not present in this checkout")
+
+    names: set[str] = set()
+    for p in paths:
+        df = pd.read_csv(p, usecols=lambda c: c in ("Home_Team", "Away_Team"),
+                         low_memory=False)
+        for col in df.columns:
+            names |= set(df[col].dropna().astype(str))
+
+    unknown = sorted(n for n in names if normalize(n) not in _ALIASES)
+    assert not unknown, (
+        f"in a canonical dataset but not in the team table: {unknown}")
+
+
 def test_no_two_clubs_share_a_lookup_key() -> None:
     """An ambiguous table would reintroduce the guess by another route."""
     from api.team_mapping import _lookup_key

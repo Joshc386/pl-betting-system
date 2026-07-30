@@ -89,6 +89,9 @@ _ALIASES = {
     "Oxford United FC": ["Oxford", "Oxford United", "OXF"],
     "Wycombe Wanderers FC": ["Wycombe", "Wycombe Wanderers", "WYC"],
     "Exeter City FC": ["Exeter", "Exeter City", "EXE"],
+    "Tranmere Rovers FC": ["Tranmere", "Tranmere Rovers", "TRA"],
+    # In the Championship from 2025/26. The odds feeds send "Wrexham AFC".
+    "Wrexham AFC": ["Wrexham", "WRE"],
 }
 
 # FC, AFC and CF are decoration, not part of the name: "Arsenal" and
