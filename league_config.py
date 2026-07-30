@@ -54,17 +54,26 @@ LEAGUES: dict[str, dict[str, Any]] = {
         "fbref_comp_id": 9,          # FBref competition ID for PL
         "has_detailed_match": True,   # matches2425.csv available
 
-        # Derby definitions (canonical CSV names)
-        "derbies": {
+        # Derby definitions — canonical CSV names, matched exactly by
+        # data/build_canonical_dataset.py. These reproduce the derby flags
+        # already in the PL canonical, so a rebuild is value-neutral.
+        "derbies_local": {
             ("Arsenal FC", "Tottenham Hotspur FC"),
-            ("Liverpool FC", "Everton FC"),
-            ("Manchester United FC", "Manchester City FC"),
-            ("Chelsea FC", "Tottenham Hotspur FC"),
-            ("West Ham United FC", "Tottenham Hotspur FC"),
-            ("Crystal Palace FC", "Brighton & Hove Albion FC"),
-            ("Aston Villa FC", "Wolverhampton Wanderers FC"),
+            ("Aston Villa FC", "Birmingham City FC"),
+            ("Brighton & Hove Albion FC", "Crystal Palace FC"),
+            ("Chelsea FC", "Fulham FC"),
+            ("Everton FC", "Liverpool FC"),
+            ("Manchester City FC", "Manchester United FC"),
             ("Newcastle United FC", "Sunderland AFC"),
-            ("Nottingham Forest FC", "Derby County FC"),
+            ("West Bromwich Albion FC", "Wolverhampton Wanderers FC"),
+        },
+        "derbies_historical": {
+            ("Arsenal FC", "Chelsea FC"),
+            ("Arsenal FC", "Manchester United FC"),
+            ("Chelsea FC", "Liverpool FC"),
+            ("Chelsea FC", "Manchester United FC"),
+            ("Liverpool FC", "Manchester City FC"),
+            ("Liverpool FC", "Manchester United FC"),
         },
 
         # Historical seasons available (SeasonIndex range)
@@ -107,25 +116,39 @@ LEAGUES: dict[str, dict[str, Any]] = {
         "fbref_comp_id": 10,         # FBref competition ID for Championship
         "has_detailed_match": False,  # No matches2425.csv equivalent yet
 
-        # Derby definitions (canonical CSV names — will use football-data.co.uk naming)
-        "derbies": {
-            ("Sheffield Wednesday", "Sheffield United"),
-            ("Nottingham Forest", "Derby County"),
-            ("West Brom", "Wolverhampton"),
-            ("Leeds United", "Sheffield United"),
-            ("Leeds United", "Sheffield Wednesday"),
-            ("Sunderland", "Newcastle United"),
+        # Derby definitions — football-data.co.uk short forms, exactly as the
+        # EFL canonical stores them ("Sheffield Weds", not "Sheffield
+        # Wednesday"). The previous long-form list here was read by no code
+        # and named 18 clubs that do not exist in the canonical, so wiring it
+        # up would have silently zeroed most EFL derby flags.
+        "derbies_local": {
+            ("Sheffield Weds", "Sheffield United"),
+            # "Nott'm Forest" with the apostrophe — the canonical's own form.
+            # Configured as "Nottm Forest" this matched nothing for 33
+            # East Midlands derbies across 17 seasons, and fuzzy matching did
+            # not save it either: the apostrophe defeats substring matching in
+            # both directions, which is why fuzzy and exact agreed.
+            ("Nott'm Forest", "Derby"),
+            ("Leeds", "Sheffield United"),
             ("Sunderland", "Middlesbrough"),
-            ("Bristol City", "Cardiff City"),
-            ("Norwich City", "Ipswich Town"),
-            ("Stoke City", "Port Vale"),
-            ("Coventry City", "Leicester City"),
-            ("Burnley", "Blackburn Rovers"),
-            ("Preston", "Blackpool"),
+            ("Bristol City", "Cardiff"),
+            ("Norwich", "Ipswich"),
+            ("Burnley", "Blackburn"),
             ("QPR", "Millwall"),
-            ("Watford", "Luton Town"),
-            ("Hull City", "Sheffield United"),
-            ("Plymouth Argyle", "Exeter City"),
+            ("Watford", "Luton"),
+        },
+        "derbies_historical": {
+            ("West Brom", "Wolves"),
+            ("Leeds", "Sheffield Weds"),
+            ("Preston", "Blackpool"),
+            ("Stoke", "Port Vale"),
+            ("Coventry", "Leicester"),
+            ("Hull", "Sheffield United"),
+            ("Derby", "Leicester"),
+            ("Sunderland", "Newcastle"),
+            ("Huddersfield", "Leeds"),
+            ("Birmingham", "West Brom"),
+            ("Charlton", "Millwall"),
         },
 
         # Historical seasons available

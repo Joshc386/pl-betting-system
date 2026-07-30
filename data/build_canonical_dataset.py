@@ -33,74 +33,18 @@ from league_config import get_league_config  # noqa: E402
 
 BASE_URL = "https://www.football-data.co.uk/mmz4281/{code}/{div}.csv"
 
-# ── EFL Championship derbies — names as they appear in football-data.co.uk ──
-# (EFL keeps source names verbatim; see _LEAGUES[...]["normalize_names"].)
-_EFL_DERBIES_LOCAL: set[tuple[str, str]] = {
-    ("Sheffield Weds", "Sheffield United"),
-    ("Nottm Forest", "Derby"),
-    ("Leeds", "Sheffield United"),
-    ("Sunderland", "Middlesbrough"),
-    ("Bristol City", "Cardiff"),
-    ("Norwich", "Ipswich"),
-    ("Burnley", "Blackburn"),
-    ("QPR", "Millwall"),
-    ("Watford", "Luton"),
-}
-
-_EFL_DERBIES_HISTORICAL: set[tuple[str, str]] = {
-    ("West Brom", "Wolves"),
-    ("Leeds", "Sheffield Weds"),
-    ("Preston", "Blackpool"),
-    ("Stoke", "Port Vale"),
-    ("Coventry", "Leicester"),
-    ("Hull", "Sheffield United"),
-    ("Derby", "Leicester"),
-    ("Sunderland", "Newcastle"),
-    ("Huddersfield", "Leeds"),
-    ("Birmingham", "West Brom"),
-    ("Charlton", "Millwall"),
-}
-
-# ── Premier League derbies ──
-# In *canonical* form ("Arsenal FC"), because PL normalises team names during
-# column mapping and derby detection runs afterwards. Derived from the derby
-# flags already present in the PL canonical so a rebuild reproduces them.
-_PL_DERBIES_LOCAL: set[tuple[str, str]] = {
-    ("Arsenal FC", "Tottenham Hotspur FC"),
-    ("Aston Villa FC", "Birmingham City FC"),
-    ("Brighton & Hove Albion FC", "Crystal Palace FC"),
-    ("Chelsea FC", "Fulham FC"),
-    ("Everton FC", "Liverpool FC"),
-    ("Manchester City FC", "Manchester United FC"),
-    ("Newcastle United FC", "Sunderland AFC"),
-    ("West Bromwich Albion FC", "Wolverhampton Wanderers FC"),
-}
-
-_PL_DERBIES_HISTORICAL: set[tuple[str, str]] = {
-    ("Arsenal FC", "Chelsea FC"),
-    ("Arsenal FC", "Manchester United FC"),
-    ("Chelsea FC", "Liverpool FC"),
-    ("Chelsea FC", "Manchester United FC"),
-    ("Liverpool FC", "Manchester City FC"),
-    ("Liverpool FC", "Manchester United FC"),
-}
-
 # ── Per-league build settings ──
 # Only what is genuinely league-specific lives here; division code, output
 # path and season range come from league_config so there is one source of truth.
 _LEAGUES: dict[str, dict[str, Any]] = {
     "PL": {
         "raw_dir": os.path.join(PROJECT_DIR, "data", "pl_raw"),
-        "derbies_local": _PL_DERBIES_LOCAL,
-        "derbies_historical": _PL_DERBIES_HISTORICAL,
         # PL canonical uses long-form names ("Arsenal FC"), so source names
         # must be normalised on the way in.
         "normalize_names": True,
     },
     "EFL": {
         "raw_dir": os.path.join(PROJECT_DIR, "data", "championship_raw"),
-        "derbies_local": _EFL_DERBIES_LOCAL,
-        "derbies_historical": _EFL_DERBIES_HISTORICAL,
         # EFL canonical uses football-data.co.uk's own short forms
         # ("Blackburn"). Normalising would rewrite 23 of 24 names and break
         # the ESPN/odds mappings and the Betfair League Split allowlists.
@@ -141,6 +85,10 @@ def _settings(league: str, output: str | None = None) -> dict[str, Any]:
     # sibling — every arrival there came up.
     settings["sibling_canonical_path"] = (
         get_league_config("PL")["csv_path"] if league == "EFL" else None)
+    # One derby list per league, living in league_config (ADR 0007 decision 9).
+    # There were four copies; the one here was the last to be removed.
+    settings["derbies_local"] = cfg["derbies_local"]
+    settings["derbies_historical"] = cfg["derbies_historical"]
     settings["first_season"] = cfg["first_season_idx"]
     settings["last_season"] = cfg["current_season_idx"]
     return settings
@@ -291,22 +239,15 @@ def _map_columns(
 
 
 def _is_derby(home: str, away: str, derby_set: set[tuple[str, str]]) -> bool:
-    """Check if a fixture is a derby (order-independent)."""
-    pair = (home, away)
-    rev = (away, home)
-    for d in derby_set:
-        if pair == d or rev == d:
-            return True
-        # Fuzzy: check if either team name is contained in the derby tuple
-        h_low, a_low = home.lower(), away.lower()
-        d0_low, d1_low = d[0].lower(), d[1].lower()
-        if ((d0_low in h_low or h_low in d0_low) and
-                (d1_low in a_low or a_low in d1_low)):
-            return True
-        if ((d0_low in a_low or a_low in d0_low) and
-                (d1_low in h_low or h_low in d1_low)):
-            return True
-    return False
+    """Is this fixture a derby? Exact, order-independent pair matching.
+
+    Substring matching was dropped (ADR 0007 decision 9): it is the same
+    silent-failure mode as `normalize()`'s fallback and the odds-feed resolver
+    that mapped "Coventry City" onto "Manchester City FC". Exact matching
+    fails visibly instead — a pair naming a club the canonical does not use
+    simply never matches, which `tests/test_derby_config.py` asserts against.
+    """
+    return (home, away) in derby_set or (away, home) in derby_set
 
 
 def _season_teams(df: pd.DataFrame, season: int) -> set[str]:

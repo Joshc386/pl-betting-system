@@ -41,6 +41,14 @@ _TOL_LOW, _TOL_HIGH = 0.8, 1.25
 _EXEMPT: dict[str, str] = {
     "Home_LeaguePosition": "20-team division vs 24 — mid-table is 10.5 vs 12.5",
     "Away_LeaguePosition": "20-team division vs 24 — mid-table is 10.5 vs 12.5",
+    # One list and one exact matcher now serve both leagues (ADR 0007 decision
+    # 9), so the contract holds; the rates still differ because the divisions
+    # contain different clubs. A mean-ratio test can never pass here, and left
+    # as xfail it would be a permanent allowance that never resolves — exactly
+    # what the strict mechanism exists to prevent. The real contract is checked
+    # by tests/test_derby_config.py instead.
+    "Local Derby": "different clubs per division — rate is not comparable",
+    "Historical Derby": "different clubs per division — rate is not comparable",
 }
 
 # The 15 divergences ADR 0007 accepted but has not yet fixed, each against
@@ -56,8 +64,6 @@ _KNOWN_DIVERGENCES: dict[str, str] = {
     "Away_DefensiveStrength_SOT": "decision 4 — 1÷SOT-conceded is not a rate",
     "Home_Promoted": "decision 1 — hand-maintained dicts, dead in both leagues",
     "Away_Promoted": "decision 1 — hand-maintained dicts, dead in both leagues",
-    "Local Derby": "decision 9 — exact tuple match vs fuzzy substring match",
-    "Historical Derby": "decision 9 — exact tuple match vs fuzzy substring match",
     "H2H_HomeWins": "decision 6 — last 5 meetings vs all meetings; being dropped",
     "H2H_AwayWins": "decision 6 — last 5 meetings vs all meetings; being dropped",
     "H2H_Draws": "decision 6 — last 5 meetings vs all meetings; being dropped",
