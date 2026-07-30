@@ -118,15 +118,26 @@ errors in `tests/test_championship.py` are pre-existing and unrelated.
 - **A club promoted into either league needs a mapping entry**, not a code
   change. That was already true; it is now the only true path.
 
-- **`api/team_mapping.py::normalize()` is a different contract and is
-  deliberately not consolidated here.** It maps *data-source* names (FPL,
-  football-data.org) to canonical names via an alias table, not feed names
-  against a live `our_teams` set. It carries the same failure family and worse:
-  its substring fallback matches three-letter alias codes inside longer names,
-  so `normalize("Bristol Rovers")` returns `"Stockport County FC"` (via `"sto"`
-  in "bri**sto**l rovers") and `normalize("Manchester")` returns `"Chelsea FC"`
-  (via `"che"` in "man**che**ster"). [0007](0007-one-feature-contract-per-name.md)
-  decision 3 already cites this fallback as the failure mode that hid the
-  Bradford City gap. Whether well-formed source names can reach it in practice
-  is not established. **Known open gap**, out of scope for this ADR, and the
-  reason it is recorded here rather than fixed in passing.
+- **`api/team_mapping.py::normalize()` remains a separate contract, but its
+  version of this failure is now fixed** (`25881a2`). It maps *data-source*
+  names (FPL, football-data.org, Understat, ESPN) to canonical names via an
+  alias table, rather than feed names against a live `our_teams` set, so it is
+  not consolidated onto `resolve_feed_team`. It had the same failure by a
+  different mechanism: a substring fallback that found short alias codes inside
+  longer names, returning `"Stockport County FC"` for `"Bristol Rovers"` (via
+  `"sto"` in "bri**sto**l rovers") and `"Chelsea FC"` for `"Manchester"` (via
+  `"che"` in "man**che**ster"). Of 22 real EFL clubs absent from the table, 11
+  resolved to the wrong club.
+
+  It was reachable, and by the same route as everything else in this ADR: a
+  club absent from the table is what promotion produces, and
+  [0007](0007-one-feature-contract-per-name.md) decision 3 already cites this
+  fallback as what hid the Bradford City gap. Matching is now on whole names
+  only — the codes stay, since a code is a name for its own club, but cannot be
+  found inside another club's name — and an unrecognised name is returned
+  untouched.
+
+  **The shared principle, stated once:** a name resolves to a club or it
+  resolves to nothing. Fragments of a name are not evidence about which club it
+  is, whether the fragment is a shared city ("Bristol"), a shared surname
+  ("City") or a substring that happens to spell another club's code ("sto").
