@@ -603,10 +603,18 @@ def _add_league_position(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _add_h2h(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute head-to-head stats for each fixture."""
-    df["H2H_HomeWins"] = 0
-    df["H2H_AwayWins"] = 0
-    df["H2H_Draws"] = 0
+    """Compute head-to-head goal averages for each fixture.
+
+    The win counts (`H2H_HomeWins`, `H2H_AwayWins`, `H2H_Draws`) were dropped
+    by ADR 0007 decision 6. They correlate with total goals at ±0.01–0.045 and
+    `H2H_HomeWins` has *opposite signs* across the two leagues, so whatever
+    they carried was not a shared signal. They also encode match result, which
+    no market this system bets asks about.
+
+    The averages are kept: `H2HAvgGoals` correlates +0.051 (PL) / +0.022 (EFL)
+    with total goals and retains +0.047 / +0.021 once team form is partialled
+    out, so it is not a restatement of recent form.
+    """
     df["H2H_AvgGoals_5"] = np.nan
     df["H2HAvgGoals"] = np.nan
     df["H2H_MatchCount"] = 0
@@ -622,26 +630,19 @@ def _add_h2h(df: pd.DataFrame) -> pd.DataFrame:
 
         if len(history) > 0:
             # Compute H2H stats from PRIOR meetings
-            hw = sum(1 for m in history if m["winner"] == home)
-            aw = sum(1 for m in history if m["winner"] == away)
-            draws = sum(1 for m in history if m["winner"] is None)
             all_goals = [m["tg"] for m in history]
             recent_goals = all_goals[-5:] if len(all_goals) >= 5 else all_goals
 
-            df.at[idx, "H2H_HomeWins"] = hw
-            df.at[idx, "H2H_AwayWins"] = aw
-            df.at[idx, "H2H_Draws"] = draws
             df.at[idx, "H2H_AvgGoals_5"] = np.mean(recent_goals) if recent_goals else np.nan
             df.at[idx, "H2HAvgGoals"] = np.mean(all_goals) if all_goals else np.nan
             df.at[idx, "H2H_MatchCount"] = len(history)
 
-        # Add this match to history
+        # Add this match to history. Only total goals is retained — the
+        # result was needed solely by the win counts decision 6 removed.
         hg = row["Home_Goals"]
         ag = row["Away_Goals"]
         if pd.notna(hg) and pd.notna(ag):
-            ftr = row.get("FTR", "")
-            winner = home if ftr == "H" else (away if ftr == "A" else None)
-            history.append({"tg": hg + ag, "winner": winner})
+            history.append({"tg": hg + ag})
             h2h_results[key] = history
 
     return df

@@ -87,14 +87,27 @@ def test_per_season_row_counts_unchanged(efl_rebuild, efl_live):
 # stale entry here fails the suite — which is how that publish was noticed.
 PENDING_NEW_COLUMNS: set[str] = set()
 
+# The same idea in reverse: columns the rebuild deliberately drops that the
+# published canonical still carries. ADR 0007 decision 6 removes the H2H win
+# counts, and the canonical loses them at its next publish — which now needs
+# `--allow-schema-change`, because daily_ingest's schema gate refuses an
+# unattended column change. Empty this set once that publish has happened.
+PENDING_REMOVED_COLUMNS = {"H2H_HomeWins", "H2H_AwayWins", "H2H_Draws"}
+
 
 def test_schema_unchanged(efl_rebuild, efl_live):
-    """The rebuild must lose no column, and add only the ones we intend."""
+    """The rebuild may only add or drop columns we have declared.
+
+    Strict in both directions: an undeclared change fails, and so does a
+    declaration that has gone stale.
+    """
     added = set(efl_rebuild.columns) - set(efl_live.columns)
     lost = set(efl_live.columns) - set(efl_rebuild.columns)
-    assert lost == set(), f"rebuild dropped columns: {sorted(lost)}"
     assert added == PENDING_NEW_COLUMNS, (
         f"rebuild added {sorted(added)}, expected {sorted(PENDING_NEW_COLUMNS)}")
+    assert lost == PENDING_REMOVED_COLUMNS, (
+        f"rebuild dropped {sorted(lost)}, "
+        f"expected {sorted(PENDING_REMOVED_COLUMNS)}")
 
 
 def test_facts_are_byte_identical(efl_rebuild, efl_live):

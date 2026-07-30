@@ -64,9 +64,6 @@ _KNOWN_DIVERGENCES: dict[str, str] = {
     "Away_DefensiveStrength_SOT": "decision 4 — 1÷SOT-conceded is not a rate",
     "Home_Promoted": "decision 1 — hand-maintained dicts, dead in both leagues",
     "Away_Promoted": "decision 1 — hand-maintained dicts, dead in both leagues",
-    "H2H_HomeWins": "decision 6 — last 5 meetings vs all meetings; being dropped",
-    "H2H_AwayWins": "decision 6 — last 5 meetings vs all meetings; being dropped",
-    "H2H_Draws": "decision 6 — last 5 meetings vs all meetings; being dropped",
 }
 
 _NEAR_ZERO = 1e-9

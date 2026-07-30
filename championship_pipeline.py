@@ -705,7 +705,7 @@ CHAMP_ALL_FEATURES = [
     "Home_Past5CornersConceded", "Away_Past5CornersConceded",
     "Home_Promoted", "Away_Promoted",
     "Local Derby", "Historical Derby",
-    "H2H_HomeWins", "H2H_AwayWins", "H2H_Draws",
+    # H2H win counts dropped by ADR 0007 decision 6 — see config.py.
     "H2H_AvgGoals_5", "H2HAvgGoals",
     # Derived
     "LeaguePosition_Diff", "Home_GoalDiff_5", "Away_GoalDiff_5",

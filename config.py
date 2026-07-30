@@ -72,8 +72,10 @@ EXISTING_FEATURES = [
     "Home_Promoted", "Away_Promoted",
     "Local Derby", "Historical Derby",
 
-    # H2H
-    "H2H_HomeWins", "H2H_AwayWins", "H2H_Draws",
+    # H2H — goal averages only. The win counts were dropped by ADR 0007
+    # decision 6: ±0.01-0.045 correlation with total goals, opposite signs
+    # across the leagues, and they encode match result, which no market this
+    # system bets asks about.
     "H2H_AvgGoals_5", "H2HAvgGoals",
 ]
 
