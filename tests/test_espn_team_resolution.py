@@ -24,6 +24,10 @@ from api.espn_scores import _ESPN_TO_CHAMP, _ESPN_TO_PL, _resolve_team
     ("Sheffield Wednesday", "Sheffield Weds"),
     ("Queens Park Rangers", "QPR"),
     ("West Bromwich Albion", "West Brom"),
+    # 2026/27 arrivals: a club with no canonical history, and one that is
+    # also in _ESPN_TO_PL — the ELC path must answer in the short form.
+    ("Lincoln City", "Lincoln"),
+    ("West Ham United", "West Ham"),
 ])
 def test_a_mapped_efl_club_resolves_to_its_short_form(
         espn_name: str, expected: str) -> None:
@@ -33,7 +37,7 @@ def test_a_mapped_efl_club_resolves_to_its_short_form(
 
 @pytest.mark.parametrize("espn_name", [
     "Plymouth Argyle",
-    "Cardiff City",
+    "Rotherham United",
     "Luton Town",
 ])
 def test_an_unmapped_efl_club_resolves_to_nothing(espn_name: str) -> None:

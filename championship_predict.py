@@ -124,6 +124,12 @@ _ODDS_API_TO_CHAMP: dict[str, str] = {
     "Watford": "Watford",
     "West Bromwich Albion": "West Brom",
     "West Brom": "West Brom",
+    # 2026/27 arrivals — relegated from the PL or promoted from League One.
+    # Lincoln have no canonical history, so the fuzzy path cannot back this
+    # entry up: without it their fixtures resolve to None and vanish.
+    "Bolton Wanderers": "Bolton",
+    "Lincoln City": "Lincoln",
+    "West Ham United": "West Ham",
     # Recent Championship teams (for when squads change)
     "Birmingham City": "Birmingham",
     "Charlton Athletic": "Charlton",
@@ -147,6 +153,7 @@ _ODDS_API_TO_CHAMP: dict[str, str] = {
     "Watford FC": "Watford",
     "Sunderland FC": "Sunderland",
     "Burnley FC": "Burnley",
+    "Lincoln City FC": "Lincoln",
 }
 
 

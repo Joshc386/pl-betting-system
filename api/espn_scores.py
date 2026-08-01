@@ -58,6 +58,12 @@ _ESPN_TO_PL: dict[str, str] = {
 _ESPN_TO_CHAMP: dict[str, str] = {
     "Birmingham City": "Birmingham",
     "Blackburn Rovers": "Blackburn",
+    "Bolton Wanderers": "Bolton",
+    "Burnley": "Burnley",
+    "Cardiff City": "Cardiff",
+    "Lincoln City": "Lincoln",
+    "West Ham United": "West Ham",
+    "Wolverhampton Wanderers": "Wolves",
     "Bristol City": "Bristol City",
     "Charlton Athletic": "Charlton",
     "Coventry City": "Coventry",
