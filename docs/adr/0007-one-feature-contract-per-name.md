@@ -6,7 +6,11 @@ Date: 2026-07-26
 
 Accepted. Implementation in progress — decisions **1 and 2 landed 2026-07-28**
 (`Promoted`/`Relegated` derived from the Canonical Datasets; both builder dicts
-deleted). Decisions 3–10 remain pending.
+deleted), **6 and 9 landed 2026-07-30** (H2H win counts dropped; one derby list
+per league, matched exactly), **7 landed 2026-08-01** (`Factor` retired; the
+builder now emits `ScoringRate_10` and `ScoringIndex_10`, named per venue).
+Decisions 3, 4, 5, 8 and 10 remain pending — 8 needs no code beyond what the
+builder already does; a PL rebuild resolves it.
 
 The derived flags reach the models only once the canonicals are rebuilt and
 republished, which happens with the retrain. Until then the published

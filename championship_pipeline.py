@@ -690,7 +690,8 @@ def add_context_features(df: pd.DataFrame) -> pd.DataFrame:
 # All Championship features in canonical order (O/U 2.5 model)
 CHAMP_ALL_FEATURES = [
     # From CSV (basic rolling)
-    "Home Factor", "Away Factor",
+    "Home_ScoringRate_10", "Away_ScoringRate_10",
+    "Home_ScoringIndex_10", "Away_ScoringIndex_10",
     "Home_AvgShotsOnTarget_5", "Away_AvgShotsOnTarget_5",
     "Home_ShotRatio_5", "Away_ShotRatio_5",
     "Home_ShotsPerGoal_5", "Away_ShotsPerGoal_5",

@@ -159,8 +159,8 @@ class TestAuditFeaturesSchema:
                     "Over_2_5": int((hg + ag) > 2),
                     # Include at least one feature from ALL_FEATURES so the
                     # audit has something to work with
-                    "Home Factor": rng.normal(0, 1),
-                    "Away Factor": rng.normal(0, 1),
+                    "Home_ScoringRate_10": rng.normal(0, 1),
+                    "Away_ScoringRate_10": rng.normal(0, 1),
                 })
         return pd.DataFrame(rows)
 

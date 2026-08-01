@@ -54,8 +54,6 @@ _EXEMPT: dict[str, str] = {
 # The 15 divergences ADR 0007 accepted but has not yet fixed, each against
 # the decision that retires it. Delete an entry when its decision lands.
 _KNOWN_DIVERGENCES: dict[str, str] = {
-    "Home Factor": "decision 7 — rolling-10 mean vs ratio-to-league-average",
-    "Away Factor": "decision 7 — rolling-10 mean vs ratio-to-league-average",
     "Home_ShotRatio_5": "decision 8 — shots÷SOT (PL) vs SOT÷shots (EFL)",
     "Away_ShotRatio_5": "decision 8 — shots÷SOT (PL) vs SOT÷shots (EFL)",
     "Home_DefensiveStrength_5": "decision 4 — 1÷shots-conceded is not a rate",

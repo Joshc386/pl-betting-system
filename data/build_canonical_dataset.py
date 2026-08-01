@@ -662,10 +662,19 @@ def _add_h2h(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _add_factor(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute Home/Away Factor (rolling goal ratio vs league average)."""
-    df["Home Factor"] = np.nan
-    df["Away Factor"] = np.nan
+def _add_scoring_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute the rolling scoring features (ADR 0007 decision 7).
+
+    ``ScoringRate_10`` is the rolling-10 mean of a team's goals at this venue
+    (what the PL canonical called ``Factor``). ``ScoringIndex_10`` divides
+    that rate by the season's venue average (what the EFL canonical called
+    ``Factor``) — league scoring drifts ~34% across the training window, so
+    the Index is the cross-era-comparable form. Both need 3 prior venue
+    matches in the season before they exist.
+    """
+    for col in ("Home_ScoringRate_10", "Home_ScoringIndex_10",
+                "Away_ScoringRate_10", "Away_ScoringIndex_10"):
+        df[col] = np.nan
 
     for _, season_group in df.groupby("SeasonIndex"):
         season_matches = season_group.sort_values("Date")
@@ -677,23 +686,27 @@ def _add_factor(df: pd.DataFrame) -> pd.DataFrame:
             hg = row["Home_Goals"]
             ag = row["Away_Goals"]
 
-            # Factor BEFORE this match
+            # Features BEFORE this match
             h_hist = team_home_goals.get(home, [])
             a_hist = team_away_goals.get(away, [])
 
             if len(h_hist) >= 3:
+                rate = np.mean(h_hist[-10:])
+                df.at[idx, "Home_ScoringRate_10"] = rate
                 league_avg_home = np.mean(
                     [g for goals in team_home_goals.values() for g in goals]
                 )
                 if league_avg_home > 0:
-                    df.at[idx, "Home Factor"] = np.mean(h_hist[-10:]) / league_avg_home
+                    df.at[idx, "Home_ScoringIndex_10"] = rate / league_avg_home
 
             if len(a_hist) >= 3:
+                rate = np.mean(a_hist[-10:])
+                df.at[idx, "Away_ScoringRate_10"] = rate
                 league_avg_away = np.mean(
                     [g for goals in team_away_goals.values() for g in goals]
                 )
                 if league_avg_away > 0:
-                    df.at[idx, "Away Factor"] = np.mean(a_hist[-10:]) / league_avg_away
+                    df.at[idx, "Away_ScoringIndex_10"] = rate / league_avg_away
 
             # Record this match
             if pd.notna(hg):
@@ -910,9 +923,9 @@ def build(
     print("Adding derby flags...")
     df = _add_derby_flags(df, s["derbies_local"], s["derbies_historical"])
 
-    # Step 7: Home/Away Factor
-    print("Computing home/away factor...")
-    df = _add_factor(df)
+    # Step 7: Rolling scoring rate and index (ADR 0007 decision 7)
+    print("Computing scoring rate/index...")
+    df = _add_scoring_features(df)
 
     # Save
     df.to_csv(s["output_path"], index=False)

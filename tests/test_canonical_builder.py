@@ -85,14 +85,21 @@ def test_per_season_row_counts_unchanged(efl_rebuild, efl_live):
 # the Relegated columns on its 2026-07-29 run, the morning after ADR 0007
 # decision 2 landed. The assertion below is strict in both directions, so a
 # stale entry here fails the suite — which is how that publish was noticed.
-PENDING_NEW_COLUMNS: set[str] = set()
+# ADR 0007 decision 7: Factor is retired and both of its meanings get a
+# name of their own. The columns arrive at the next deliberate publish.
+PENDING_NEW_COLUMNS: set[str] = {
+    "Home_ScoringRate_10", "Away_ScoringRate_10",
+    "Home_ScoringIndex_10", "Away_ScoringIndex_10",
+}
 
 # The same idea in reverse: columns the rebuild deliberately drops that the
 # published canonical still carries. ADR 0007 decision 6 removes the H2H win
-# counts, and the canonical loses them at its next publish — which now needs
-# `--allow-schema-change`, because daily_ingest's schema gate refuses an
-# unattended column change. Empty this set once that publish has happened.
-PENDING_REMOVED_COLUMNS = {"H2H_HomeWins", "H2H_AwayWins", "H2H_Draws"}
+# counts, decision 7 the Factor pair; the canonical loses them at its next
+# publish — which now needs `--allow-schema-change`, because daily_ingest's
+# schema gate refuses an unattended column change. Empty this set once that
+# publish has happened.
+PENDING_REMOVED_COLUMNS = {"H2H_HomeWins", "H2H_AwayWins", "H2H_Draws",
+                           "Home Factor", "Away Factor"}
 
 
 def test_schema_unchanged(efl_rebuild, efl_live):
@@ -439,3 +446,77 @@ def test_no_refresh_flag_caches_every_season(monkeypatch):
                   refresh_current_season=False)
 
     assert all(use_cache for _, use_cache in calls)
+
+
+# ── ADR 0007 decision 7: Factor retired, ScoringRate_10 + ScoringIndex_10 ──
+#
+# "Factor" denoted the rolling-10 mean in the PL canonical and that mean
+# divided by the season's league average in the EFL one. Both quantities are
+# now emitted under names that say which is which; the old column is gone.
+
+def _scoring_fixture() -> pd.DataFrame:
+    """A hand-computable mini-season.
+
+    A hosts B four times; C hosts D twice in between. Before A's fourth home
+    match, A's home history is [2, 4, 0] and B's away history is [1, 1, 1] —
+    both exactly at the 3-match minimum.
+    """
+    rows = []
+    fixtures = [
+        ("A", "B", 2, 1),
+        ("C", "D", 1, 0),
+        ("A", "B", 4, 1),
+        ("C", "D", 1, 0),
+        ("A", "B", 0, 1),
+        ("A", "B", 3, 2),  # features computed BEFORE this match
+    ]
+    for i, (h, a, hg, ag) in enumerate(fixtures):
+        rows.append({
+            "SeasonIndex": 3,
+            "Date": pd.Timestamp("2003-08-01") + pd.Timedelta(days=i),
+            "Home_Team": h, "Away_Team": a,
+            "Home_Goals": hg, "Away_Goals": ag,
+        })
+    return pd.DataFrame(rows)
+
+
+def test_scoring_rate_is_the_rolling_mean():
+    """ScoringRate_10 is the raw rolling-10 venue mean (the PL semantic)."""
+    from data.build_canonical_dataset import _add_scoring_features
+
+    out = _add_scoring_features(_scoring_fixture())
+    last = out.iloc[-1]
+    assert last["Home_ScoringRate_10"] == pytest.approx((2 + 4 + 0) / 3)
+    assert last["Away_ScoringRate_10"] == pytest.approx(1.0)
+
+
+def test_scoring_index_is_the_rate_over_league_average():
+    """ScoringIndex_10 divides the rate by the season's venue average
+    (the EFL semantic). League home goals seen before the last match are
+    A's [2, 4, 0] and C's [1, 1]; away are B's [1, 1, 1] and D's [0, 0]."""
+    from data.build_canonical_dataset import _add_scoring_features
+
+    out = _add_scoring_features(_scoring_fixture())
+    last = out.iloc[-1]
+    assert last["Home_ScoringIndex_10"] == pytest.approx(2.0 / 1.6)
+    assert last["Away_ScoringIndex_10"] == pytest.approx(1.0 / 0.6)
+
+
+def test_scoring_features_need_three_prior_venue_matches():
+    """Below the 3-match minimum every scoring column stays NaN."""
+    from data.build_canonical_dataset import _add_scoring_features
+
+    out = _add_scoring_features(_scoring_fixture())
+    early = out.iloc[:-1]
+    for col in ("Home_ScoringRate_10", "Home_ScoringIndex_10",
+                "Away_ScoringRate_10", "Away_ScoringIndex_10"):
+        assert early[col].isna().all(), f"{col} appeared before 3 matches"
+
+
+def test_the_factor_name_is_retired():
+    """The builder must not emit the retired column under either name."""
+    from data.build_canonical_dataset import _add_scoring_features
+
+    out = _add_scoring_features(_scoring_fixture())
+    assert "Home Factor" not in out.columns
+    assert "Away Factor" not in out.columns

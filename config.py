@@ -41,8 +41,10 @@ TEST_SEASONS = [25]                      # Season 25 (2025/26 - current)
 # ── Features ──
 # Columns from CompleteDSPL_CSV.csv to use directly
 EXISTING_FEATURES = [
-    # Factor (contains potential leakage in X1-X3 but we'll address in pipeline)
-    "Home Factor", "Away Factor",
+    # Rolling scoring form (ADR 0007 decision 7: Rate is the rolling-10 venue
+    # mean; Index is that rate over the season's venue average)
+    "Home_ScoringRate_10", "Away_ScoringRate_10",
+    "Home_ScoringIndex_10", "Away_ScoringIndex_10",
 
     # Shot stats (rolling 5-game)
     "Home_AvgShotsOnTarget_5", "Away_AvgShotsOnTarget_5",
