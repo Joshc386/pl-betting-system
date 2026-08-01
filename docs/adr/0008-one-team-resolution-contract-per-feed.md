@@ -5,12 +5,17 @@ Date: 2026-07-30
 ## Status
 
 Accepted. Implemented 2026-07-30 (`e82d4d1`), following the wrong-club fix in
-`f30d366`.
+`f30d366`. Extended the same day to `api/team_mapping.py::normalize()`
+(`25881a2`, `4cc05cf`).
 
 Applies to odds-feed resolution the principle
 [0007](0007-one-feature-contract-per-name.md) establishes for canonical
-features. Does **not** cover `api/team_mapping.py::normalize()`, which is a
-different contract — see Consequences.
+features.
+
+`normalize()` keeps its own **resolution mechanism** — an alias table, rather
+than feed names weighed against a live `our_teams` set — and is not
+consolidated onto `resolve_feed_team`. It is now held to the same **contract**:
+resolve to a club, or say so. Both halves are recorded in Consequences.
 
 ## Context
 
@@ -134,10 +139,50 @@ errors in `tests/test_championship.py` are pre-existing and unrelated.
   [0007](0007-one-feature-contract-per-name.md) decision 3 already cites this
   fallback as what hid the Bradford City gap. Matching is now on whole names
   only — the codes stay, since a code is a name for its own club, but cannot be
-  found inside another club's name — and an unrecognised name is returned
-  untouched.
+  found inside another club's name.
+
+- **An unresolved name is now distinguishable from a resolved one** (`4cc05cf`).
+  Removing the fragment matching fixed the wrong answers but not the silence:
+  `normalize()` returns its input when it cannot resolve it, so `"Manchester"`
+  — a city no club is called — came back looking exactly like a canonical team
+  name. Half the contract was still missing. No caller could tell the two
+  apart, and the string went on to be written into the canonical datasets, used
+  as a pipeline merge key, and matched against open bets.
+
+  `is_known_team()` answers the question the return value cannot;
+  `assert_known_teams()` raises, naming what did not resolve; and `normalize()`
+  warns once per unrecognised name — once per *name*, not per call, because
+  `pipeline.py` normalises whole columns and a single unmapped club would
+  otherwise log thousands of times and be worse than silence.
+
+  Strict where an unknown cannot simply be skipped:
+
+  | Boundary | Why it cannot skip |
+  |---|---|
+  | `data/build_canonical_dataset.py`, `data/add_season.py` | The canonical is the training data. A name stored unresolved becomes a team of its own, for every spelling the feed uses. |
+  | `api/espn_scores.py` | Settlement keys bets on `(home_team, away_team)`. A name in the wrong format matches nothing, so the bet stays open with nothing said. |
+
+  A guard on a build path has to be verified against the build, not only
+  against tests. Two defects surfaced only that way, both in code the tests
+  were green on: `E0_1415.csv` carries a blank row, which `astype(str)` renders
+  as the string `"nan"` — checking the mapped column rather than the source
+  values would have failed every rebuild on a file that has always been fine —
+  and normalising that `"nan"` logged an unrecognised-team warning on every
+  run, which is how a team learns to ignore warnings.
+
+- **The ESPN Championship resolver had no valid fallback and now has none.**
+  An EFL club missing from `_ESPN_TO_CHAMP` fell through to `normalize()`,
+  which answers in Premier League canonical names (`"Blackburn Rovers FC"`)
+  while the EFL database holds football-data.co.uk short forms
+  (`"Blackburn"`). Those cannot match, so such a club's bets were
+  unsettleable and nothing said so. Masked only because that hand-maintained
+  25-entry map happens to cover the current division — the next promoted club
+  would have hit it. Unresolved now returns `None`, and the match is skipped
+  and logged.
 
   **The shared principle, stated once:** a name resolves to a club or it
-  resolves to nothing. Fragments of a name are not evidence about which club it
-  is, whether the fragment is a shared city ("Bristol"), a shared surname
-  ("City") or a substring that happens to spell another club's code ("sto").
+  resolves to nothing, and *nothing* must be visible as nothing. Fragments of a
+  name are not evidence about which club it is — not a shared city
+  ("Bristol"), a shared surname ("City"), or a substring that happens to spell
+  another club's code ("sto") — and a name that resolved to nothing must not be
+  returned in a shape that reads as an answer.
