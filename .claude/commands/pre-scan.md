@@ -48,11 +48,11 @@ Cross-reference teams in the odds caches against:
 Flag as **WARNING** any team that appears in API data but has no explicit mapping (relying on fuzzy fallback).
 
 ### 6. Model Pickle State
-Check `models/` directory for:
-- `pl_trained_state.pkl` — PL trained models
-- `efl_trained_state.pkl` — Championship trained models
-- `pl_pipeline_cache.pkl` — PL pipeline DataFrame cache
-- `efl_pipeline_cache.pkl` — Championship pipeline DataFrame cache
+Check for:
+- `models/pl_trained_state.pkl` — PL trained models
+- `models/championship/efl_trained_state.pkl` — Championship trained models
+- `models/pl_pipeline_cache.pkl` — PL pipeline DataFrame cache
+- `models/championship/efl_pipeline_cache.pkl` — Championship pipeline DataFrame cache
 
 Report age of each file. Flag as **WARNING** if older than 7 days (should be refreshed weekly by Sunday retrain).
 
