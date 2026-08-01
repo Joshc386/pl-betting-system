@@ -15,7 +15,7 @@ import pandas as pd
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_DIR)
-from api.team_mapping import normalize
+from api.team_mapping import assert_known_teams, normalize
 
 
 # Promoted teams per season (extend as needed)
@@ -36,6 +36,12 @@ def load_main_csv():
 def fotmob_to_base(fotmob_path: str, season_index: int) -> pd.DataFrame:
     """Convert a FotMob matches CSV to the base columns of CompleteDSPL_CSV.csv."""
     fm = pd.read_csv(fotmob_path)
+
+    # These names go into the canonical, which is the training data. One that
+    # does not resolve becomes a team of its own rather than the club it names.
+    assert_known_teams(
+        set(fm["home_team"]) | set(fm["away_team"]),
+        f"season {season_index} from {os.path.basename(fotmob_path)}")
 
     rows = []
     for _, r in fm.iterrows():

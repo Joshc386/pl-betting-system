@@ -11,8 +11,12 @@ short code sits inside some real name: "BUR" is in "Blackburn", "CHE" in
 "Manchester City", "STO" in "Bristol Rovers", "MIL" in "Milton Keynes Dons".
 So "Bristol Rovers" normalised to Stockport County and "Manchester" to
 Chelsea. A code is a name for one club, never a fragment of another's.
-A name this table does not recognise is returned untouched.
+A name this table does not recognise is returned untouched, and warned about.
+Use `is_known_team()` to tell the two apart before trusting the result.
 """
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Canonical names in CompleteDSPL_CSV.csv -> aliases from other sources
 _ALIASES = {
@@ -128,19 +132,84 @@ for _key in _ambiguous:
     del _BY_KEY[_key]
 
 
-def normalize(name: str) -> str:
-    """Convert any team name variant to the canonical CSV name.
-
-    An unrecognised name is returned as it came in. Callers see the original
-    string and can flag it; what they must never see is a different club's
-    name in place of one this table has never been taught.
-    """
-    # Strip whitespace and promoted-team asterisk
+def _resolve(name: str) -> str | None:
+    """The canonical name, or None when this table has never been taught it."""
     clean = name.strip().rstrip("*").strip()
     direct = _REVERSE.get(clean.lower())
     if direct is not None:
         return direct
-    return _BY_KEY.get(_lookup_key(clean), clean)
+    return _BY_KEY.get(_lookup_key(clean))
+
+
+def is_known_team(name: str) -> bool:
+    """Whether `name` resolves to a club.
+
+    `normalize()` hands back what it was given when it cannot resolve it, so
+    its return value cannot answer this on its own: "Manchester" comes back
+    looking exactly like a canonical club name, and no club is called that.
+    Anything writing team names into stored data or matching them against
+    stored data should ask this first.
+    """
+    return _resolve(name) is not None
+
+
+def assert_known_teams(names, context: str) -> None:
+    """Raise unless every name resolves to a club.
+
+    For the boundaries where an unrecognised name cannot simply be skipped:
+    anything writing team names into stored data. The canonical datasets are
+    the training data, and a name written there is a team until someone
+    rebuilds them — an unresolved one becomes a club of its own, distinct
+    from every other appearance of the same side.
+
+    Args:
+        names: The names about to be stored.
+        context: What is being built, named in the error.
+
+    Raises:
+        ValueError: Listing every name that did not resolve.
+    """
+    unknown = sorted({str(n) for n in names if not is_known_team(str(n))})
+    if unknown:
+        raise ValueError(
+            f"{len(unknown)} team name(s) in {context} do not resolve to a "
+            f"club: {unknown}. Add them to _ALIASES in api/team_mapping.py — "
+            f"storing them unresolved would create a separate team per "
+            f"spelling.")
+
+
+# One warning per unrecognised name, not per row: pipeline.py normalises whole
+# columns, so a single unmapped club would otherwise log thousands of times.
+_unknown_names_logged: set[str] = set()
+
+
+def _reset_unknown_name_log() -> None:
+    """Forget which names have been warned about. For tests."""
+    _unknown_names_logged.clear()
+
+
+def normalize(name: str) -> str:
+    """Convert any team name variant to the canonical CSV name.
+
+    An unrecognised name is returned as it came in, and warned about once.
+    Callers see the original string and can flag it; what they must never see
+    is a different club's name in place of one this table has never held.
+
+    The string it returns is not proof of anything — use `is_known_team()`
+    before writing a name into stored data or matching one against it.
+    """
+    resolved = _resolve(name)
+    if resolved is not None:
+        return resolved
+
+    clean = name.strip().rstrip("*").strip()
+    if clean not in _unknown_names_logged:
+        _unknown_names_logged.add(clean)
+        logger.warning(
+            "Unrecognised team name %r — returned unchanged. It will read as "
+            "a team name downstream and match nothing. Add it to _ALIASES in "
+            "api/team_mapping.py.", clean)
+    return clean
 
 
 def get_all_current_teams():

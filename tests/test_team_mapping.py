@@ -205,6 +205,163 @@ def test_every_team_in_the_canonical_datasets_resolves() -> None:
         f"in a canonical dataset but not in the team table: {unknown}")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Saying "I don't know this name"
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("name,known", [
+    ("Arsenal", True),
+    ("Arsenal FC", True),
+    ("Man Utd", True),
+    ("MCI", True),
+    ("Wrexham", True),
+    ("Manchester", False),      # a city; no club is called this
+    ("Bristol Rovers", False),  # a real club this table has never held
+    ("Sheffield", False),
+    ("", False),
+])
+def test_is_known_team_reports_whether_a_name_resolves(
+        name: str, known: bool) -> None:
+    """Callers need to distinguish a resolved name from an unrecognised one.
+
+    normalize() returns the input unchanged when it cannot resolve it, so the
+    return value alone cannot answer this: "Manchester" comes back looking
+    exactly like a club's canonical name.
+    """
+    from api.team_mapping import is_known_team
+
+    assert is_known_team(name) is known
+
+
+def test_an_unrecognised_name_is_logged(caplog) -> None:
+    """An unknown name is a gap in the table and must not pass silently.
+
+    It reaches the canonical datasets, the pipeline merge keys and settlement,
+    where it reads as a team name and quietly matches nothing.
+    """
+    import logging
+
+    from api import team_mapping
+
+    team_mapping._reset_unknown_name_log()
+    with caplog.at_level(logging.WARNING, logger="api.team_mapping"):
+        team_mapping.normalize("Bristol Rovers")
+
+    assert any("Bristol Rovers" in r.message for r in caplog.records), (
+        "an unrecognised name produced no warning")
+
+
+def test_a_recognised_name_is_not_logged(caplog) -> None:
+    """Normal traffic must not fill the log."""
+    import logging
+
+    from api import team_mapping
+
+    team_mapping._reset_unknown_name_log()
+    with caplog.at_level(logging.WARNING, logger="api.team_mapping"):
+        for name in ("Arsenal", "Man Utd", "Wrexham AFC", "MCI"):
+            team_mapping.normalize(name)
+
+    assert not caplog.records, f"unexpected warnings: {caplog.records}"
+
+
+def test_an_unrecognised_name_is_logged_once(caplog) -> None:
+    """pipeline.py normalises whole columns, so one warning per name, not row."""
+    import logging
+
+    from api import team_mapping
+
+    team_mapping._reset_unknown_name_log()
+    with caplog.at_level(logging.WARNING, logger="api.team_mapping"):
+        for _ in range(50):
+            team_mapping.normalize("Bristol Rovers")
+
+    assert len(caplog.records) == 1, (
+        f"{len(caplog.records)} warnings for one repeated name")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The boundaries that must refuse an unknown name
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_assert_known_teams_passes_for_real_clubs() -> None:
+    from api.team_mapping import assert_known_teams
+
+    assert_known_teams(["Arsenal", "Man Utd", "Wrexham AFC"], "a test")
+
+
+def test_assert_known_teams_names_what_it_could_not_resolve() -> None:
+    """A build that would write an unknown name must stop, and say which."""
+    from api.team_mapping import assert_known_teams
+
+    with pytest.raises(ValueError) as exc:
+        assert_known_teams(
+            ["Arsenal", "Bristol Rovers", "Manchester"], "the PL canonical")
+
+    message = str(exc.value)
+    assert "Bristol Rovers" in message and "Manchester" in message
+    assert "the PL canonical" in message
+    assert "Arsenal" not in message, "resolved names should not be reported"
+
+
+def test_the_canonical_builder_refuses_an_unknown_team() -> None:
+    """A name written into the canonical is there until someone rebuilds it.
+
+    The canonical is the training data. A club the table cannot resolve would
+    be stored as its raw feed spelling and treated as a separate team from
+    every other appearance of that club.
+    """
+    import pandas as pd
+
+    from data.build_canonical_dataset import _map_columns
+
+    raw = pd.DataFrame({
+        "Date": ["10/08/24", "11/08/24"],
+        "HomeTeam": ["Arsenal", "Bristol Rovers"],
+        "AwayTeam": ["Chelsea", "Man City"],
+        "FTHG": [1, 2], "FTAG": [0, 2], "FTR": ["H", "D"],
+    })
+
+    # Known names map without complaint.
+    ok = _map_columns(raw.iloc[[0]].copy(), 25, normalize_names=True)
+    assert ok["Home_Team"].tolist() == ["Arsenal FC"]
+
+    with pytest.raises(ValueError, match="Bristol Rovers"):
+        _map_columns(raw, 25, normalize_names=True)
+
+
+def test_the_canonical_builder_tolerates_a_blank_row(caplog) -> None:
+    """A trailing blank row is not an unresolved club.
+
+    Several football-data.co.uk season files carry them (E0_1415.csv does).
+    The column goes through astype(str) on the way in, which renders a blank
+    as the string "nan" — checking the mapped column instead of the source
+    would fail every rebuild on a file that has always been fine.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from data.build_canonical_dataset import _map_columns
+
+    raw = pd.DataFrame({
+        "Date": ["10/08/24", np.nan],
+        "HomeTeam": ["Arsenal", np.nan],
+        "AwayTeam": ["Chelsea", np.nan],
+        "FTHG": [1, np.nan], "FTAG": [0, np.nan], "FTR": ["H", np.nan],
+    })
+
+    import logging
+
+    from api import team_mapping
+    team_mapping._reset_unknown_name_log()
+    with caplog.at_level(logging.WARNING, logger="api.team_mapping"):
+        out = _map_columns(raw, 25, normalize_names=True)
+
+    assert out["Home_Team"].tolist()[0] == "Arsenal FC"
+    # And it must not warn about a team called "nan" on every rebuild.
+    assert not caplog.records, f"spurious warnings: {caplog.records}"
+
+
 def test_no_two_clubs_share_a_lookup_key() -> None:
     """An ambiguous table would reintroduce the guess by another route."""
     from api.team_mapping import _lookup_key

@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 import requests
 
-from api.team_mapping import normalize
+from api.team_mapping import is_known_team, normalize
 
 logger = logging.getLogger(__name__)
 
@@ -84,27 +84,37 @@ _ESPN_TO_CHAMP: dict[str, str] = {
 }
 
 
-def _resolve_team(espn_name: str, competition: str) -> str:
+def _resolve_team(espn_name: str, competition: str) -> str | None:
     """Map ESPN team name to the name used in the dashboard database.
+
+    Settlement keys bets on (home_team, away_team). A name in the wrong format
+    does not raise — the key simply never matches, and the bet stays open with
+    nothing said. So an unresolved name returns None and the caller skips the
+    match, which is visible.
 
     Args:
         espn_name: Team name from ESPN API.
         competition: Competition code ('PL' or 'EFL'/'ELC').
 
     Returns:
-        Database-compatible team name.
+        Database-compatible team name, or None if the name does not resolve.
     """
     if competition in ("EFL", "ELC"):
-        mapped = _ESPN_TO_CHAMP.get(espn_name)
-        if mapped:
-            return mapped
-    else:
-        mapped = _ESPN_TO_PL.get(espn_name)
-        if mapped:
-            return mapped
+        # The EFL database holds football-data.co.uk short forms ("Blackburn").
+        # normalize() answers in Premier League canonical names ("Blackburn
+        # Rovers FC"), which cannot match it, so there is no fallback here —
+        # an unmapped Championship club is unresolved, not nearly resolved.
+        return _ESPN_TO_CHAMP.get(espn_name)
 
-    # Fallback: try normalize()
-    return normalize(espn_name)
+    mapped = _ESPN_TO_PL.get(espn_name)
+    if mapped:
+        return mapped
+
+    # The PL database uses canonical long names, which is what normalize()
+    # returns — but only where it recognises the name.
+    if is_known_team(espn_name):
+        return normalize(espn_name)
+    return None
 
 
 def fetch_completed_matches(
@@ -177,6 +187,19 @@ def fetch_completed_matches(
                 # Resolve to DB names
                 home_db = _resolve_team(home_name, comp)
                 away_db = _resolve_team(away_name, comp)
+
+                if home_db is None or away_db is None:
+                    # Settling this would mean matching bets on a name the
+                    # database does not use, which silently matches nothing.
+                    # Skipping is the same outcome, said out loud.
+                    logger.warning(
+                        "ESPN [%s]: cannot resolve %s v %s to database names "
+                        "(%s unresolved) — match skipped, any bets on it stay "
+                        "open. Add it to the map in api/espn_scores.py.",
+                        comp, home_name, away_name,
+                        "home" if home_db is None else "away",
+                    )
+                    continue
 
                 # Deduplicate (same match can appear on adjacent date queries)
                 dedup_key = (home_db, away_db, date_str)

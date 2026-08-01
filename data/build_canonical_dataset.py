@@ -28,7 +28,7 @@ import requests
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_DIR)
 
-from api.team_mapping import normalize  # noqa: E402
+from api.team_mapping import assert_known_teams, normalize  # noqa: E402
 from league_config import get_league_config  # noqa: E402
 
 BASE_URL = "https://www.football-data.co.uk/mmz4281/{code}/{div}.csv"
@@ -189,8 +189,22 @@ def _map_columns(
     out["Home_Team"] = df["HomeTeam"].astype(str).str.strip()
     out["Away_Team"] = df["AwayTeam"].astype(str).str.strip()
     if normalize_names:
-        out["Home_Team"] = out["Home_Team"].map(normalize)
-        out["Away_Team"] = out["Away_Team"].map(normalize)
+        # Refuse rather than store a name nothing recognises: it would become
+        # a team of its own for every spelling the feed uses. Checked against
+        # the source values, not out[...] — those went through astype(str),
+        # which turns a blank row into the string "nan". Some season files
+        # carry trailing blanks (E0_1415.csv does); an empty row is not an
+        # unresolved club.
+        source = pd.concat([df["HomeTeam"], df["AwayTeam"]]).dropna()
+        source = source.astype(str).str.strip()
+        assert_known_teams(
+            set(source[source != ""]),
+            f"season {season_idx} of the canonical")
+        # Same reason for the mask: normalising "nan" would warn about an
+        # unrecognised team on every rebuild of a file that is fine.
+        for col, src in (("Home_Team", "HomeTeam"), ("Away_Team", "AwayTeam")):
+            real = df[src].notna()
+            out.loc[real, col] = out.loc[real, col].map(normalize)
     out["Home_Goals"] = pd.to_numeric(df["FTHG"], errors="coerce")
     out["Away_Goals"] = pd.to_numeric(df["FTAG"], errors="coerce")
     out["TG"] = out["Home_Goals"] + out["Away_Goals"]
