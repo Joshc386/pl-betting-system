@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 from config import ODDSPAPI_CACHE_TTL_MINUTES, ODDSPAPI_SHARP_BOOKS, ODDSPAPI_TIER1_BOOKS
-from api.odds_api import _resolve_by_overlap
+from api.team_resolver import resolve_feed_team
 
 logger = logging.getLogger(__name__)
 
@@ -686,19 +686,7 @@ def map_team(api_name: str, our_teams: set[str]) -> str | None:
     Returns:
         Matched team name, or None if no match found.
     """
-    # An explicit mapping is authoritative even when the club is not yet in
-    # our_teams — see the matching note in api.odds_api.match_to_our_teams.
-    if api_name in _ODDSPAPI_TO_DATASET:
-        return _ODDSPAPI_TO_DATASET[api_name]
-
-    # Exact match
-    if api_name in our_teams:
-        return api_name
-
-    # Shared with odds_api deliberately: two copies of the generic-word list
-    # would be two implementations of one contract, and drift is exactly the
-    # failure this resolver exists to prevent.
-    return _resolve_by_overlap(api_name, our_teams)
+    return resolve_feed_team(api_name, our_teams, _ODDSPAPI_TO_DATASET)
 
 
 if __name__ == "__main__":

@@ -66,6 +66,7 @@ from api.oddspapi import (
     fetch_epl_all_odds as fetch_oddspapi_odds,
     map_team as oddspapi_map_team,
 )
+from api.team_resolver import resolve_feed_team
 import api.odds_api as odds_api_module
 import api.oddspapi as oddspapi_module
 
@@ -152,7 +153,10 @@ _ODDS_API_TO_CHAMP: dict[str, str] = {
 def _resolve_champ_team(api_name: str, our_teams: set[str]) -> str | None:
     """Map Odds-API team name to Championship CSV name.
 
-    Uses explicit mapping first, then fuzzy word overlap fallback.
+    The matching rule is shared with both PL feeds — see api.team_resolver.
+    Only the mapping dict is Championship-specific, because only the name
+    format is: this canonical keeps football-data.co.uk short forms.
+
     If the team isn't in the historical dataset (e.g. newly promoted),
     still returns the mapped short name so fixtures appear in the dashboard.
 
@@ -164,26 +168,7 @@ def _resolve_champ_team(api_name: str, our_teams: set[str]) -> str | None:
         Matched team name (may not be in our_teams if newly promoted).
         None only if no mapping exists at all.
     """
-    # Explicit mapping — return even if not in our_teams (newly promoted)
-    if api_name in _ODDS_API_TO_CHAMP:
-        return _ODDS_API_TO_CHAMP[api_name]
-
-    # Direct match
-    if api_name in our_teams:
-        return api_name
-
-    # Fuzzy fallback: word overlap (only against known teams)
-    api_words = set(api_name.lower().replace("fc", "").replace("afc", "")
-                    .replace("city", "").strip().split())
-    best_score = 0
-    best_match: str | None = None
-    for team in our_teams:
-        team_words = set(team.lower().replace("'m", "").strip().split())
-        overlap = len(api_words & team_words)
-        if overlap > best_score:
-            best_score = overlap
-            best_match = team
-    return best_match if best_score >= 1 else None
+    return resolve_feed_team(api_name, our_teams, _ODDS_API_TO_CHAMP)
 
 
 def _match_champ_teams(odds_match: dict,

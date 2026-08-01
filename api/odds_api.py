@@ -18,6 +18,8 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
+from api.team_resolver import resolve_feed_team
+
 # ── Configuration ──
 API_KEY = os.environ.get("ODDS_API_KEY", "")
 BASE_URL = "https://api.the-odds-api.com/v4"
@@ -863,49 +865,6 @@ _ODDS_API_TO_DATASET = {
     "Hull City": "Hull City AFC",
 }
 
-# Words too common to identify a club on their own. "City" is shared by
-# Manchester City, Leicester City, Hull City, Coventry City, Norwich City and
-# Stoke City; "United" is no better. A candidate must share something
-# distinctive before a generic word counts towards its score.
-_GENERIC_TEAM_WORDS = frozenset({
-    "city", "united", "town", "albion", "wanderers", "rovers",
-    "athletic", "county", "fc", "afc", "and", "the",
-})
-
-
-def _team_words(name: str) -> set[str]:
-    """Lower-cased word set for comparison, with '&' folded to 'and'."""
-    return {w for w in name.lower().replace("&", " and ").split() if w}
-
-
-def _resolve_by_overlap(api_name: str, our_teams) -> str | None:
-    """Best candidate sharing a distinctive word — None if absent or ambiguous.
-
-    Requiring a distinctive word is what stops "Coventry City" matching
-    "Manchester City FC" on "City" alone. Generic words still break ties, so
-    "Manchester City" beats "Manchester United FC" once "manchester" has
-    qualified both. A tie returns None: no match is recoverable, the wrong
-    match is not.
-    """
-    api_words = _team_words(api_name)
-    distinctive = api_words - _GENERIC_TEAM_WORDS
-    if not distinctive:
-        return None
-
-    scored: list[tuple[int, str]] = []
-    for candidate in our_teams:
-        candidate_words = _team_words(candidate)
-        if not (distinctive & candidate_words):
-            continue
-        scored.append((len(api_words & candidate_words), candidate))
-
-    if not scored:
-        return None
-    best = max(score for score, _ in scored)
-    winners = [team for score, team in scored if score == best]
-    return winners[0] if len(winners) == 1 else None
-
-
 def match_to_our_teams(odds_match, our_teams):
     """Map Odds-API team names to our dataset team names.
 
@@ -913,23 +872,10 @@ def match_to_our_teams(odds_match, our_teams):
     skip those fixtures, which is the intended outcome — pricing the wrong
     fixture is far worse than pricing none.
     """
-    home = odds_match["home_team"]
-    away = odds_match["away_team"]
-
     def resolve(api_name):
-        # An explicit mapping is authoritative even when the club is not yet
-        # in our_teams. A newly promoted side is unknown until its season is
-        # built into the canonical; downstream logs "no recent data" and skips
-        # it, then starts working by itself once the season lands. Falling
-        # through to the fuzzy path here is what returned Manchester City for
-        # Coventry City.
-        if api_name in _ODDS_API_TO_DATASET:
-            return _ODDS_API_TO_DATASET[api_name]
-        if api_name in our_teams:
-            return api_name
-        return _resolve_by_overlap(api_name, our_teams)
+        return resolve_feed_team(api_name, our_teams, _ODDS_API_TO_DATASET)
 
-    return resolve(home), resolve(away)
+    return resolve(odds_match["home_team"]), resolve(odds_match["away_team"])
 
 
 def get_upcoming_with_odds(our_teams=None):
