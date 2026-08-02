@@ -24,8 +24,17 @@ of 0.00224 (away) — no credible improvement, so the names stay out of
 FPL-Core-Insights coverage grows beyond two seasons. The same audit
 endorsed tier 1: `Away_ShotSuppression_5` scored +0.00274, 14× the noise
 threshold, top-10 of all 173 features.
-Decisions 3, 8 and 10 remain pending — 8 needs no code beyond what the
-builder already does; a PL rebuild resolves it.
+**Decision 10 landed 2026-08-02**: `add_season.py` keeps only its source
+converters (FotMob/Understat → base fact rows); the six feature functions,
+`PROMOTED_TEAMS`, and the direct canonical write are gone. The builder is
+the single write path, guarded by daily_ingest's schema gate.
+
+Remaining: **decision 8** needs no code — a PL rebuild resolves it — and
+**decision 3**, which is genuinely unimplemented: `_add_league_position`
+seeds matchday 1 by alphabetical order of zero-point teams, not by the
+previous season's outcome or promotion route (ADR 0002). Being a
+value-only change to an existing column, the schema gate will NOT catch
+it, so it must land before the one deliberate publish and retrain.
 
 The derived flags reach the models only once the canonicals are rebuilt and
 republished, which happens with the retrain. Until then the published
