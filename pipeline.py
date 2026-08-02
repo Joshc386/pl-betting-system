@@ -8,6 +8,7 @@ import os
 from scipy.stats import poisson
 from features.common import (
     add_congestion_features,
+    add_defensive_components,
     add_discipline_features,
 )
 from config import (
@@ -1461,8 +1462,9 @@ def initialize_promoted_features(df):
         "Home_ShotRatio_5", "Away_ShotRatio_5",
         "Home_ShotsPerGoal_5", "Away_ShotsPerGoal_5",
         "Home_CR_5", "Away_CR_5",
-        "Home_DefensiveStrength_5", "Away_DefensiveStrength_5",
-        "Home_DefensiveStrength_SOT", "Away_DefensiveStrength_SOT",
+        "Home_ShotSuppression_5", "Away_ShotSuppression_5",
+        "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
+        "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
         "Home_GoalDiff_5", "Away_GoalDiff_5",
     ]
 
@@ -1605,6 +1607,10 @@ def run_pipeline(verbose=True):
     if verbose:
         print("Computing discipline features (cards, fouls)...")
     df = add_discipline_features(df)
+
+    if verbose:
+        print("Computing defensive components...")
+    df = add_defensive_components(df)
 
     if verbose:
         print("Fetching weather features...")

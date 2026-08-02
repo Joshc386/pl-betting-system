@@ -57,9 +57,6 @@ EXISTING_FEATURES = [
     "Home_SOT_CR_5", "Home_SOT_CR_20",
     "Away_SOT_CR_5", "Away_SOT_CR_20",
 
-    # Defensive
-    "Home_DefensiveStrength_5", "Away_DefensiveStrength_5",
-    "Home_DefensiveStrength_SOT", "Away_DefensiveStrength_SOT",
 
     # League position
     "Home_LeaguePosition", "Away_LeaguePosition",
@@ -88,6 +85,12 @@ DERIVED_FEATURES = [
     "LeaguePosition_Diff",
     "Home_RestDays",
     "Away_RestDays",
+    # Defensive Strength components (ADR 0007 decisions 4+5, tier 1) —
+    # three named quantities, never one number; computed in the pipeline
+    # because opponent adjustment needs each side's rolling shot volume
+    "Home_ShotSuppression_5", "Away_ShotSuppression_5",
+    "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
+    "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
     "Home_GoalDiff_5",   # Past5Goals - Past5Conceded
     "Away_GoalDiff_5",
     # Option 3 Step 2a: Corner efficiency — rolling goals / rolling corners.
@@ -319,8 +322,9 @@ BTTS_SHARED_FEATURES = [
     "Home_AvgShotsOnTarget_5", "Away_AvgShotsOnTarget_5",
     "Home_ShotRatio_5", "Away_ShotRatio_5",
     "Home_ShotsPerGoal_5", "Away_ShotsPerGoal_5",
-    "Home_DefensiveStrength_5", "Away_DefensiveStrength_5",
-    "Home_DefensiveStrength_SOT", "Away_DefensiveStrength_SOT",
+    "Home_ShotSuppression_5", "Away_ShotSuppression_5",
+    "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
+    "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
     # League position & context
     "Home_LeaguePosition", "Away_LeaguePosition",
     "LeaguePosition_Diff",

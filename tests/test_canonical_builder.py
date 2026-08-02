@@ -94,12 +94,17 @@ PENDING_NEW_COLUMNS: set[str] = {
 
 # The same idea in reverse: columns the rebuild deliberately drops that the
 # published canonical still carries. ADR 0007 decision 6 removes the H2H win
-# counts, decision 7 the Factor pair; the canonical loses them at its next
-# publish — which now needs `--allow-schema-change`, because daily_ingest's
-# schema gate refuses an unattended column change. Empty this set once that
-# publish has happened.
+# counts, decision 7 the Factor pair, decision 4 the DefensiveStrength pairs
+# (recomputed as three named components in the pipelines); the canonical
+# loses them at its next publish — which now needs `--allow-schema-change`,
+# because daily_ingest's schema gate refuses an unattended column change.
+# Empty this set once that publish has happened.
 PENDING_REMOVED_COLUMNS = {"H2H_HomeWins", "H2H_AwayWins", "H2H_Draws",
-                           "Home Factor", "Away Factor"}
+                           "Home Factor", "Away Factor",
+                           "Home_DefensiveStrength_5",
+                           "Away_DefensiveStrength_5",
+                           "Home_DefensiveStrength_SOT",
+                           "Away_DefensiveStrength_SOT"}
 
 
 def test_schema_unchanged(efl_rebuild, efl_live):

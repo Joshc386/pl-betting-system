@@ -183,13 +183,13 @@ _Avoid_: Rivalry record, historical record (both suggest results matter, which i
 **Defensive Strength**:
 How well a team prevents the opposition scoring — deliberately **three separate components**, never one number, because they are driven by different things and a single score hides which one moved:
 
-- **Shot Suppression** — how few shots the team allows (volume), adjusted for the attacking strength of the opponent faced. The most Wheatcroft-aligned of the three.
+- **Shot Suppression** — how few shots the team allows (volume), adjusted for the attacking strength of the opponent faced: per-match shots conceded ÷ the opponent's own pre-match rolling-5 shot volume, averaged over the team's last 5. 1.0 = the opponent got exactly its usual volume; below 1 = suppression. The adjuster is the opponent's shot *generation*, not Elo — process beats results (Wheatcroft), and a ratio of like quantities is self-normalising across leagues and eras, which is what the feature contract wants. The most Wheatcroft-aligned of the three.
 - **Chance Quality Allowed** — SOT conceded ÷ shots conceded. How dangerous the chances allowed were; a Facts-only proxy for xG per shot.
 - **Conversion Allowed** — goals conceded ÷ SOT conceded. How many of those chances were finished — keeper quality plus finishing variance, and the noisiest of the three.
 
 The first is computed from Facts; the second and third are what the EFL builder already computed, correctly, under the misleading name `DefensiveStrength_5` / `DefensiveStrength_SOT`. The PL formula (`1 ÷ Σ shots conceded`) was never a defensive metric at all — the reciprocal of a *count* scales with how many matches are in the window, not with how well the team defends.
 
-**Computed in the pipeline, not the Canonical Dataset.** Opponent-adjustment needs Elo, and the xG/lineup variants need enrichment, none of which exist at build time; putting them in the canonical would violate the Facts-only rule for computed columns (ADR 0004).
+**Computed in the pipeline, not the Canonical Dataset.** Opponent-adjustment needs each side's rolling shot volume at match time (originally sketched as Elo; implemented as the shot-volume ratio above), and the xG/lineup variants need enrichment — neither belongs at build time; putting them in the canonical would violate the Facts-only rule for computed columns (ADR 0004). One implementation in `features/common.py` serves both leagues.
 
 Defensive data arrives in **three tiers of decreasing coverage**, each a *separately named* set of features rather than one name whose formula varies:
 

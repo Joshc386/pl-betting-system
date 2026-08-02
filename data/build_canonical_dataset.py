@@ -489,15 +489,6 @@ def _add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
         g["sot_cr_5"] = _rolling_mean(g["goals_scored"] / sot_nz, 5)
         g["sot_cr_20"] = _rolling_mean(g["goals_scored"] / sot_nz, 20)
 
-        # Defensive strength (shots conceded / shots against)
-        sa_nz = g["shots_against"].replace(0, np.nan)
-        g["def_strength_5"] = _rolling_mean(g["shots_target_against"] / sa_nz, 5)
-
-        sta_nz = g["shots_target_against"].replace(0, np.nan)
-        g["def_strength_sot"] = _rolling_mean(
-            g["goals_conceded"] / sta_nz, 5
-        )
-
         # Goals
         g["past5_goals"] = _rolling_sum(g["goals_scored"], 5)
         g["past5_conceded"] = _rolling_sum(g["goals_conceded"], 5)
@@ -520,8 +511,6 @@ def _add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
             feat_map[midx][f"{prefix}_cr_20"] = r["cr_20"]
             feat_map[midx][f"{prefix}_sot_cr_5"] = r["sot_cr_5"]
             feat_map[midx][f"{prefix}_sot_cr_20"] = r["sot_cr_20"]
-            feat_map[midx][f"{prefix}_def_5"] = r["def_strength_5"]
-            feat_map[midx][f"{prefix}_def_sot"] = r["def_strength_sot"]
             feat_map[midx][f"{prefix}_past5_goals"] = r["past5_goals"]
             feat_map[midx][f"{prefix}_past5_conceded"] = r["past5_conceded"]
             feat_map[midx][f"{prefix}_past5_corners"] = r["past5_corners"]
@@ -548,10 +537,6 @@ def _add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
         "home_sot_cr_20": "Home_SOT_CR_20",
         "away_sot_cr_5": "Away_SOT_CR_5",
         "away_sot_cr_20": "Away_SOT_CR_20",
-        "home_def_5": "Home_DefensiveStrength_5",
-        "away_def_5": "Away_DefensiveStrength_5",
-        "home_def_sot": "Home_DefensiveStrength_SOT",
-        "away_def_sot": "Away_DefensiveStrength_SOT",
         "home_past5_goals": "Home_Past5Goals",
         "away_past5_goals": "Away_Past5Goals",
         "home_past5_conceded": "Home_Past5Conceded",

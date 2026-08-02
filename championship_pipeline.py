@@ -19,6 +19,7 @@ import os
 
 from features.common import (
     add_congestion_features,
+    add_defensive_components,
     add_discipline_features,
 )
 from league_config import get_league_config
@@ -697,8 +698,9 @@ CHAMP_ALL_FEATURES = [
     "Home_ShotsPerGoal_5", "Away_ShotsPerGoal_5",
     "Home_CR_5", "Home_CR_20", "Away_CR_5", "Away_CR_20",
     "Home_SOT_CR_5", "Home_SOT_CR_20", "Away_SOT_CR_5", "Away_SOT_CR_20",
-    "Home_DefensiveStrength_5", "Away_DefensiveStrength_5",
-    "Home_DefensiveStrength_SOT", "Away_DefensiveStrength_SOT",
+    "Home_ShotSuppression_5", "Away_ShotSuppression_5",
+    "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
+    "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
     "Home_LeaguePosition", "Away_LeaguePosition",
     "Home_Past5Goals", "Away_Past5Goals",
     "Home_Past5Conceded", "Away_Past5Conceded",
@@ -789,7 +791,9 @@ CHAMP_BTTS_FEATURES = [
     "Home_CR_5", "Home_CR_20", "Away_CR_5", "Away_CR_20",
     "Home_SOT_CR_5", "Home_SOT_CR_20", "Away_SOT_CR_5", "Away_SOT_CR_20",
     "Home_AvgShotsOnTarget_5", "Away_AvgShotsOnTarget_5",
-    "Home_DefensiveStrength_5", "Away_DefensiveStrength_5",
+    "Home_ShotSuppression_5", "Away_ShotSuppression_5",
+    "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
+    "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
     "Home_LeaguePosition", "Away_LeaguePosition",
     "LeaguePosition_Diff",
     "Home_RestDays", "Away_RestDays",
@@ -933,8 +937,9 @@ def initialize_promoted_features(
         "Home_CR_20", "Away_CR_20",
         "Home_SOT_CR_5", "Away_SOT_CR_5",
         "Home_SOT_CR_20", "Away_SOT_CR_20",
-        "Home_DefensiveStrength_5", "Away_DefensiveStrength_5",
-        "Home_DefensiveStrength_SOT", "Away_DefensiveStrength_SOT",
+        "Home_ShotSuppression_5", "Away_ShotSuppression_5",
+        "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
+        "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
         # Derived rolling
         "Home_GoalDiff_5", "Away_GoalDiff_5",
         # Advanced rolling
@@ -1111,6 +1116,10 @@ def run_pipeline(verbose: bool = True) -> dict:
     if verbose:
         print("Adding discipline features...")
     df = add_discipline_features(df)
+
+    if verbose:
+        print("Adding defensive components...")
+    df = add_defensive_components(df)
 
     if verbose:
         print("Adding half-time features...")

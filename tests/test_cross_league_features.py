@@ -56,10 +56,6 @@ _EXEMPT: dict[str, str] = {
 _KNOWN_DIVERGENCES: dict[str, str] = {
     "Home_ShotRatio_5": "decision 8 — shots÷SOT (PL) vs SOT÷shots (EFL)",
     "Away_ShotRatio_5": "decision 8 — shots÷SOT (PL) vs SOT÷shots (EFL)",
-    "Home_DefensiveStrength_5": "decision 4 — 1÷shots-conceded is not a rate",
-    "Away_DefensiveStrength_5": "decision 4 — 1÷shots-conceded is not a rate",
-    "Home_DefensiveStrength_SOT": "decision 4 — 1÷SOT-conceded is not a rate",
-    "Away_DefensiveStrength_SOT": "decision 4 — 1÷SOT-conceded is not a rate",
     "Home_Promoted": "decision 1 — hand-maintained dicts, dead in both leagues",
     "Away_Promoted": "decision 1 — hand-maintained dicts, dead in both leagues",
 }

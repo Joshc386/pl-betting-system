@@ -83,8 +83,9 @@ def _clip_scaled(X_scaled, clip=5.0):
     """Clip scaled features to [-clip, +clip].
 
     Prevents catastrophic predictions from distribution shift between train/test.
-    Without this, a single feature shifting by 250+ standard deviations (e.g.
-    Home_DefensiveStrength_5) can push LR logits to +10, making every prediction 0.9999.
+    Without this, a single feature shifting by 250+ standard deviations (as the
+    retired Home_DefensiveStrength_5 once did) can push LR logits to +10,
+    making every prediction 0.9999.
     """
     return np.clip(X_scaled, -clip, clip)
 

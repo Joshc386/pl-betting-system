@@ -742,7 +742,7 @@ class TestPromotedFeatureInitialisation:
         from championship_pipeline import _detect_new_teams
         df = pipeline_df
         new_teams = _detect_new_teams(df)
-        key_features = ["Home_Past5Goals", "Home_DefensiveStrength_5",
+        key_features = ["Home_Past5Goals", "Home_ChanceQualityAllowed_5",
                         "Home_Over25_5", "Home_GPG_20"]
 
         nan_count = 0
