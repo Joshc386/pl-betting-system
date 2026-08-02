@@ -201,7 +201,7 @@ Defensive data arrives in **three tiers of decreasing coverage**, each a *separa
 
 A league or era simply has NaN on the tiers it cannot reach — XGBoost handles NaN natively, so coverage degrades gracefully. **The EFL's "different approach" is that it runs on tier 1 alone; it must never mean the same column name computed a different way**, which is the exact defect this vocabulary exists to prevent.
 
-Tier 3 reaches only ~7% of training rows, so it is **provisional**: it ships only if a walk-forward comparison on the final fold shows it improves AUC/Brier. Tier 3's `goals_prevented` is what separates keeper shot-stopping from defensive quality — the confound baked into Conversion Allowed.
+Tier 3 reaches only ~7% of training rows, so it was **provisional**: it ships only if a walk-forward comparison on the final fold shows it improves AUC/Brier. Tier 3's `goals_prevented` is what separates keeper shot-stopping from defensive quality — the confound baked into Conversion Allowed. **The gate ran 2026-08-02 and failed** — `GKShotStopping_5` moved final-fold AUC by nothing (home) and by less than its own standard deviation (away) — so tier 3 is computed and tested but **not shipped**; re-evaluate when coverage grows past two seasons.
 _Avoid_: Defence rating, defensive score (both imply a single number, which is exactly what this is not)
 
 **Wheatcroft Principle**:

@@ -169,6 +169,17 @@ ADVANCED_FEATURES = [
 
 # Squad-level features from FPL-Core-Insights player data (seasons 24-25+)
 # Built from real match stats (xG, xA, defensive actions), NOT FPL fantasy points
+# Defensive tier 3 (ADR 0007 decision 5) — GATE FAILED 2026-08-02, NOT
+# SHIPPED. The playing keeper's rolling-5 goals_prevented per 90 from
+# FPL-Core-Insights. The walk-forward gate measured Home perm-AUC-drop of
+# exactly 0 on the final fold and Away +0.00099 (below its own std of
+# 0.00224) — no credible AUC improvement, so per the ADR these names stay
+# out of ALL_FEATURES. The computation (api/player_features.py) and its
+# tests remain for re-evaluation when coverage grows past 2 seasons.
+DEFENSIVE_TIER3_FEATURES = [
+    "Home_GKShotStopping_5", "Away_GKShotStopping_5",
+]
+
 SQUAD_FEATURES = [
     "Home_AvailableXG", "Away_AvailableXG",       # Available xG / best XI xG ratio
     "Home_AvailableXA", "Away_AvailableXA",       # Available xA / best XI xA ratio
@@ -271,6 +282,8 @@ WEATHER_FEATURES = [
 
 # Combined feature list for the main model (squad features excluded — used as post-model adjustment)
 # Note: CONGESTION_FEATURES and DISCIPLINE_FEATURES tested but did not improve accuracy — excluded
+# DEFENSIVE_TIER3_FEATURES deliberately absent: the tier-3 gate failed
+# (see the list's comment above), so the models never see those columns.
 ALL_FEATURES = (EXISTING_FEATURES + DERIVED_FEATURES + XG_FEATURES + PLAYER_FEATURES +
                 FPL_STRENGTH_FEATURES + ADVANCED_FEATURES + SHOT_LEVEL_FEATURES +
                 ROSTER_FEATURES + TACTICAL_FEATURES + DETAILED_MATCH_FEATURES +

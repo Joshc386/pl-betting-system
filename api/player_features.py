@@ -79,6 +79,13 @@ def _load_season_data(season):
     pms["def_actions"] = sum(pms[c] for c in DEF_ACTION_COLS if c in pms.columns)
     pms["def_actions_p90"] = pms["def_actions"] / mins * 90
 
+    # GK shot-stopping (ADR 0007 decision 5, tier 3). NaN stays NaN — a
+    # missing keeper stat is unknown, not zero.
+    if "goals_prevented" in pms.columns:
+        pms["gp_p90"] = (
+            pd.to_numeric(pms["goals_prevented"], errors="coerce") / mins * 90
+        )
+
     return pms
 
 
@@ -111,9 +118,12 @@ def compute_player_rolling_stats():
         "rolling_xa_5": "xa_p90",
         "rolling_def_5": "def_actions_p90",
         "rolling_mins_5": "minutes_played",
+        "rolling_gp90_5": "gp_p90",
     }
 
     for new_col, src_col in rolling_cols.items():
+        if src_col not in df.columns:
+            continue
         df[new_col] = (
             df.groupby("player_id")[src_col]
             .transform(lambda x: x.shift(1).rolling(ROLLING_WINDOW, min_periods=2).mean())
@@ -172,7 +182,7 @@ def compute_squad_features_historical(player_df=None):
                     "AvailableXG": np.nan, "AvailableXA": np.nan,
                     "AttackMissing": np.nan, "DefenceMissing": np.nan,
                     "StarAvailable": np.nan, "FormXG5": np.nan,
-                    "SquadDepth": np.nan,
+                    "SquadDepth": np.nan, "GKShotStopping_5": np.nan,
                 })
                 continue
 
@@ -223,6 +233,20 @@ def compute_squad_features_historical(player_df=None):
             recent_players = team_players[team_players["minutes_played"] > 0]
             squad_depth = len(recent_players) / 20.0
 
+            # GKShotStopping_5 (ADR 0007 decision 5, tier 3): the playing
+            # keeper's rolling-5 goals_prevented per 90. A keeper with no
+            # rolling history is unknown — NaN, never zero.
+            keepers = (
+                available[available["position"] == "Goalkeeper"]
+                if "position" in available.columns else available.iloc[0:0]
+            )
+            gk_vals = (
+                keepers["rolling_gp90_5"].dropna()
+                if "rolling_gp90_5" in keepers.columns
+                else pd.Series(dtype=float)
+            )
+            gk_shot_stopping = float(gk_vals.mean()) if len(gk_vals) else np.nan
+
             results.append({
                 "season": season, "match_id": match_id, "gameweek": gw,
                 "team": team_name, "side": side, "kickoff_time": kickoff,
@@ -233,6 +257,7 @@ def compute_squad_features_historical(player_df=None):
                 "StarAvailable": np.clip(star_available, 0, 1),
                 "FormXG5": form_xg,
                 "SquadDepth": squad_depth,
+                "GKShotStopping_5": gk_shot_stopping,
             })
 
     return pd.DataFrame(results)

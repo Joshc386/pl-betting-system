@@ -16,7 +16,14 @@ the decision text: the opponent adjustment is the ratio to the opponent's own
 pre-match rolling-5 shot volume, not Elo — process-based per the Wheatcroft
 principle, self-normalising across leagues, and it drops the rating
 dependency entirely. Tier 2 already existed (`Home/Away_RollingXGAgainst_5`,
-PL only). Tier 3 remains provisional pending its AUC/Brier gate.
+PL only). **Tier 3's gate ran 2026-08-02 and failed**: `GKShotStopping_5`
+(the keeper's rolling-5 goals_prevented per 90) measured a final-fold
+permutation-AUC drop of exactly 0 (home) and +0.00099 against its own std
+of 0.00224 (away) — no credible improvement, so the names stay out of
+`ALL_FEATURES`. The computation and tests remain for re-evaluation when
+FPL-Core-Insights coverage grows beyond two seasons. The same audit
+endorsed tier 1: `Away_ShotSuppression_5` scored +0.00274, 14× the noise
+threshold, top-10 of all 173 features.
 Decisions 3, 8 and 10 remain pending — 8 needs no code beyond what the
 builder already does; a PL rebuild resolves it.
 

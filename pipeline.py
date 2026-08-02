@@ -13,7 +13,8 @@ from features.common import (
 )
 from config import (
     DATA_PATH, ENRICHED_DATA_PATH, EXISTING_FEATURES, DERIVED_FEATURES,
-    XG_FEATURES, PLAYER_FEATURES, SQUAD_FEATURES, ADVANCED_FEATURES,
+    XG_FEATURES, PLAYER_FEATURES, SQUAD_FEATURES, DEFENSIVE_TIER3_FEATURES,
+    ADVANCED_FEATURES,
     SHOT_LEVEL_FEATURES, ROSTER_FEATURES, TACTICAL_FEATURES,
     DETAILED_MATCH_FEATURES, CONTEXT_FEATURES,
     CONGESTION_FEATURES, DISCIPLINE_FEATURES, WEATHER_FEATURES, ALL_FEATURES,
@@ -490,7 +491,7 @@ def add_squad_features(df):
                               "data", "player_data", "squad_features.csv")
     if not os.path.exists(squad_path):
         print("  Warning: squad_features.csv not found. Skipping squad features.")
-        for col in SQUAD_FEATURES:
+        for col in SQUAD_FEATURES + DEFENSIVE_TIER3_FEATURES:
             df[col] = np.nan
         return df
 
@@ -503,7 +504,8 @@ def add_squad_features(df):
     # Build lookup: (date, canonical_team, side) -> features
     # Also store ±1 day for fuzzy matching
     feature_cols = ["AvailableXG", "AvailableXA", "AttackMissing",
-                    "DefenceMissing", "StarAvailable", "FormXG5", "SquadDepth"]
+                    "DefenceMissing", "StarAvailable", "FormXG5", "SquadDepth",
+                    "GKShotStopping_5"]
     squad_lookup = {}
     for _, row in sf.iterrows():
         if pd.isna(row["date"]):
@@ -523,7 +525,7 @@ def add_squad_features(df):
     df = df.copy()
 
     # Initialize all squad feature columns
-    for col in SQUAD_FEATURES:
+    for col in SQUAD_FEATURES + DEFENSIVE_TIER3_FEATURES:
         df[col] = np.nan
 
     matched = 0
@@ -1564,7 +1566,7 @@ def fill_nans(train_df, val_df, test_df, features):
     """
     # Don't fill xG/Poisson-xG/injury features - XGBoost handles NaN better than median-filling
     # These features have partial season coverage; native NaN handling learns optimal splits
-    native_nan = set(XG_FEATURES) | set(PLAYER_FEATURES) | set(SQUAD_FEATURES) | set(WEATHER_FEATURES) | set(SHOT_LEVEL_FEATURES) | set(ROSTER_FEATURES) | set(TACTICAL_FEATURES) | set(DETAILED_MATCH_FEATURES) | {
+    native_nan = set(XG_FEATURES) | set(PLAYER_FEATURES) | set(SQUAD_FEATURES) | set(DEFENSIVE_TIER3_FEATURES) | set(WEATHER_FEATURES) | set(SHOT_LEVEL_FEATURES) | set(ROSTER_FEATURES) | set(TACTICAL_FEATURES) | set(DETAILED_MATCH_FEATURES) | {
         "Poisson_xG", "Expected_TG_xG", "Home_Lambda_xG", "Away_Lambda_xG",
         "Poisson_DC", "Expected_TG_DC",
         "Poisson_Shots", "Expected_TG_Shots",
