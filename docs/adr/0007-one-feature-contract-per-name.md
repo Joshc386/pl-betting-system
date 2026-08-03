@@ -4,7 +4,16 @@ Date: 2026-07-26
 
 ## Status
 
-Accepted. Implementation in progress — decisions **1 and 2 landed 2026-07-28**
+**Accepted and fully implemented.** Both canonicals were republished on
+**2026-08-03** under `--allow-schema-change` — four columns in
+(`ScoringRate_10`, `ScoringIndex_10`, per venue), nine out (the three H2H
+win counts, the `Factor` pair, the four `DefensiveStrength` columns) — and
+both leagues retrained on the result. The two leagues now publish an
+identical 69-column schema from one builder, and
+`tests/test_cross_league_features.py` holds **zero** known divergences
+against the 15 it opened with.
+
+Implementation history — decisions **1 and 2 landed 2026-07-28**
 (`Promoted`/`Relegated` derived from the Canonical Datasets; both builder dicts
 deleted), **6 and 9 landed 2026-07-30** (H2H win counts dropped; one derby list
 per league, matched exactly), **7 landed 2026-08-01** (`Factor` retired; the
@@ -29,7 +38,7 @@ converters (FotMob/Understat → base fact rows); the six feature functions,
 `PROMOTED_TEAMS`, and the direct canonical write are gone. The builder is
 the single write path, guarded by daily_ingest's schema gate.
 
-**Decision 3 landed 2026-08-02**: `_add_league_position` seeds matchday 1
+**Decision 3 landed 2026-08-03**: `_add_league_position` seeds matchday 1
 from the previous season's outcome per ADR 0002 — returning teams keep
 their finish, PL arrivals seed 18/19/20 by route read off the EFL final
 table, EFL arrivals seed 1/2/3 (down from the PL, in PL finishing order)

@@ -4,7 +4,7 @@ Date: 2026-06-13
 
 ## Status
 
-Accepted. **Implemented 2026-08-02** in the shared builder
+Accepted. **Implemented 2026-08-03** in the shared builder
 (`_add_league_position` / `_matchday1_seeds`, ADR 0007 decision 3), with
 three conventions this document left open, recorded in `CONTEXT.md`:
 sides relegated into the EFL seed 1, 2, 3 in their PL finishing order;

@@ -85,7 +85,7 @@ def test_per_season_row_counts_unchanged(efl_rebuild, efl_live):
 # the Relegated columns on its 2026-07-29 run, the morning after ADR 0007
 # decision 2 landed. The assertion below is strict in both directions, so a
 # stale entry here fails the suite — which is how that publish was noticed.
-# Both ledgers are EMPTY as of the 2026-08-02 publish, which carried ADR
+# Both ledgers are EMPTY as of the 2026-08-03 publish, which carried ADR
 # 0007's four new Scoring columns in and its nine retired ones out under
 # `--allow-schema-change`. The assertion below is strict in both
 # directions, so a stale entry here fails the suite just as an undeclared

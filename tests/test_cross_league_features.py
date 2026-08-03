@@ -56,7 +56,7 @@ _EXEMPT: dict[str, str] = {
 # xfail makes that mandatory rather than optional: a fixed feature XPASSes
 # and fails the suite until its exemption is removed.
 #
-# EMPTY as of 2026-08-02. All 15 are gone: decisions 1, 2, 4, 6, 7 and 9
+# EMPTY as of 2026-08-03. All 15 are gone: decisions 1, 2, 4, 6, 7 and 9
 # changed the builder, and the deliberate --allow-schema-change publish of
 # both canonicals that day carried every one of them into the published
 # artefacts. The last four to clear (ShotRatio_5 and Promoted, ×2) needed
