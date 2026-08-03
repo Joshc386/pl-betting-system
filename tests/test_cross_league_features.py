@@ -51,14 +51,18 @@ _EXEMPT: dict[str, str] = {
     "Historical Derby": "different clubs per division — rate is not comparable",
 }
 
-# The 15 divergences ADR 0007 accepted but has not yet fixed, each against
-# the decision that retires it. Delete an entry when its decision lands.
-_KNOWN_DIVERGENCES: dict[str, str] = {
-    "Home_ShotRatio_5": "decision 8 — shots÷SOT (PL) vs SOT÷shots (EFL)",
-    "Away_ShotRatio_5": "decision 8 — shots÷SOT (PL) vs SOT÷shots (EFL)",
-    "Home_Promoted": "decision 1 — hand-maintained dicts, dead in both leagues",
-    "Away_Promoted": "decision 1 — hand-maintained dicts, dead in both leagues",
-}
+# The 15 divergences ADR 0007 accepted, each against the decision that
+# retires it. Delete an entry when its decision lands — and the strict
+# xfail makes that mandatory rather than optional: a fixed feature XPASSes
+# and fails the suite until its exemption is removed.
+#
+# EMPTY as of 2026-08-02. All 15 are gone: decisions 1, 2, 4, 6, 7 and 9
+# changed the builder, and the deliberate --allow-schema-change publish of
+# both canonicals that day carried every one of them into the published
+# artefacts. The last four to clear (ShotRatio_5 and Promoted, ×2) needed
+# no code at all — decision 8 was already the builder's formula, and the
+# derived Promoted flags only ever waited on a PL rebuild.
+_KNOWN_DIVERGENCES: dict[str, str] = {}
 
 _NEAR_ZERO = 1e-9
 

@@ -85,26 +85,13 @@ def test_per_season_row_counts_unchanged(efl_rebuild, efl_live):
 # the Relegated columns on its 2026-07-29 run, the morning after ADR 0007
 # decision 2 landed. The assertion below is strict in both directions, so a
 # stale entry here fails the suite — which is how that publish was noticed.
-# ADR 0007 decision 7: Factor is retired and both of its meanings get a
-# name of their own. The columns arrive at the next deliberate publish.
-PENDING_NEW_COLUMNS: set[str] = {
-    "Home_ScoringRate_10", "Away_ScoringRate_10",
-    "Home_ScoringIndex_10", "Away_ScoringIndex_10",
-}
-
-# The same idea in reverse: columns the rebuild deliberately drops that the
-# published canonical still carries. ADR 0007 decision 6 removes the H2H win
-# counts, decision 7 the Factor pair, decision 4 the DefensiveStrength pairs
-# (recomputed as three named components in the pipelines); the canonical
-# loses them at its next publish — which now needs `--allow-schema-change`,
-# because daily_ingest's schema gate refuses an unattended column change.
-# Empty this set once that publish has happened.
-PENDING_REMOVED_COLUMNS = {"H2H_HomeWins", "H2H_AwayWins", "H2H_Draws",
-                           "Home Factor", "Away Factor",
-                           "Home_DefensiveStrength_5",
-                           "Away_DefensiveStrength_5",
-                           "Home_DefensiveStrength_SOT",
-                           "Away_DefensiveStrength_SOT"}
+# Both ledgers are EMPTY as of the 2026-08-02 publish, which carried ADR
+# 0007's four new Scoring columns in and its nine retired ones out under
+# `--allow-schema-change`. The assertion below is strict in both
+# directions, so a stale entry here fails the suite just as an undeclared
+# change does — that is how the 2026-07-29 Relegated publish was noticed.
+PENDING_NEW_COLUMNS: set[str] = set()
+PENDING_REMOVED_COLUMNS: set[str] = set()
 
 
 def test_schema_unchanged(efl_rebuild, efl_live):

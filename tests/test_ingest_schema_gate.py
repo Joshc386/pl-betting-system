@@ -125,3 +125,65 @@ def test_unchanged_schema_still_publishes(wired, monkeypatch):
     monkeypatch.setattr(mod, "build", _stub_build(BASE))
 
     assert mod.ingest_league("EFL") is True
+
+
+# ── Facts compare by fixture key, not row position ──────────────────────────
+#
+# The builder's output order is not part of the contract: preserved rows
+# (absent upstream) can land at different positions depending on which live
+# file they were read back from, and a reordering is not a fact change.
+# Date compares at day precision — seasons 24-25 of the PL canonical carried
+# FotMob kickoff times that football-data.co.uk does not serve.
+
+from scripts.daily_ingest import _facts_regressed
+
+
+def _facts_frame():
+    return pd.DataFrame({
+        "SeasonIndex": [3, 3, 4],
+        "Home_Team": ["A", "B", "A"],
+        "Away_Team": ["B", "A", "B"],
+        "Date": ["2003-08-16", "2003-12-01", "2004-08-14"],
+        "Home_Goals": [1, 0, 2],
+        "Away_Goals": [0, 0, 2],
+        "TG": [1, 0, 4],
+        "FTR": ["H", "D", "D"],
+        # a current season so the rows above count as historical
+        **{},
+    })
+
+
+def _with_current(df):
+    cur = pd.DataFrame({
+        "SeasonIndex": [9], "Home_Team": ["A"], "Away_Team": ["B"],
+        "Date": ["2009-08-15"], "Home_Goals": [1], "Away_Goals": [1],
+        "TG": [2], "FTR": ["D"],
+    })
+    return pd.concat([df, cur], ignore_index=True)
+
+
+def test_row_order_alone_is_not_a_fact_change(tmp_path):
+    live = _with_current(_facts_frame())
+    path = tmp_path / "live.csv"
+    live.to_csv(path, index=False)
+    shuffled = _with_current(_facts_frame().iloc[::-1])
+    assert _facts_regressed(str(path), shuffled) is None
+
+
+def test_a_changed_fact_value_is_still_refused(tmp_path):
+    live = _with_current(_facts_frame())
+    path = tmp_path / "live.csv"
+    live.to_csv(path, index=False)
+    tampered = _facts_frame()
+    tampered.loc[0, "Home_Goals"] = 3
+    problem = _facts_regressed(str(path), _with_current(tampered))
+    assert problem is not None and "Home_Goals" in problem
+
+
+def test_date_compares_at_day_precision(tmp_path):
+    """A kickoff time on one side of the comparison is not a moved match."""
+    live = _facts_frame()
+    live.loc[0, "Date"] = "2003-08-16 19:00:00"
+    path = tmp_path / "live.csv"
+    _with_current(live).to_csv(path, index=False)
+    assert _facts_regressed(str(path), _with_current(_facts_frame())) is None

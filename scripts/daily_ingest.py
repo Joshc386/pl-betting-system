@@ -105,13 +105,34 @@ def _facts_regressed(live_path: str, candidate: pd.DataFrame) -> str | None:
         return (f"historical row count changed: {len(live_hist)} -> "
                 f"{len(cand_hist)}")
 
+    # Facts compare by fixture key, not row position: the builder's output
+    # order is not part of the contract (preserved rows can land at
+    # different positions depending on which live file they were read back
+    # from), and a reordering is not a fact change. Date compares at day
+    # precision — seasons 24-25 of the PL canonical carried FotMob kickoff
+    # times that football-data.co.uk does not serve.
+    key = ["SeasonIndex", "Home_Team", "Away_Team"]
+    live_hist = live_hist.copy()
+    cand_hist = cand_hist.copy()
+    for frame in (live_hist, cand_hist):
+        frame["Date"] = pd.to_datetime(
+            frame["Date"], format="mixed", dayfirst=True).dt.normalize()
+    if live_hist.duplicated(key).any() or cand_hist.duplicated(key).any():
+        return "duplicate fixture keys — cannot compare facts by key"
+    merged = live_hist.merge(cand_hist, on=key, how="outer",
+                             suffixes=("_live", "_cand"), indicator=True)
+    moved = int((merged["_merge"] != "both").sum())
+    if moved:
+        return f"{moved} historical fixture(s) present on only one side"
     for col in FACT_COLUMNS:
-        if col not in live_hist.columns or col not in cand_hist.columns:
+        if col in key:
             continue
-        a = live_hist[col].astype(str).reset_index(drop=True)
-        b = cand_hist[col].astype(str).reset_index(drop=True)
-        if not a.equals(b):
-            n = int((a != b).sum())
+        if f"{col}_live" not in merged.columns:
+            continue
+        a = merged[f"{col}_live"].astype(str)
+        b = merged[f"{col}_cand"].astype(str)
+        n = int((a != b).sum())
+        if n:
             return f"Fact column {col!r} changed in {n} historical row(s)"
     return None
 
