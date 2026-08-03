@@ -525,3 +525,182 @@ def test_the_factor_name_is_retired():
     out = _add_scoring_features(_scoring_fixture())
     assert "Home Factor" not in out.columns
     assert "Away Factor" not in out.columns
+
+
+# ── ADR 0007 decision 3 / ADR 0002: matchday-1 seeding by previous season ──
+#
+# Before any games are played every team is on zero points, and the old code
+# ranked them alphabetically — pure noise as a model feature. The seed is the
+# previous season's outcome: returning teams keep their finishing position,
+# promoted teams enter at the bottom by route (champion 18th PL / runner-up
+# 19th / play-off winner 20th), relegated teams enter the EFL at the top in
+# their PL finishing order, and League One arrivals (whose table this system
+# does not hold) take the neutral 2nd-from-bottom seed. Once games are
+# played, the live table applies — points, goal difference, goals scored —
+# with the seed as the final tie-break in place of the alphabet.
+
+def _m(date, home, away, hg, ag, season):
+    ftr = "H" if hg > ag else ("A" if hg < ag else "D")
+    return {"Date": pd.Timestamp(date), "SeasonIndex": season,
+            "Home_Team": home, "Away_Team": away,
+            "Home_Goals": hg, "Away_Goals": ag, "FTR": ftr}
+
+
+def _pl_two_seasons(tmp_path):
+    """A complete synthetic PL season 1 and a season-2 opening day.
+
+    Season 1: fixture i is A{i} beating A{21-i} by i goals to nil, so the
+    final table is A10 (GD +10) down to A01 in 1st-10th, then A20 (GD -1)
+    down to A11 in 11th-20th. Relegated: A13, A12, A11.
+
+    Season 2 arrivals B01, B02, B03 come from a sibling EFL whose season-1
+    table reads B01 champion, B02 runner-up, B03 3rd (the play-off winner
+    here), B04 4th.
+    """
+    rows = []
+    for i in range(1, 11):
+        rows.append(_m(f"2001-01-{i:02d}", f"A{i:02d}", f"A{21 - i:02d}", i, 0, 1))
+    # Season 2, matchday 1. The table is live even inside a matchday, so
+    # every day-1 result is a 0-0 draw: drawn sides gain a point but no GD
+    # or goals, leaving the seed-ordering of later openers intact.
+    rows.append(_m("2001-08-01", "A10", "A01", 0, 0, 2))   # champion v 10th
+    rows.append(_m("2001-08-01", "B01", "B02", 0, 0, 2))   # the two arrivals
+    rows.append(_m("2001-08-01", "A02", "B03", 0, 0, 2))   # play-off arrival
+    # Fillers so every season-2 team is in the table from day one.
+    fillers = [("A03", "A04"), ("A05", "A06"), ("A07", "A08"),
+               ("A09", "A14"), ("A15", "A16"), ("A17", "A18"),
+               ("A19", "A20")]
+    for h, a in fillers:
+        rows.append(_m("2001-08-02", h, a, 0, 0, 2))
+    # Day 2: A10 and A01 each win 1-0 — 4 points, +1 GD, 1 goal scored apiece.
+    rows.append(_m("2001-08-03", "A10", "A14", 1, 0, 2))
+    rows.append(_m("2001-08-03", "A20", "A01", 0, 1, 2))
+    # Day 3: dead level on points, GD and goals scored — the seed must break
+    # the tie, not the alphabet.
+    rows.append(_m("2001-08-05", "A01", "A10", 0, 0, 2))
+    df = pd.DataFrame(rows)
+
+    sib_rows = [
+        _m("2001-01-01", "B01", "B04", 3, 0, 1),
+        _m("2001-01-02", "B02", "B03", 1, 0, 1),
+    ]
+    sib_path = tmp_path / "sibling_efl.csv"
+    pd.DataFrame(sib_rows).to_csv(sib_path, index=False)
+    return df, str(sib_path)
+
+
+def _seeded_pl(tmp_path, monkeypatch):
+    from data import build_canonical_dataset as mod
+
+    df, sib_path = _pl_two_seasons(tmp_path)
+    # The synthetic league has 20 distinct teams in season 1, matching the
+    # real PL count, so the completeness check passes unmodified.
+    return mod._add_league_position(df, "PL", sib_path)
+
+
+def test_matchday1_returning_teams_keep_their_finishing_position(tmp_path, monkeypatch):
+    out = _seeded_pl(tmp_path, monkeypatch)
+    opener = out[(out["SeasonIndex"] == 2) & (out["Home_Team"] == "A10")].iloc[0]
+    assert opener["Home_LeaguePosition"] == 1          # last season's champion
+    assert opener["Away_LeaguePosition"] == 10         # A01 finished 10th
+
+
+def test_matchday1_promoted_teams_seed_by_route(tmp_path, monkeypatch):
+    out = _seeded_pl(tmp_path, monkeypatch)
+    s2 = out[out["SeasonIndex"] == 2]
+    b_row = s2[s2["Home_Team"] == "B01"].iloc[0]
+    assert b_row["Home_LeaguePosition"] == 18          # EFL champion
+    assert b_row["Away_LeaguePosition"] == 19          # runner-up (B02)
+    assert s2[s2["Home_Team"] == "A02"].iloc[0]["Away_LeaguePosition"] == 20  # play-off (B03)
+
+
+def test_equal_points_break_on_seed_not_alphabet(tmp_path, monkeypatch):
+    """By day 3, A01 and A10 both have 4 points, +1 GD, 1 goal scored. A10's
+    seed (champion, 1) must rank it above A01 (10th) — alphabetically A01
+    would win, which is the old noise this decision removes."""
+    out = _seeded_pl(tmp_path, monkeypatch)
+    decider = out[(out["SeasonIndex"] == 2) & (out["Home_Team"] == "A01")
+                  & (out["Away_Team"] == "A10")].iloc[0]
+    assert decider["Away_LeaguePosition"] == 1
+    assert decider["Home_LeaguePosition"] == 2
+
+
+def test_matchday1_positions_span_the_full_roster(tmp_path, monkeypatch):
+    """Openers used to rank only the teams already seen — the first fixture's
+    away side always showed 2nd. The whole roster is in the table from day
+    one, so A01 shows its seeded 10th, not 2nd."""
+    out = _seeded_pl(tmp_path, monkeypatch)
+    opener = out[(out["SeasonIndex"] == 2) & (out["Home_Team"] == "A10")].iloc[0]
+    assert opener["Away_LeaguePosition"] != 2
+
+
+def test_goals_scored_breaks_ties_before_the_seed(tmp_path):
+    """Mid-season rank is points, GD, then goals scored (ADR 0002). C and E
+    both won by two; E scored three to C's two, so E ranks above C even
+    though C is alphabetically first and no seed exists (single season)."""
+    from data import build_canonical_dataset as mod
+
+    df = pd.DataFrame([
+        _m("2001-01-01", "C", "D", 2, 0, 1),
+        _m("2001-01-01", "E", "F", 3, 1, 1),
+        _m("2001-01-08", "C", "E", 0, 0, 1),
+    ])
+    out = mod._add_league_position(df, "PL", None)
+    decider = out.iloc[-1]
+    assert decider["Away_LeaguePosition"] == 1     # E, on goals scored
+    assert decider["Home_LeaguePosition"] == 2     # C
+
+
+def test_efl_relegated_arrivals_seed_top_in_pl_finish_order(tmp_path):
+    """EFL season 2: P01-P03 came down from the PL (P01 finished best), so
+    they seed 1, 2, 3. L01-L03 came up from League One, whose table this
+    system does not hold: all take the neutral 23rd, ranked between the
+    returning sides by alphabet."""
+    from data import build_canonical_dataset as mod
+
+    rows = []
+    for i in range(1, 13):
+        rows.append(_m(f"2001-01-{i:02d}", f"E{i:02d}", f"E{25 - i:02d}", i, 0, 1))
+    # Season 2 openers: relegated P01 hosts League One arrival L01;
+    # P02 hosts P03.
+    rows.append(_m("2001-08-01", "P01", "L01", 1, 0, 2))
+    rows.append(_m("2001-08-01", "P02", "P03", 1, 0, 2))
+    # Fillers: the 18 returning sides (E10-E12 went up, E13-E15 went down)
+    # plus L02 and L03, so the full 24-team roster is in the table.
+    fillers = [("E01", "E02"), ("E03", "E04"), ("E05", "E06"),
+               ("E07", "E08"), ("E09", "E16"), ("E17", "E18"),
+               ("E19", "E20"), ("E21", "E22"), ("E23", "E24"),
+               ("L02", "L03")]
+    for h, a in fillers:
+        rows.append(_m("2001-08-02", h, a, 0, 0, 2))
+    df = pd.DataFrame(rows)
+
+    sib_rows = [
+        _m("2001-01-01", "P01", "P04", 3, 0, 1),
+        _m("2001-01-02", "P02", "P05", 2, 0, 1),
+        _m("2001-01-03", "P03", "P06", 1, 0, 1),
+    ]
+    sib_path = tmp_path / "sibling_pl.csv"
+    pd.DataFrame(sib_rows).to_csv(sib_path, index=False)
+
+    out = mod._add_league_position(df, "EFL", str(sib_path))
+    s2 = out[out["SeasonIndex"] == 2]
+    p_row = s2[s2["Home_Team"] == "P01"].iloc[0]
+    assert p_row["Home_LeaguePosition"] == 1
+    assert p_row["Away_LeaguePosition"] == 22      # first of the three 23-seeds
+    pp_row = s2[s2["Home_Team"] == "P02"].iloc[0]
+    assert pp_row["Home_LeaguePosition"] == 2
+    assert pp_row["Away_LeaguePosition"] == 3
+
+
+def test_first_season_has_no_seed_and_keeps_alphabetical_order(tmp_path):
+    """Season 0 has nothing to seed from — the documented default is the
+    old behaviour: every team equal, alphabet decides."""
+    from data import build_canonical_dataset as mod
+
+    df = pd.DataFrame([
+        _m("2000-08-01", "Z", "M", 0, 0, 0),
+    ])
+    out = mod._add_league_position(df, "PL", None)
+    assert out.iloc[0]["Home_LeaguePosition"] == 2  # Z after M
+    assert out.iloc[0]["Away_LeaguePosition"] == 1

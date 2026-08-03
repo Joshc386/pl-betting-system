@@ -79,12 +79,15 @@ def _settings(league: str, output: str | None = None) -> dict[str, Any]:
     # real canonical, or it would "reproduce" the build by dropping the very
     # rows preservation exists to keep.
     settings["canonical_path"] = cfg["csv_path"]
-    # The EFL split needs the division above: an arrival that was in the PL
-    # last season came *down*, and is one of the division's stronger teams
-    # rather than one of its weakest (ADR 0007 decisions 1-2). The PL needs no
-    # sibling — every arrival there came up.
+    # Each league needs the other's canonical. The EFL split needs the
+    # division above: an arrival that was in the PL last season came *down*
+    # (ADR 0007 decisions 1-2), and its PL finish orders the top-of-table
+    # seeds. The PL needs the EFL's final table for promotion routes —
+    # champion, runner-up or play-off winner sets the matchday-1 seed
+    # (ADR 0002, ADR 0007 decision 3).
     settings["sibling_canonical_path"] = (
-        get_league_config("PL")["csv_path"] if league == "EFL" else None)
+        get_league_config("PL")["csv_path"] if league == "EFL"
+        else get_league_config("EFL")["csv_path"])
     # One derby list per league, living in league_config (ADR 0007 decision 9).
     # There were four copies; the one here was the last to be removed.
     settings["derbies_local"] = cfg["derbies_local"]
@@ -551,26 +554,126 @@ def _add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _add_league_position(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute running league position for each team within each season."""
+def _final_table(frame: pd.DataFrame, season: int) -> dict[str, int]:
+    """Final standings of *season*: rank by points, GD, goals scored, name."""
+    pts: dict[str, int] = {}
+    gd: dict[str, int] = {}
+    gs: dict[str, int] = {}
+    for _, row in frame[frame["SeasonIndex"] == season].iterrows():
+        home, away = row["Home_Team"], row["Away_Team"]
+        for t in (home, away):
+            pts.setdefault(t, 0)
+            gd.setdefault(t, 0)
+            gs.setdefault(t, 0)
+        hg, ag = row["Home_Goals"], row["Away_Goals"]
+        if pd.isna(hg) or pd.isna(ag):
+            continue
+        hg, ag = int(hg), int(ag)
+        gd[home] += hg - ag
+        gd[away] += ag - hg
+        gs[home] += hg
+        gs[away] += ag
+        ftr = row.get("FTR", "")
+        if ftr == "H":
+            pts[home] += 3
+        elif ftr == "A":
+            pts[away] += 3
+        elif ftr == "D":
+            pts[home] += 1
+            pts[away] += 1
+    ranked = sorted(pts, key=lambda t: (-pts[t], -gd[t], -gs[t], t))
+    return {t: i + 1 for i, t in enumerate(ranked)}
+
+
+def _matchday1_seeds(
+    df: pd.DataFrame,
+    league: str,
+    season: int,
+    sibling: pd.DataFrame | None,
+) -> dict[str, int]:
+    """Seed a season's table from the previous season's outcome (ADR 0002,
+    ADR 0007 decision 3).
+
+    Returning teams keep their finishing position. Arrivals per league:
+
+    * **PL** — route read off the sibling EFL final table for season N-1:
+      champion seeds 18th, runner-up 19th, the play-off winner 20th.
+    * **EFL** — sides relegated from the PL seed 1, 2, 3 in their PL
+      finishing order (the division's strongest priors); League One
+      arrivals, whose table this system does not hold, take the neutral
+      2nd-from-bottom seed (23rd).
+
+    The first season, or one whose predecessor is incomplete, has nothing
+    to seed from: every team gets an equal seed and the alphabet decides,
+    which is the documented default.
+    """
+    teams = _season_teams(df, season)
+    prev = _season_teams(df, season - 1)
+    expected = get_league_config(league)["teams_count"]
+    if len(prev) != expected:
+        return {t: 0 for t in teams}
+
+    prev_table = _final_table(df, season - 1)
+    seeds = {t: prev_table[t] for t in teams & prev}
+    arrivals = teams - prev
+    neutral = expected - 1  # 2nd-from-bottom: 19th PL, 23rd EFL
+    sib_table = _final_table(sibling, season - 1) if sibling is not None else {}
+
+    if league == "PL":
+        bridge = {normalize(t): p for t, p in sib_table.items()}
+        route = {1: expected - 2, 2: expected - 1}
+        for t in arrivals:
+            pos = bridge.get(t)
+            seeds[t] = route.get(pos, expected) if pos is not None else neutral
+    else:
+        relegated = sorted(
+            (t for t in arrivals if normalize(t) in sib_table),
+            key=lambda t: sib_table[normalize(t)],
+        )
+        for rank, t in enumerate(relegated, start=1):
+            seeds[t] = rank
+        for t in arrivals.difference(relegated):
+            seeds[t] = neutral
+    return seeds
+
+
+def _add_league_position(
+    df: pd.DataFrame,
+    league: str,
+    sibling_canonical_path: str | None,
+) -> pd.DataFrame:
+    """Running league position, seeded at matchday 1 (ADR 0002, ADR 0007 d3).
+
+    Rank is points, then goal difference, then goals scored, with the seed
+    as the final tie-break in place of the alphabet — so before any games
+    are played the table reproduces the previous season's order instead of
+    alphabetical noise, and the seed keeps carrying mild signal at equal
+    points all season.
+    """
+    sibling = None
+    if sibling_canonical_path and os.path.exists(sibling_canonical_path):
+        sibling = pd.read_csv(sibling_canonical_path, low_memory=False)
+
     positions: list[dict[str, int | float]] = []
 
-    for _, season_group in df.groupby("SeasonIndex"):
+    for season, season_group in df.groupby("SeasonIndex"):
+        seeds = _matchday1_seeds(df, league, season, sibling)
         season_matches = season_group.sort_values("Date")
-        points: dict[str, int] = {}
-        gd: dict[str, int] = {}
+        # The whole roster is in the table from day one. Ranking only the
+        # teams already seen gave season openers positions 1-2 regardless
+        # of strength — the arbitrariness ADR 0002 documents.
+        points = {t: 0 for t in seeds}
+        gd = {t: 0 for t in seeds}
+        gs = {t: 0 for t in seeds}
 
         for idx, row in season_matches.iterrows():
             home, away = row["Home_Team"], row["Away_Team"]
-            for t in [home, away]:
-                if t not in points:
-                    points[t] = 0
-                    gd[t] = 0
 
             # Position BEFORE this match
             standings = sorted(
                 points.keys(),
-                key=lambda t: (-points[t], -gd[t], t),
+                key=lambda t: (-points[t], -gd[t], -gs[t],
+                               seeds.get(t, 0), t),
             )
             pos_map = {t: i + 1 for i, t in enumerate(standings)}
             positions.append({
@@ -586,6 +689,8 @@ def _add_league_position(df: pd.DataFrame) -> pd.DataFrame:
                 hg, ag = int(hg), int(ag)
                 gd[home] += (hg - ag)
                 gd[away] += (ag - hg)
+                gs[home] += hg
+                gs[away] += ag
                 ftr = row.get("FTR", "")
                 if ftr == "H":
                     points[home] += 3
@@ -894,7 +999,7 @@ def build(
 
     # Step 3: League position
     print("Computing league positions...")
-    df = _add_league_position(df)
+    df = _add_league_position(df, league, s["sibling_canonical_path"])
 
     # Step 4: H2H
     print("Computing H2H stats...")

@@ -29,12 +29,21 @@ converters (FotMob/Understat → base fact rows); the six feature functions,
 `PROMOTED_TEAMS`, and the direct canonical write are gone. The builder is
 the single write path, guarded by daily_ingest's schema gate.
 
-Remaining: **decision 8** needs no code — a PL rebuild resolves it — and
-**decision 3**, which is genuinely unimplemented: `_add_league_position`
-seeds matchday 1 by alphabetical order of zero-point teams, not by the
-previous season's outcome or promotion route (ADR 0002). Being a
-value-only change to an existing column, the schema gate will NOT catch
-it, so it must land before the one deliberate publish and retrain.
+**Decision 3 landed 2026-08-02**: `_add_league_position` seeds matchday 1
+from the previous season's outcome per ADR 0002 — returning teams keep
+their finish, PL arrivals seed 18/19/20 by route read off the EFL final
+table, EFL arrivals seed 1/2/3 (down from the PL, in PL finishing order)
+or the neutral 23rd (up from League One). The seed replaces the alphabet
+as the standing tie-break, and goals scored joins the mid-season ranking
+as ADR 0002 always specified. Verified against 2025/26: Leeds 18,
+Burnley 19, Sunderland 20. A value-only change to an existing column —
+the schema gate does not see it, which is why it landed before the
+deliberate publish.
+
+Remaining: **decision 8** needs no code — a PL rebuild resolves it. Every
+coded decision of this ADR is now implemented; what stands between here
+and done is the one `--allow-schema-change` publish of both canonicals
+and the retrain of both leagues.
 
 The derived flags reach the models only once the canonicals are rebuilt and
 republished, which happens with the retrain. Until then the published

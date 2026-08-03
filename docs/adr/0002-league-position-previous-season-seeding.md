@@ -4,7 +4,15 @@ Date: 2026-06-13
 
 ## Status
 
-Accepted (convention agreed; implementation pending — see Consequences)
+Accepted. **Implemented 2026-08-02** in the shared builder
+(`_add_league_position` / `_matchday1_seeds`, ADR 0007 decision 3), with
+three conventions this document left open, recorded in `CONTEXT.md`:
+sides relegated into the EFL seed 1, 2, 3 in their PL finishing order;
+the neutral promoted seed is 2nd-from-bottom; the dataset's first season
+(nothing to seed from) keeps the alphabetical order as its documented
+default. `PROMOTED_TEAMS` was never extended for routes — it was deleted
+(decision 10), and routes derive from the sibling canonical's final table
+instead.
 
 ## Context
 
