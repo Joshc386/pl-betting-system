@@ -250,7 +250,7 @@ def precompute_season_efl(train_df: pd.DataFrame, test_df: pd.DataFrame,
 
     Args:
         train_df: Training data (all prior seasons).
-        test_df:  Test season with B365Greater2.5 / B365LessThan2.5 merged.
+        test_df:  Test season with Odds_Over_2.5 / Odds_Under_2.5 merged.
         features: Champ-specific feature column names.
         dc_kwargs: Dixon-Coles constructor kwargs.
 
@@ -311,8 +311,8 @@ def precompute_season_efl(train_df: pd.DataFrame, test_df: pd.DataFrame,
         match_data.append({
             "pred_idx": pred_idx,
             "actual": int(y_test[pred_idx]),
-            "odds_over": row.get("B365Greater2.5", np.nan),
-            "odds_under": row.get("B365LessThan2.5", np.nan),
+            "odds_over": row.get("Odds_Over_2.5", np.nan),
+            "odds_under": row.get("Odds_Under_2.5", np.nan),
             "season": row.get("SeasonIndex", 0),
             "home": row.get("Home_Team", ""),
             "away": row.get("Away_Team", ""),
@@ -451,7 +451,7 @@ def backtest_season(train_df: pd.DataFrame, test_df: pd.DataFrame,
 
     Args:
         train_df: Training data (all prior seasons).
-        test_df: Test season data with B365 odds columns.
+        test_df: Test season data with the Odds_Over/Under_2.5 columns.
         features: Feature column names for GBDTs.
         config: Blend/staking configuration dict.
         dc_kwargs: Dixon-Coles constructor kwargs.
@@ -579,8 +579,8 @@ def backtest_season(train_df: pd.DataFrame, test_df: pd.DataFrame,
         model_over = per_model.mean()
         model_under = 1 - model_over
 
-        odds_over = row.get("B365Greater2.5", np.nan)
-        odds_under = row.get("B365LessThan2.5", np.nan)
+        odds_over = row.get("Odds_Over_2.5", np.nan)
+        odds_under = row.get("Odds_Under_2.5", np.nan)
 
         if pd.isna(odds_over) or pd.isna(odds_under):
             continue
@@ -792,7 +792,7 @@ def run_backtest(config: dict | None = None, start_season: int = 4,
         ].copy()
         test_df = full_df[full_df["SeasonIndex"] == season].copy()
 
-        has_odds = test_df["B365Greater2.5"].notna().sum()
+        has_odds = test_df["Odds_Over_2.5"].notna().sum()
         if has_odds < 50 or len(train_df) < 500:
             if verbose:
                 print(f"  S{season:>5d}  skipped (odds={has_odds}, "

@@ -625,7 +625,7 @@ def run_backtest_analytics(
                                (full_df["SeasonIndex"] < season)].copy()
             test_df = full_df[full_df["SeasonIndex"] == season].copy()
 
-            has_odds = test_df["B365Greater2.5"].notna().sum()
+            has_odds = test_df["Odds_Over_2.5"].notna().sum()
             if has_odds < 50 or len(train_df) < 500:
                 continue
 

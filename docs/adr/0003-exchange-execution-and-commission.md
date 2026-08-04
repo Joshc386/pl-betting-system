@@ -4,9 +4,21 @@ Date: 2026-06-24
 
 ## Status
 
-Accepted (spec agreed via `/grill-with-docs`; implementation pending — see Consequences).
-Sequenced **behind** pre-live hardening item #5 (settlement concurrency), which rewrites the
-same settlement profit path.
+Accepted (spec agreed via `/grill-with-docs`). Commission and the Minimum Odds
+work remain pending, sequenced **behind** pre-live hardening item #5
+(settlement concurrency), which rewrites the same settlement profit path.
+
+**The re-sourcing half landed 2026-08-04.** This ADR observed that
+`backtest.py:416` used Bet365 for both the fair reference and the execution
+price, and that "'re-run with commission' is really 're-source the backtest
+onto Betfair'". Both canonicals now carry `Odds_Over/Under_{1.5,2.5}` —
+Betfair `ltp_first` where the exchange reaches, Bet365 where it does not
+(it begins 2016-08-01; the canonicals in 2000/01) — with
+`Odds_Source_{line}` recording which, per row, because the two are
+different kinds of number. The O/U 2.5 backtests for both leagues now read
+those columns. **The commission-netted ROI comparison has not been run**,
+so every published ROI figure remains gross and is now measured on a mix of
+exchange and soft prices that `Odds_Source_*` can separate.
 
 ## Context
 

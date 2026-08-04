@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import io
 import os
+import re
 import sys
 import time
 from typing import Any
@@ -752,6 +753,143 @@ def _add_h2h(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+_BETFAIR_GOAL_ODDS = os.path.join(PROJECT_DIR, "data", "betfair_goal_ou.csv")
+
+# Betfair spells five Championship clubs differently from
+# football-data.co.uk, whose short forms the EFL canonical keeps. Each of
+# these sat at exactly 0% join rate before the bridge existed — about 1,000
+# fixtures reading as a data gap rather than a name miss. "Oxford City" and
+# "Forest Green" are different clubs entirely and deliberately absent.
+_BETFAIR_TO_EFL: dict[str, str] = {
+    "Peterborough": "Peterboro",
+    "Nottm Forest": "Nott'm Forest",
+    "Oxford United": "Oxford",
+    "Oxford Utd": "Oxford",
+    "Sheff Utd": "Sheffield United",
+    "Sheff Wed": "Sheffield Weds",
+}
+
+# Betfair carries women's, youth and reserve fixtures under near-identical
+# names on the same day. normalize() already refuses to fold them into the
+# senior club (ADR 0008), but the EFL side joins on raw strings, so the
+# exclusion has to be explicit for both.
+_NON_SENIOR = re.compile(r"\(W\)|\(Res\)?\)?|\bU\d{2}\b|\bWomen\b", re.I)
+
+
+def _load_betfair_lines(path: str, league: str) -> pd.DataFrame | None:
+    """Load Betfair goal O/U prices keyed to a league's canonical names.
+
+    Only ``*_ltp_first`` is read. ``over_ltp``/``under_ltp`` are the *last*
+    traded prices and are contaminated by in-play trading — across 66k
+    settled O/U 2.5 markets the median ``over_ltp`` is 1.53 when the over
+    won and 15.00 when it lost. A pre-match price cannot know the result.
+
+    Returns:
+        Frame of (Home_Team, Away_Team, DateOnly, line, over, under), or
+        None when the download is absent.
+    """
+    if not os.path.exists(path):
+        print(f"  WARNING: no Betfair goal odds at {path} — "
+              f"odds fall back to Bet365 alone")
+        return None
+
+    bf = pd.read_csv(path)
+    bf = bf[bf["market_type"].isin(("OVER_UNDER_25", "OVER_UNDER_15"))].copy()
+
+    parts = bf["event_name"].str.split(r"\s+v\s+", n=1, regex=True)
+    bf["home_raw"] = parts.str[0].str.strip()
+    bf["away_raw"] = parts.str[1].str.strip()
+    bf = bf.dropna(subset=["home_raw", "away_raw"])
+
+    senior = ~(bf["home_raw"].str.contains(_NON_SENIOR, na=False)
+               | bf["away_raw"].str.contains(_NON_SENIOR, na=False))
+    bf = bf[senior]
+
+    if league == "PL":
+        # normalize() answers in PL canonical long forms and refuses names
+        # it does not know, so a non-PL club drops out of the join here.
+        names = pd.unique(pd.concat([bf["home_raw"], bf["away_raw"]]))
+        lookup = {n: normalize(n) for n in names}
+        bf["Home_Team"] = bf["home_raw"].map(lookup)
+        bf["Away_Team"] = bf["away_raw"].map(lookup)
+    else:
+        bf["Home_Team"] = bf["home_raw"].replace(_BETFAIR_TO_EFL)
+        bf["Away_Team"] = bf["away_raw"].replace(_BETFAIR_TO_EFL)
+
+    bf["DateOnly"] = pd.to_datetime(
+        bf["market_time"], format="mixed", utc=True).dt.date
+    bf["line"] = np.where(bf["market_type"] == "OVER_UNDER_25", "2.5", "1.5")
+
+    out = bf[["Home_Team", "Away_Team", "DateOnly", "line",
+              "over_ltp_first", "under_ltp_first"]].copy()
+    out.columns = ["Home_Team", "Away_Team", "DateOnly", "line",
+                   "over", "under"]
+    return out.drop_duplicates(["Home_Team", "Away_Team", "DateOnly", "line"])
+
+
+def _add_odds(df: pd.DataFrame, league: str,
+              betfair_path: str | None = None) -> pd.DataFrame:
+    """Add the O/U odds columns, exchange price first (ADR 0003).
+
+    The exchange is the execution venue, so its price is what a backtest
+    should measure against; Bet365 is a soft-book stand-in for the seasons
+    Betfair does not reach (it begins 2016-08-01, the canonicals in
+    2000/01). ``Odds_Source_*`` records which, per row, because the two are
+    different kinds of number and a backtest must be able to say which one
+    produced its result.
+
+    ``1.5`` has no soft-book fallback — football-data.co.uk serves no such
+    line — so it is the exchange price or nothing.
+
+    Args:
+        df: The frame being built.
+        league: "PL" or "EFL".
+        betfair_path: Override for the goal-odds download (tests).
+
+    Returns:
+        *df* with Odds_Over/Under_1.5/2.5 and Odds_Source_1.5/2.5 added.
+    """
+    df = df.copy()
+    bf = _load_betfair_lines(betfair_path or _BETFAIR_GOAL_ODDS, league)
+
+    date_only = pd.to_datetime(
+        df["Date"], format="mixed", dayfirst=True).dt.date
+
+    for line in ("2.5", "1.5"):
+        over = pd.Series(np.nan, index=df.index)
+        under = pd.Series(np.nan, index=df.index)
+        source = pd.Series(pd.NA, index=df.index, dtype="object")
+
+        if bf is not None:
+            sub = bf[bf["line"] == line]
+            key = pd.DataFrame({
+                "Home_Team": df["Home_Team"], "Away_Team": df["Away_Team"],
+                "DateOnly": date_only,
+            })
+            merged = key.merge(sub, on=["Home_Team", "Away_Team", "DateOnly"],
+                               how="left")
+            merged.index = df.index
+            hit = merged["over"].notna() & merged["under"].notna()
+            over[hit] = merged.loc[hit, "over"]
+            under[hit] = merged.loc[hit, "under"]
+            source[hit] = "betfair"
+
+        if line == "2.5":
+            b_over = pd.to_numeric(df.get("B365Greater2.5"), errors="coerce")
+            b_under = pd.to_numeric(df.get("B365LessThan2.5"), errors="coerce")
+            if b_over is not None and b_under is not None:
+                gap = over.isna() & b_over.notna() & b_under.notna()
+                over[gap] = b_over[gap]
+                under[gap] = b_under[gap]
+                source[gap] = "b365"
+
+        df[f"Odds_Over_{line}"] = over
+        df[f"Odds_Under_{line}"] = under
+        df[f"Odds_Source_{line}"] = source
+
+    return df
+
+
 def _add_scoring_features(df: pd.DataFrame) -> pd.DataFrame:
     """Compute the rolling scoring features (ADR 0007 decision 7).
 
@@ -1016,6 +1154,15 @@ def build(
     # Step 7: Rolling scoring rate and index (ADR 0007 decision 7)
     print("Computing scoring rate/index...")
     df = _add_scoring_features(df)
+
+    # Step 8: O/U odds — exchange price first, soft book as fallback (ADR 0003)
+    print("Merging O/U odds (Betfair, Bet365 fallback)...")
+    df = _add_odds(df, league)
+    for line in ("2.5", "1.5"):
+        src = df[f"Odds_Source_{line}"].value_counts(dropna=True)
+        print(f"  O/U {line}: betfair {int(src.get('betfair', 0))}, "
+              f"b365 {int(src.get('b365', 0))}, "
+              f"none {int(df[f'Odds_Source_{line}'].isna().sum())}")
 
     # Save
     df.to_csv(s["output_path"], index=False)

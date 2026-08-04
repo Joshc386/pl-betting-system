@@ -258,6 +258,16 @@ _Avoid_: Confidence weight
 
 ### Edge & value
 
+**Historical Odds (canonical)**:
+The price a *backtest* settles against, held in both Canonical Datasets as `Odds_Over_{line}` / `Odds_Under_{line}` for the 1.5 and 2.5 goal lines, with `Odds_Source_{line}` naming its origin per row — `betfair`, `b365`, or null.
+
+**Betfair first, Bet365 only as a stand-in.** The exchange is the Execution Venue (see [ADR 0003](docs/adr/0003-exchange-execution-and-commission.md)), so its price is what a backtest should measure against. But Betfair's history begins **2016-08-01** while the canonicals begin 2000/01, so roughly 55% of rows carry a soft-book price instead. Those are *different kinds of number* — a soft book's margin is wider and its price is not one you would execute at — which is exactly why the source column exists rather than a single silently-mixed column. O/U **1.5 has no fallback**: football-data.co.uk serves no such line, so it is the exchange price or nothing.
+
+**Always the first traded price, never the last.** Betfair's `over_ltp` is the *last* traded price and is contaminated by in-play trading — across 66k settled O/U 2.5 markets its median is 1.53 when the over won and 15.00 when it lost. A pre-match price cannot know the result; only `*_ltp_first` is safe. Women's, youth and reserve fixtures are excluded explicitly: Betfair carries them under near-identical names on the same day.
+
+Note this is **not** the Fair Probability source — that stays independent (see below), because grading a bet against the venue you trade on erases edge by construction.
+_Avoid_: "B365 odds" (the columns are no longer Bet365-only), closing price
+
 **Edge**:
 The raw probability gap between the model's estimate and the market's fair probability. Computed as `blended_prob - fair_prob`. A positive edge means the model thinks the market is underpricing that outcome.
 _Avoid_: Advantage, overlay

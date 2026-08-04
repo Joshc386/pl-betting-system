@@ -413,8 +413,8 @@ def backtest_season(train_df, test_df, features, config=None, dc_kwargs=None,
             model_over = per_model.mean()
         model_under = 1 - model_over
 
-        odds_over = row.get("B365Greater2.5", np.nan)
-        odds_under = row.get("B365LessThan2.5", np.nan)
+        odds_over = row.get("Odds_Over_2.5", np.nan)
+        odds_under = row.get("Odds_Under_2.5", np.nan)
 
         if pd.isna(odds_over) or pd.isna(odds_under):
             continue
@@ -613,8 +613,8 @@ def precompute_season(train_df, test_df, features, dc_kwargs=None):
         match_data.append({
             "pred_idx": pred_idx,
             "actual": int(y_test[pred_idx]),
-            "odds_over": row.get("B365Greater2.5", np.nan),
-            "odds_under": row.get("B365LessThan2.5", np.nan),
+            "odds_over": row.get("Odds_Over_2.5", np.nan),
+            "odds_under": row.get("Odds_Under_2.5", np.nan),
             "season": row.get("SeasonIndex", 0),
             "home": row.get("Home_Team", ""),
             "away": row.get("Away_Team", ""),
@@ -850,7 +850,7 @@ def run_backtest(config=None, start_season=19, end_season=25, verbose=True):
                            (full_df["SeasonIndex"] < season)].copy()
         test_df = full_df[full_df["SeasonIndex"] == season].copy()
 
-        has_odds = test_df["B365Greater2.5"].notna().sum()
+        has_odds = test_df["Odds_Over_2.5"].notna().sum()
         if has_odds < 50 or len(train_df) < 500:
             continue
 
@@ -986,7 +986,7 @@ if __name__ == "__main__":
                 train_df = full_df[(full_df["SeasonIndex"] >= 14) &
                                    (full_df["SeasonIndex"] < season)].copy()
                 test_df = full_df[full_df["SeasonIndex"] == season].copy()
-                if test_df["B365Greater2.5"].notna().sum() < 50 or len(train_df) < 500:
+                if test_df["Odds_Over_2.5"].notna().sum() < 50 or len(train_df) < 500:
                     continue
                 bets_df, metrics, cum_bank, peak_bank = backtest_season(
                     train_df, test_df, features, config=cfg, dc_kwargs=dc_kwargs,
@@ -1116,7 +1116,7 @@ if __name__ == "__main__":
             train_df = full_df[(full_df["SeasonIndex"] >= 14) &
                                (full_df["SeasonIndex"] < season)].copy()
             test_df = full_df[full_df["SeasonIndex"] == season].copy()
-            if test_df["B365Greater2.5"].notna().sum() < 50 or len(train_df) < 500:
+            if test_df["Odds_Over_2.5"].notna().sum() < 50 or len(train_df) < 500:
                 continue
             cached = precompute_season(train_df, test_df, features, dc_kwargs=dc_kwargs)
             cached_seasons.append(cached)
