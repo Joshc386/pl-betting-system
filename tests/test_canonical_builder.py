@@ -91,14 +91,13 @@ def test_per_season_row_counts_unchanged(efl_rebuild, efl_live):
 # directions, so a stale entry here fails the suite just as an undeclared
 # change does — that is how the 2026-07-29 Relegated publish was noticed.
 #
-# Re-populated for the ADR 0003 odds re-sourcing: the exchange price and its
-# provenance arrive at the next deliberate publish. B365Greater2.5 /
-# B365LessThan2.5 stay — they are Facts from football-data.co.uk and the
-# fallback these columns coalesce over, not duplicates of them.
-PENDING_NEW_COLUMNS: set[str] = {
-    "Odds_Over_2.5", "Odds_Under_2.5", "Odds_Source_2.5",
-    "Odds_Over_1.5", "Odds_Under_1.5", "Odds_Source_1.5",
-}
+# Empty again: the ADR 0003 odds columns (Odds_Over/Under/Source_{1.5,2.5})
+# were declared here and published on 2026-08-04, so the declaration went
+# stale the moment the publish landed and this test said so. B365Greater2.5
+# / B365LessThan2.5 remain in both canonicals — they are Facts from
+# football-data.co.uk and the fallback those columns coalesce over, not
+# duplicates of them.
+PENDING_NEW_COLUMNS: set[str] = set()
 PENDING_REMOVED_COLUMNS: set[str] = set()
 
 
