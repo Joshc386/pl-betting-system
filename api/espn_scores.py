@@ -18,6 +18,14 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer"
 
+# Never set a custom User-Agent on these requests. ESPN's Akamai edge 403s
+# unrecognised "name/version" strings; this module works because `requests`
+# sends its own default, which is on the allowed side of that rule.
+
+
+class UnresolvedTeamError(RuntimeError):
+    """A finished fixture named a club that maps to no Canonical Dataset name."""
+
 # ESPN league identifiers
 LEAGUE_IDS = {
     "PL": "eng.1",
@@ -121,6 +129,83 @@ def _resolve_team(espn_name: str, competition: str) -> str | None:
     if is_known_team(espn_name):
         return normalize(espn_name)
     return None
+
+
+def fetch_finished_window(
+    competition: str,
+    start: "datetime.date",
+    end: "datetime.date",
+) -> list[tuple]:
+    """Finished fixtures in one date window, as ``(date, home, away)`` tuples.
+
+    Built for the ADR 0005 Freshness Gate, and deliberately *not* built on
+    ``fetch_completed_matches``, which loops one request per day and
+    ``continue``s past a failure. For settlement that is benign — a missed day
+    leaves a bet open, which is visible. For a gate it inverts the meaning:
+    fixtures never checked look like fixtures that never happened, so the gate
+    would pass on incomplete evidence.
+
+    This makes **one** request for the whole window and lets failures raise, so
+    the caller can tell "none were played" from "I could not find out".
+
+    Teams come back already in the league's Canonical Dataset format, via the
+    same ``_resolve_team`` the settlement path uses.
+
+    Raises:
+        requests.RequestException: On any HTTP or network failure.
+        UnresolvedTeamError: If a finished fixture names a club that does not
+            resolve. Skipping it would silently shrink the evidence the gate
+            reconciles against, which is the failure this function exists to
+            avoid.
+    """
+    espn_league = LEAGUE_IDS.get(competition)
+    if not espn_league:
+        raise ValueError(f"Unknown competition code: {competition}")
+
+    resp = requests.get(
+        f"{BASE_URL}/{espn_league}/scoreboard",
+        params={"dates": f"{start:%Y%m%d}-{end:%Y%m%d}", "limit": 400},
+        timeout=20,
+    )
+    resp.raise_for_status()
+
+    finished: list[tuple] = []
+    for event in resp.json().get("events", []):
+        match_comp = event.get("competitions", [{}])[0]
+        if not match_comp.get("status", {}).get("type", {}).get("completed"):
+            continue
+
+        competitors = match_comp.get("competitors", [])
+        home_raw = next(
+            (c["team"]["displayName"] for c in competitors
+             if c.get("homeAway") == "home"), None)
+        away_raw = next(
+            (c["team"]["displayName"] for c in competitors
+             if c.get("homeAway") == "away"), None)
+        if not home_raw or not away_raw:
+            raise UnresolvedTeamError(
+                f"ESPN [{competition}]: finished event {event.get('id')} is "
+                f"missing a home or away competitor"
+            )
+
+        home = _resolve_team(home_raw, competition)
+        away = _resolve_team(away_raw, competition)
+        if not home or not away:
+            unresolved = home_raw if not home else away_raw
+            raise UnresolvedTeamError(
+                f"ESPN [{competition}]: cannot resolve {unresolved!r} to a "
+                f"Canonical Dataset name. Add it to the map in "
+                f"api/espn_scores.py — the freshness gate cannot verify a "
+                f"league whose fixture list it cannot read."
+            )
+
+        finished.append((
+            datetime.strptime(event["date"][:10], "%Y-%m-%d").date(),
+            home,
+            away,
+        ))
+
+    return finished
 
 
 def fetch_completed_matches(
