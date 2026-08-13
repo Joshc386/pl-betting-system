@@ -83,6 +83,18 @@ running a **Data Refresh** for a league.
   cheap because it requires simultaneous failure at two independent providers, by which
   point the odds fetch has also failed and there is nothing to bet on.
 
+- **The window ends two days short of today.** Added 2026-08-06 during implementation,
+  after the window as originally specified was found to block every matchday evening.
+  ESPN reports a fixture finished at full time, but the canonical is rebuilt once daily
+  at 06:00 ([0006](0006-task-scheduler-for-data-critical-jobs.md)), so a fixture that
+  kicked off at 17:00 is finished-and-legitimately-absent until the next morning — and
+  the KO-1h scan for that evening's later fixtures sits inside that gap. Measured
+  against the EFL final day, a gate run that evening would have demanded **12 fixtures
+  that could not yet exist** in the canonical. Two days rather than one because the gate
+  reasons in dates, not hours: a dashboard scan at 03:00 precedes that morning's ingest.
+  Same principle as the sibling project's `PUBLISH_GRACE` — never judge a source before
+  its publishing window has closed.
+
 - **The window is 14 days**, sized to the gate's run cadence, not the fixture calendar
   — the window never needs to span a break, since zero finished fixtures passes by
   construction. Its only job is keeping a failed ingest visible until the gate next

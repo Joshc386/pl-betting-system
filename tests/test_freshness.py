@@ -25,6 +25,13 @@ from freshness import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_cached_fetches() -> None:
+    """The fetch cache is module-level, so without this a FRESH fetch cached by
+    one test answers for the next and the suite passes on stale evidence."""
+    freshness.clear_cache()
+
+
 class TestReconcile:
     """The pure core: which finished fixtures are absent from the canonical."""
 
@@ -185,21 +192,195 @@ class TestLeagueIsolation:
         assert assert_fresh("PL", finished=[], canonical_keys=set()) is None
 
 
-class TestWindow:
-    """14 days, inclusive of today, never reaching into the future."""
+class TestBoundariesAreWired:
+    """The gate must actually be reachable from the paths it guards.
 
-    def test_window_spans_exactly_fourteen_days_back_from_today(self) -> None:
+    Built as a separate step from the gate itself so a wiring bug could not be
+    mistaken for a gate bug. These assert the wiring exists at all — a gate
+    nothing calls is the failure mode that matters here.
+    """
+
+    def test_both_predictors_gate_their_recommendations(self) -> None:
+        """One check inside generate_recommendations() covers all six
+        recommendation call sites, so none is left to forget it."""
+        import inspect
+
+        import championship_predict
+        import predict
+
+        pl = inspect.getsource(predict.LivePredictor.generate_recommendations)
+        efl = inspect.getsource(
+            championship_predict.ChampionshipPredictor.generate_recommendations)
+
+        assert 'assert_fresh("PL")' in pl
+        assert 'assert_fresh("EFL")' in efl
+
+    def test_every_train_site_is_gated(self) -> None:
+        """Three train sites, not one. Blocking recommendations alone would
+        still bake staleness into the pickles, where it survives the gate
+        going green again."""
+        import inspect
+
+        import scan
+        import scheduler
+
+        retrain = inspect.getsource(scheduler.job_weekly_retrain)
+        assert 'assert_fresh("PL")' in retrain
+        assert 'assert_fresh("EFL")' in retrain
+
+        # scan.py retrains inline when load_trained_state() fails — the site
+        # ADR 0005 did not anticipate.
+        scan_src = inspect.getsource(scan.run_scan)
+        assert "assert_fresh(league)" in scan_src
+        assert scan_src.index("assert_fresh(league)") < scan_src.index(
+            "_predictor.train()"
+        ), "the gate must precede the inline retrain, not follow it"
+
+    def test_scan_reports_the_gate_by_name(self) -> None:
+        """A blocked scan must say so. Falling through to the generic handler
+        would log 'Predictor run during scan failed', burying which fixtures
+        are missing and that the odds themselves are fine."""
+        import inspect
+
+        import scan
+
+        source = inspect.getsource(scan.run_scan)
+        assert "except FreshnessError" in source
+
+        # Compared against the generic handler *in the same try block*, not the
+        # first `except Exception` in the function — run_scan has an earlier,
+        # unrelated one in the OddsPapi block.
+        assert source.index("except FreshnessError") < source.index(
+            "Predictor run during scan failed"
+        ), "the specific handler must precede the generic one or it is dead code"
+
+
+class TestCache:
+    """A per-process cache, deliberately asymmetric: only FRESH is cached."""
+
+    PLAYED = (date(2026, 8, 22), "Hull City AFC", "Manchester United FC")
+
+    def test_a_fresh_verdict_is_not_refetched_within_the_ttl(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The saving. A Sunday retrain checks twice per league — once before
+        train(), once inside generate_recommendations() — seconds apart."""
+        freshness.clear_cache()
+        calls = []
+
+        def counting(league, window_days, now):
+            calls.append(league)
+            return []
+
+        monkeypatch.setattr(freshness, "_fetch_espn", counting)
+
+        check_freshness("PL", canonical_keys=set())
+        check_freshness("PL", canonical_keys=set())
+
+        assert len(calls) == 1
+
+    def test_a_repaired_canonical_unblocks_immediately(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The safety property, and the reason the verdict is not what's cached.
+
+        A blocked gate is a thing the operator is fixing right now — re-running
+        the ingest, adding the missing row. The fix must take effect on the next
+        call, not after a TTL and not after restarting the dashboard, which is
+        exactly the ritual a safety gate must not create. Caching only the fetch
+        keeps the canonical re-read every time, so this holds without the cache
+        being cleared.
+        """
+        monkeypatch.setattr(
+            freshness, "_fetch_espn",
+            lambda league, window_days, now: [self.PLAYED],
+        )
+
+        blocked = check_freshness("PL", canonical_keys=set())
+        assert blocked.verdict is Verdict.STALE
+
+        # Operator re-runs the ingest; the fixture is now in the canonical.
+        repaired = check_freshness("PL", canonical_keys={self.PLAYED})
+
+        assert repaired.verdict is Verdict.FRESH
+
+    def test_an_unknown_verdict_is_never_cached(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An outage that recovers must be picked up at once, not after a TTL."""
+        freshness.clear_cache()
+        calls = []
+
+        def dead(league, window_days, now):
+            calls.append(league)
+            raise OSError("network down")
+
+        monkeypatch.setattr(freshness, "_fetch_espn", dead)
+        monkeypatch.setattr(freshness, "_fetch_football_data", dead)
+
+        check_freshness("PL", canonical_keys=set())
+        check_freshness("PL", canonical_keys=set())
+
+        assert len(calls) == 4  # both authorities tried, both times
+
+    def test_the_cache_is_per_league(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A cached PL pass must not answer for EFL."""
+        freshness.clear_cache()
+        calls = []
+
+        def counting(league, window_days, now):
+            calls.append(league)
+            return []
+
+        monkeypatch.setattr(freshness, "_fetch_espn", counting)
+
+        check_freshness("PL", canonical_keys=set())
+        check_freshness("EFL", canonical_keys=set())
+
+        assert calls == ["PL", "EFL"]
+
+
+class TestWindow:
+    """14 judged days, ending before the most recent ingest could have run."""
+
+    def test_window_spans_fourteen_days(self) -> None:
         """2x the weekly Sunday Data Refresh cadence, so one missed Sunday
         still leaves a missing fixture in view. 7 days would forgive it."""
         start, end = window_bounds(now=date(2026, 9, 20), window_days=WINDOW_DAYS)
 
-        assert end == date(2026, 9, 20)
-        assert start == date(2026, 9, 6)
         assert (end - start).days == 14
 
-    def test_the_window_never_extends_past_today(self) -> None:
-        """A fixture that has not kicked off cannot be missing from the
-        canonical, so asking about the future would manufacture failures."""
+    def test_fixtures_the_daily_ingest_has_not_seen_are_not_judged(self) -> None:
+        """The false positive that would have fired on the 14 August opener.
+
+        ESPN flips a fixture to completed at full time, but the canonical is
+        only rebuilt by scripts/daily_ingest.py at 06:00 (ADR 0006). Between a
+        Saturday 17:00 kickoff finishing and the next morning's ingest, the
+        fixture is legitimately finished-and-absent — and the KO-1h scan for
+        that evening's later fixtures falls inside that gap. Judging it would
+        block betting on every matchday evening.
+
+        Same shape as the sibling project's PUBLISH_GRACE: do not judge a
+        source before it has had its chance to publish.
+        """
         _, end = window_bounds(now=date(2026, 9, 20), window_days=WINDOW_DAYS)
 
-        assert end <= date(2026, 9, 20)
+        assert end < date(2026, 9, 20), (
+            "today's finished fixtures cannot be in a canonical rebuilt at 06:00"
+        )
+        assert end == date(2026, 9, 18)
+
+    def test_the_grace_covers_a_gate_run_at_any_hour(self) -> None:
+        """Two days, not one, because the gate has no clock — only a date.
+
+        A dashboard scan at 03:00 Monday runs *before* that morning's 06:00
+        ingest, so Sunday's fixtures are still uncollected. A one-day grace
+        would judge them and block. Detection cost is bounded: a missing
+        fixture still surfaces well inside both the 14-day window and the
+        weekly retrain cadence.
+        """
+        _, end = window_bounds(now=date(2026, 9, 20), window_days=WINDOW_DAYS)
+
+        assert (date(2026, 9, 20) - end).days == 2

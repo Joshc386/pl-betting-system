@@ -802,6 +802,13 @@ class LivePredictor:
         if self._ou_models is None or self._btts_models is None:
             raise RuntimeError("Models not trained. Call train() first.")
 
+        # ── Freshness Gate (ADR 0005) ──
+        # Checked here rather than at each caller: this one place covers every
+        # recommendation path — scheduler, dashboard scan and both CLIs — so
+        # there is no call site left to forget it.
+        from freshness import assert_fresh
+        assert_fresh("PL")
+
         # ── Phase C: regime detection + two-phase early-season setup ──
         # Both happen once per run and drive subsequent calibration/betting.
         matchweek_count = self._current_matchweek_count()

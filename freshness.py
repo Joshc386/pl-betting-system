@@ -9,6 +9,7 @@ See `CONTEXT.md`, "Freshness Gate", for the vocabulary and
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import Enum
@@ -22,6 +23,18 @@ Fixture = tuple[date, str, str]
 # days is 2x margin: one missed Sunday still leaves a missing fixture in view,
 # where 7 days would forgive it permanently.
 WINDOW_DAYS = 14
+
+# Do not judge a fixture the daily ingest has not had a chance to collect.
+# ESPN flips a fixture to completed at full time, but the canonical is only
+# rebuilt by scripts/daily_ingest.py at 06:00 (ADR 0006), so between a Saturday
+# evening kickoff finishing and the next morning's ingest a fixture is
+# legitimately finished-and-absent. Judging it would block betting on every
+# matchday evening — the KO-1h scan for a 20:00 fixture falls squarely in that
+# gap. Two days rather than one because the gate reasons in dates, not hours: a
+# dashboard scan at 03:00 runs before that morning's ingest, so yesterday is
+# not yet safe to judge either. Same principle as the sibling project's
+# PUBLISH_GRACE — never judge a source before its publishing window closes.
+PUBLISH_GRACE_DAYS = 2
 
 
 class Verdict(Enum):
@@ -47,15 +60,21 @@ class GateResult:
 
 
 def window_bounds(
-    *, now: date, window_days: int = WINDOW_DAYS
+    *,
+    now: date,
+    window_days: int = WINDOW_DAYS,
+    grace_days: int = PUBLISH_GRACE_DAYS,
 ) -> tuple[date, date]:
     """The rolling window's inclusive ``(start, end)``.
 
-    Pure, so the off-by-one is testable without a clock. ``end`` is today and
-    never later: a fixture that has not kicked off cannot be missing from the
-    canonical, so asking about the future would manufacture failures.
+    Pure, so the boundary is testable without a clock. ``end`` stops
+    ``grace_days`` short of today so the gate only judges fixtures the daily
+    ingest has certainly had a chance to collect — see ``PUBLISH_GRACE_DAYS``.
+    The judged span stays ``window_days`` wide; the grace shifts it back rather
+    than shortening it.
     """
-    return now - timedelta(days=window_days), now
+    end = now - timedelta(days=grace_days)
+    return end - timedelta(days=window_days), end
 
 
 class FreshnessError(RuntimeError):
@@ -191,6 +210,27 @@ def fetch_finished(
     )
 
 
+# The *authority fetch* is cached, never the verdict. The saving being bought is
+# small and specific: a Sunday retrain checks twice per league, seconds apart —
+# once before train(), once inside generate_recommendations() — and each check
+# is an HTTP round trip on the path to producing recommendations.
+#
+# Caching the verdict instead would be actively unsafe. A blocked gate is a
+# thing the operator is fixing right now, by re-running the ingest or adding the
+# missing row; a cached STALE would keep betting blocked after the fix landed and
+# make "restart the dashboard" the remedy, which is exactly the ritual a safety
+# gate must not create. Caching only the fetch keeps the canonical re-read on
+# every call, so a fix is picked up immediately. A failed fetch raises and is
+# never cached, so an outage that recovers is picked up immediately too.
+_CACHE_TTL_SECONDS = 600
+_fetch_cache: dict[str, tuple[float, list[Fixture]]] = {}
+
+
+def clear_cache() -> None:
+    """Drop every cached fixture list. For tests and for an explicit re-check."""
+    _fetch_cache.clear()
+
+
 def check_freshness(
     league: str,
     *,
@@ -204,17 +244,28 @@ def check_freshness(
     ``finished`` and ``canonical_keys`` are fetched when not supplied; passing
     them makes the verdict testable without a network, the same shape as
     ``generate_recommendations(prefetched_matches=...)``.
+
+    The authority fetch is cached per league for ``_CACHE_TTL_SECONDS``; the
+    canonical is re-read and reconciled every call, so a fixed canonical is
+    picked up at once — see the note above the cache.
     """
     if canonical_keys is None:
         canonical_keys = _canonical_keys(league)
 
     if finished is None:
-        try:
-            finished = fetch_finished(
-                league, window_days=window_days, now=now)
-        except FreshnessUndetermined:
-            return GateResult(
-                league=league, verdict=Verdict.UNKNOWN, missing=[])
+        cached = _fetch_cache.get(league)
+        if cached is not None and (
+            time.monotonic() - cached[0] < _CACHE_TTL_SECONDS
+        ):
+            finished = cached[1]
+        else:
+            try:
+                finished = fetch_finished(
+                    league, window_days=window_days, now=now)
+            except FreshnessUndetermined:
+                return GateResult(
+                    league=league, verdict=Verdict.UNKNOWN, missing=[])
+            _fetch_cache[league] = (time.monotonic(), finished)
 
     missing = reconcile(finished, canonical_keys)
     verdict = Verdict.STALE if missing else Verdict.FRESH

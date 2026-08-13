@@ -1002,6 +1002,12 @@ class ChampionshipPredictor:
         if self._ou_models is None:
             raise RuntimeError("Models not trained. Call train() first.")
 
+        # ── Freshness Gate (ADR 0005) ──
+        # League-wide and independent: a stale PL canonical must not block EFL
+        # recommendations, and vice versa.
+        from freshness import assert_fresh
+        assert_fresh("EFL")
+
         # ── Phase C: regime + two-phase early-season setup ──
         matchweek_count = self._current_matchweek_count()
         self._is_early_season = matchweek_count < EARLY_SEASON_MATCHES

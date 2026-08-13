@@ -228,9 +228,16 @@ def job_weekly_retrain() -> None:
         print(f"[{datetime.now():%H:%M:%S}] PL retrain SKIPPED (off-season gate)")
     else:
         try:
+            from freshness import assert_fresh
             from predict import LivePredictor
             from db import (save_recommendations, save_match_analysis,
                                    log_predictions)
+
+            # Freshness Gate (ADR 0005), before train() rather than only inside
+            # generate_recommendations(): blocking recommendations alone would
+            # still bake staleness into the pickles and persist it after the
+            # gate goes green.
+            assert_fresh("PL")
 
             # Option β-tight: weekly retrain IS the week-ahead snapshot — fetch
             # the full OddsPapi sweep here so bet selection has 300+ bookmaker
@@ -261,9 +268,13 @@ def job_weekly_retrain() -> None:
         print(f"[{datetime.now():%H:%M:%S}] EFL retrain SKIPPED (off-season gate)")
     else:
         try:
+            from freshness import assert_fresh
             from championship_predict import ChampionshipPredictor
             from db import (save_recommendations, save_match_analysis,
                                    log_predictions)
+
+            # Freshness Gate (ADR 0005) — see the PL block above.
+            assert_fresh("EFL")
 
             # Option β-tight: weekly retrain = week-ahead snapshot (see PL above).
             champ = ChampionshipPredictor(verbose=True, snapshot_type="week_ahead")

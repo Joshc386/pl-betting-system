@@ -21,6 +21,7 @@ from db import (
     save_recommendations,
     LEAGUE_DISPLAY_NAMES,
 )
+from freshness import FreshnessError
 from league_config import get_league_config
 
 logger = logging.getLogger(__name__)
@@ -469,6 +470,12 @@ def run_scan(league: str) -> str:
                     "Missing model data for %d/%d fixtures — running "
                     "predictor...", len(_missing_fixtures),
                     len(_scan_fixture_names))
+                # Freshness Gate (ADR 0005) before either branch, because both
+                # retrain inline when load_trained_state() fails — a scan is a
+                # Data Refresh too, which ADR 0005 did not anticipate.
+                from freshness import assert_fresh
+                assert_fresh(league)
+
                 if league == "EFL":
                     from championship_predict import ChampionshipPredictor
                     _predictor = ChampionshipPredictor(verbose=False)
@@ -505,6 +512,15 @@ def run_scan(league: str) -> str:
                 logger.info(
                     "Predictor run complete: %d recs, %d analysis rows",
                     len(_recs), len(_analysis),
+                )
+            except FreshnessError as e:
+                # Caught before the generic handler so the reason survives.
+                # "Predictor run during scan failed" buries the one thing the
+                # operator needs: which fixtures are missing, and that odds
+                # below are fine while recommendations are not.
+                logger.error(
+                    "Freshness Gate blocked %s — no recommendations this scan. "
+                    "%s", league, e,
                 )
             except Exception as e:
                 logger.error("Predictor run during scan failed: %s", e,
