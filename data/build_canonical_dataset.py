@@ -108,6 +108,20 @@ def _season_code(season_idx: int) -> str:
     return f"{start:02d}{end:02d}"
 
 
+def _serves_division(df: pd.DataFrame, div: str) -> bool:
+    """True when every row of *df* belongs to the division that was asked for.
+
+    football-data.co.uk does not 404 an unpublished season. Apache's
+    mod_speling redirects to the nearest filename it can find, so `E0.csv` for
+    a season that does not exist yet answers 301 -> `EC.csv` and serves the
+    National League with a 200. The rows are well-formed, so no structural
+    check downstream rejects them; only the division says otherwise.
+    """
+    if "Div" not in df.columns:
+        return False
+    return sorted(df["Div"].dropna().unique()) == [div]
+
+
 def download_season(
     season_idx: int,
     div: str,
@@ -137,15 +151,24 @@ def download_season(
     # Use cached version if available
     if use_cache and os.path.exists(cache_path):
         try:
-            df = pd.read_csv(cache_path, encoding="utf-8", on_bad_lines="skip")
+            # utf-8-sig: the raw is saved verbatim, BOM bytes and all.
+            df = pd.read_csv(cache_path, encoding="utf-8-sig",
+                             encoding_errors="replace", on_bad_lines="skip")
             if len(df) > 0:
-                # Apply the same malformed-row filter as the download path,
-                # otherwise a junk row in a cached raw (e.g. E1_1415 has one
-                # all-NaN row) leaks into the canonical.
-                df = df.dropna(subset=["HomeTeam", "AwayTeam", "FTHG", "FTAG"],
-                               how="any")
-                print(f"  Season {code}: loaded from cache ({len(df)} matches)")
-                return df
+                if _serves_division(df, div):
+                    # Apply the same malformed-row filter as the download path,
+                    # otherwise a junk row in a cached raw (e.g. E1_1415 has one
+                    # all-NaN row) leaks into the canonical.
+                    df = df.dropna(subset=["HomeTeam", "AwayTeam", "FTHG",
+                                           "FTAG"], how="any")
+                    print(f"  Season {code}: loaded from cache "
+                          f"({len(df)} matches)")
+                    return df
+                # A raw poisoned before this guard existed. Treat it like any
+                # other corrupt cache and fall through to a re-download, which
+                # self-heals once upstream publishes the real season.
+                print(f"  Season {code}: cached raw is not {div} - "
+                      f"re-downloading")
         except Exception:
             pass  # Re-download on cache corruption
 
@@ -157,15 +180,33 @@ def download_season(
         print(f"  Season {code}: download failed — {e}")
         return None
 
-    # Save raw CSV
-    with open(cache_path, "wb") as f:
-        f.write(resp.content)
-
     try:
-        df = pd.read_csv(io.StringIO(resp.text), encoding="utf-8", on_bad_lines="skip")
+        # Parse the bytes, not resp.text. The server sends no charset, so
+        # requests falls back to ISO-8859-1 and decodes the UTF-8 BOM into the
+        # characters "ï»¿" — naming the first column "ï»¿Div" and mojibaking
+        # every accented team and referee name. utf-8-sig decodes correctly
+        # and strips the BOM.
+        #
+        # encoding_errors="replace" because the 2004/05 raws carry a latin-1
+        # nbsp (0xa0) that is not valid UTF-8, and one stray byte must not
+        # cost a whole season.
+        df = pd.read_csv(io.BytesIO(resp.content), encoding="utf-8-sig",
+                         encoding_errors="replace", on_bad_lines="skip")
     except Exception as e:
         print(f"  Season {code}: parse failed — {e}")
         return None
+
+    if not _serves_division(df, div):
+        served = (sorted(df["Div"].dropna().unique())
+                  if "Div" in df.columns else "no Div column")
+        print(f"  Season {code}: REJECTED - asked for {div}, served {served}")
+        return None
+
+    # Save raw CSV. Deliberately after the division check: the cache-read path
+    # trusts whatever is on disk, so writing first would make one bad download
+    # permanent.
+    with open(cache_path, "wb") as f:
+        f.write(resp.content)
 
     # Drop fully-empty rows (football-data.co.uk sometimes has trailing empties)
     df = df.dropna(subset=["HomeTeam", "AwayTeam", "FTHG", "FTAG"], how="any")

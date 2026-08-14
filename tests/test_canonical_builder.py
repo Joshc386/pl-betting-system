@@ -698,3 +698,195 @@ def test_first_season_has_no_seed_and_keeps_alphabetical_order(tmp_path):
     out = mod._add_league_position(df, "PL", None)
     assert out.iloc[0]["Home_LeaguePosition"] == 2  # Z after M
     assert out.iloc[0]["Away_LeaguePosition"] == 1
+
+
+# ── Division guard: football-data.co.uk mod_speling redirects ──────────────
+#
+# Requesting a season football-data.co.uk has not published yet does not 404.
+# Apache's mod_speling finds the nearest filename and 301-redirects to it, so
+# `/mmz4281/2627/E0.csv` answers with `EC.csv` — the National League. requests
+# follows redirects by default and `raise_for_status()` only ever sees the
+# final 200, so the download path cannot tell the difference. Confirmed live
+# on 2026-08-14, the day the EFL season opened:
+#
+#     HTTP/1.1 301 Moved Permanently
+#     Location: https://www.football-data.co.uk/mmz4281/2627/EC.csv
+#
+# The rows that come back are well-formed — real teams, real scores, every
+# column the malformed-row filter checks — so nothing downstream rejects them.
+# They would be stamped with the requested SeasonIndex and published as
+# Premier League Facts, which ADR 0004 makes football-data.co.uk's `E0` alone.
+
+_EC_PAYLOAD = (
+    "Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HTHG,HTAG,HTR\n"
+    "EC,08/08/2026,15:00,Altrincham,Southend,1,3,A,1,1,D\n"
+    "EC,08/08/2026,15:00,Boreham Wood,Tamworth,3,3,D,1,1,D\n"
+)
+
+_E0_PAYLOAD = (
+    "Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HTHG,HTAG,HTR\n"
+    "E0,15/08/2025,20:00,Liverpool,Bournemouth,4,2,H,1,0,H\n"
+)
+
+
+class _FakeResponse:
+    """Only the surface ``download_season`` touches, decoded as requests does.
+
+    football-data.co.uk sends its CSVs with a UTF-8 BOM and no charset in the
+    Content-Type, so requests falls back to ISO-8859-1 (RFC 2616) and
+    ``.text`` renders those three BOM bytes as the characters ``ï»¿`` — the
+    first column arrives named ``ï»¿Div``, not ``Div``. Modelling that is the
+    entire point of this fake: an earlier version handed back clean text, and
+    every test below passed while the guard rejected all four real seasons.
+    """
+
+    def __init__(self, body: str) -> None:
+        self.content = b"\xef\xbb\xbf" + body.encode("utf-8")
+        self.text = self.content.decode("iso-8859-1")
+
+    def raise_for_status(self) -> None:
+        return None  # a followed 301 lands on 200
+
+
+def _serve(monkeypatch, body: str) -> None:
+    """Serve *body* the way the real source does, BOM and all."""
+    from data import build_canonical_dataset as mod
+    monkeypatch.setattr(mod.requests, "get",
+                        lambda *a, **k: _FakeResponse(body))
+    monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
+
+
+def test_download_rejects_a_different_division(monkeypatch, tmp_path, capsys):
+    """Asking for E0 and being served EC yields nothing, not National League.
+
+    The reason is asserted, not just the outcome: a guard that cannot read the
+    division column at all also returns None, and that would pass this test
+    while being blind to the thing it exists to catch.
+    """
+    from data import build_canonical_dataset as mod
+
+    _serve(monkeypatch, _EC_PAYLOAD)
+    got = mod.download_season(26, "E0", str(tmp_path), use_cache=False)
+
+    assert got is None
+    assert "served ['EC']" in capsys.readouterr().out, \
+        "rejected, but not as a division mismatch"
+
+
+def test_download_accepts_the_requested_division(monkeypatch, tmp_path):
+    """The guard must not cost us the seasons that are genuinely there.
+
+    The payload is BOM-prefixed like the real one, so this also pins the
+    encoding: read as plain utf-8 the column is named "ï»¿Div", the guard sees
+    no division at all, and every published season is rejected. That was the
+    state of this code until the live check caught it — all five unit tests
+    green, all four real seasons refused.
+    """
+    from data import build_canonical_dataset as mod
+
+    _serve(monkeypatch, _E0_PAYLOAD)
+    got = mod.download_season(25, "E0", str(tmp_path), use_cache=False)
+
+    assert got is not None
+    assert len(got) == 1
+    assert got.iloc[0]["HomeTeam"] == "Liverpool"
+
+
+def test_rejected_download_is_not_left_in_the_raw_cache(monkeypatch, tmp_path):
+    """A rejected payload must not persist and be trusted later.
+
+    The raw is written before it is parsed, and the cache-read path does no
+    validation, so without this a single bad download poisons every
+    subsequent build from disk — no network needed to stay wrong.
+    """
+    from data import build_canonical_dataset as mod
+
+    _serve(monkeypatch, _EC_PAYLOAD)
+    assert mod.download_season(26, "E0", str(tmp_path), use_cache=False) is None
+
+    assert not (tmp_path / "E0_2627.csv").exists(), \
+        "rejected payload was cached and will be served silently next build"
+
+
+def test_wrong_division_in_cache_is_treated_as_corruption(monkeypatch, tmp_path):
+    """A bad raw already on disk must not be trusted, and must self-heal.
+
+    Finished seasons read from cache without touching the network, so a raw
+    poisoned before this guard existed would be believed forever. Falling
+    through to a re-download matches how the function already handles an
+    unparseable cache, and recovers the moment upstream publishes.
+    """
+    from data import build_canonical_dataset as mod
+
+    (tmp_path / "E0_2627.csv").write_text(_EC_PAYLOAD, encoding="utf-8")
+    _serve(monkeypatch, _E0_PAYLOAD)
+
+    got = mod.download_season(26, "E0", str(tmp_path), use_cache=True)
+
+    assert got is not None
+    assert got.iloc[0]["HomeTeam"] == "Liverpool", \
+        "served the poisoned cache instead of re-downloading"
+
+
+def test_payload_without_a_division_column_is_rejected(monkeypatch, tmp_path):
+    """Unverifiable provenance is not the same as verified provenance.
+
+    Same principle as the Freshness Gate's UNKNOWN verdict: "could not
+    determine" must not collapse into "fine". Every one of the 52 cached raws
+    carries a single Div value, so this only fires if the source's shape
+    changes — exactly when believing it would be worst.
+    """
+    from data import build_canonical_dataset as mod
+
+    _serve(monkeypatch, "Date,HomeTeam,AwayTeam,FTHG,FTAG\n"
+                        "15/08/2026,Liverpool,Bournemouth,4,2\n")
+
+    assert mod.download_season(26, "E0", str(tmp_path), use_cache=False) is None
+    assert not (tmp_path / "E0_2627.csv").exists()
+
+
+def test_byte_order_mark_in_cached_raw_is_read(monkeypatch, tmp_path):
+    """Same for the cache: the raw is saved verbatim, BOM bytes included."""
+    from data import build_canonical_dataset as mod
+
+    (tmp_path / "E0_2526.csv").write_bytes(
+        b"\xef\xbb\xbf" + _E0_PAYLOAD.encode("utf-8"))
+    got = mod.download_season(25, "E0", str(tmp_path), use_cache=True)
+
+    assert got is not None
+    assert got.iloc[0]["HomeTeam"] == "Liverpool"
+
+
+def test_stray_non_utf8_byte_does_not_lose_the_season(monkeypatch, tmp_path):
+    """The 2004/05 raws carry a latin-1 nbsp (0xa0) that is invalid UTF-8.
+
+    Decoding strictly turns one stray byte into a lost season: the download
+    path returns None, and the cache path raises into the catch-all and
+    re-downloads on every single build. Neither is worth a non-breaking space,
+    so undecodable bytes are replaced rather than fatal.
+    """
+    from data import build_canonical_dataset as mod
+
+    body = (b"\xef\xbb\xbfDiv,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG\n"
+            b"E0,15/08/2004,15:00,Arsenal,Everton\xa0,4,1\n")
+
+    class _Raw:
+        content = body
+        text = body.decode("iso-8859-1")
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(mod.requests, "get", lambda *a, **k: _Raw())
+    monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
+
+    got = mod.download_season(4, "E0", str(tmp_path), use_cache=False)
+    assert got is not None, "one stray byte lost the whole season"
+    assert len(got) == 1
+
+    # And the same raw read back from cache, which is how every finished
+    # season is loaded.
+    (tmp_path / "E0_0405.csv").write_bytes(body)
+    cached = mod.download_season(4, "E0", str(tmp_path), use_cache=True)
+    assert cached is not None
+    assert len(cached) == 1
