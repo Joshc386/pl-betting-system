@@ -4,7 +4,14 @@ Date: 2026-07-25
 
 ## Status
 
-Accepted
+Accepted. **Counterexample observed 2026-08-14 — the catch-up this decision
+rests on failed once, silently. See the corrected consequence below.**
+
+The decision itself stands: Task Scheduler is still strictly better than
+APScheduler's `misfire_grace_time` for a laptop that sleeps. What this ADR got
+wrong is the strength of the guarantee — it treated `StartWhenAvailable` as
+reliable rather than as usually-reliable, and therefore never asked what would
+notice if a catch-up did not happen. Nothing did.
 
 ## Context
 
@@ -55,7 +62,29 @@ refresh satisfies.** Nothing in the data-currency goal needs sub-hour granularit
 - Two scheduling mechanisms coexist by design. This ADR exists primarily so that a
   future reader asking "why are there two schedulers?" finds the answer rather than
   assuming it is an accident and unifying them.
-- The data tier gains catch-up semantics and survives the laptop's sleep cycle.
+- ~~The data tier gains catch-up semantics and survives the laptop's sleep cycle.~~
+  **Corrected 2026-08-14 — catch-up is reliable but not guaranteed, and its
+  failure is silent.** `Betting Bot Daily Ingest` (06:00 daily,
+  `StartWhenAvailable: True`, `WakeToRun: False`) caught up correctly on 11, 12
+  and 13 August, each time logging event `114` — *"could not launch as
+  scheduled … started now as required by the configuration option to start the
+  task when available"* — at 07:49, 07:57 and 07:49, shortly after each morning
+  wake. On **14 August** the laptop slept at 21:49 the previous evening and
+  resumed at **07:52**, the same window, and the task emitted **no events of any
+  kind**. `NumberOfMissedRuns` incremented to 1 and `NextRunTime` advanced past
+  the day to 15 August 06:00. Confirmed by two independent event-log queries
+  (XPath on `TaskName`, and a message-text scan of the preceding 48 hours).
+  Root cause undetermined; the configuration is correct and unchanged.
+
+  **The operationally important part is that this is invisible.**
+  `LastTaskResult` still reads `0`, because the last run that *happened*
+  succeeded — so the one field an operator would check reports health on a day
+  the job never ran. That is the same silent-discard failure this ADR criticised
+  APScheduler for; moving tiers reduced its frequency without removing it. A
+  missed ingest is only detectable today by the **Freshness Gate**
+  ([0005](0005-freshness-gate.md)) noticing the *consequence* two days later,
+  which is a downstream symptom rather than an alarm on the job itself. Nothing
+  currently asserts "the ingest ran today".
 - The odds tier still depends on `run.py` being alive, which it generally is not. This
   remains a **known open gap** — per-kickoff odds refresh and CLV capture at KO−5min are
   not currently firing, and neither is the settlement pair inside APScheduler (daily
