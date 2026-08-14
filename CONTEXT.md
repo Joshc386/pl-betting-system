@@ -63,8 +63,10 @@ _Avoid_: Learner, estimator
 A logistic regression meta-learner trained on out-of-fold predictions from the base models. Learns optimal combination weights. The stacker IS part of the ensemble — not separate from it.
 _Avoid_: Meta-model, blender (conflicts with the model-market Blend)
 
-**Squad Adjuster**:
-A second-stage overlay that takes the ensemble's base probability and adjusts it using real-time player availability data from the FPL API. A separate LogReg model that accounts for injuries, suspensions, and key absences. Only available for recent seasons (24+) due to FPL data limitations. Planned for expansion with richer player data.
+**Squad Adjuster** (removed 2026-08-14):
+A second-stage overlay that took the ensemble's base probability and adjusted it using player availability from the FPL API — a separate LogReg for injuries, suspensions and key absences, meaningful only for seasons 24+ because FPL data does not exist before that. **Deleted, because it was dead at both ends.** Its output `squad_adjuster.pkl` was rewritten every Sunday and loaded by nothing; it trained against `over_under_model.pkl` / `scaler.pkl` / `feature_list.pkl` dated 2026-05-04 — a legacy *single* model, not the current **Ensemble** — and had been failing outright since the 2026-08-03 publish retired columns that stale feature list still named.
+
+The 16 `SQUAD_FEATURES` it consumed are **still computed by `pipeline.py` and still reach no model**: they are absent from `ALL_FEATURES` because they are NaN for every training season before 24, which is the exact constraint the adjuster existed to work around. Squad availability therefore has **no route into a Recommendation** today, and giving it one again would be a strategy change rather than a repair. Note this does not orphan the FPL fetch — `PLAYER_FEATURES` comes from the same `api/player_features.py` and is live in both leagues' models.
 _Avoid_: Player model, availability model
 
 **Dixon-Coles (DC)**:
@@ -342,7 +344,7 @@ _Avoid_: Ask price, lay price (lay is the opposite side of the exchange)
 - A **Market** has exactly two **Sides** (binary outcome)
 - Each **Line** defines a distinct Over/Under goals **Market** (O/U 1.5, O/U 2.5, O/U 3.5 are three separate markets)
 - **Alt Lines** are modelled differently from the standard 2.5 line (DC Poisson only vs full ensemble)
-- The **Ensemble** produces a model probability per **Fixture** × **Market**; the **Squad Adjuster** optionally modifies it
+- The **Ensemble** produces a model probability per **Fixture** × **Market** (nothing modifies it downstream — the **Squad Adjuster** that once could was removed 2026-08-14)
 - **Edge** is computed from the **Blend** minus the **Fair Probability**
 - **EV** is the monetary translation of **Edge** at the available odds
 - **Agreement** gates whether a Pick becomes a **Recommendation**; it also scales **Kelly** stake size

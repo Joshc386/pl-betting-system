@@ -71,7 +71,8 @@ The system ingests from multiple data sources across APIs, a web scraper, and hi
 
 **Player Features** (`api/player_features.py`):
 - Squad availability from FPL-Core-Insights GitHub repo
-- 2024-25 and 2025-26 seasons only — cannot be in main model (NaN for all training seasons), used via separate squad adjuster
+- `PLAYER_FEATURES` (4) **are** in the main model — live in both leagues
+- `SQUAD_FEATURES` (16) are **not**, and now feed nothing: 2024-25 onwards only, so they are NaN for every training season and cannot enter `ALL_FEATURES`. The squad adjuster that consumed them was deleted 2026-08-14 (dead at both ends — see CONTEXT.md). `pipeline.py` still computes the columns; no model reads them.
 
 **Weather** (`api/weather.py`):
 - Open-Meteo API for match-day weather conditions

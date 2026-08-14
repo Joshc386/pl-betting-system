@@ -136,36 +136,6 @@ def _refresh_betfair_splits() -> None:
                   f"(non-critical)")
 
 
-def _retrain_squad_adjuster() -> None:
-    """Retrain the squad availability adjuster model.
-
-    Learns the relationship between squad disruption features and match
-    outcomes. Only retrains if sufficient training data exists (>20 rows).
-    Non-critical — failures are logged as warnings.
-    """
-    try:
-        import joblib
-        from squad_adjuster import (
-            build_adjustment_dataset,
-            train_adjuster,
-            ADJUSTER_PATH,
-        )
-        X_train, y_train, X_test, y_test = build_adjustment_dataset()
-        if X_train is not None and len(X_train) > 20:
-            adj = train_adjuster(X_train, y_train)
-            joblib.dump(adj, ADJUSTER_PATH)
-            logger.info("Squad adjuster retrained")
-            print(f"[{datetime.now():%H:%M:%S}] Squad adjuster retrained")
-        else:
-            logger.info("Not enough squad data for adjuster retrain")
-            print(f"[{datetime.now():%H:%M:%S}] Squad adjuster: "
-                  f"insufficient data, skipped")
-    except Exception as e:
-        logger.warning(f"Squad adjuster retrain failed (non-critical): {e}")
-        print(f"[{datetime.now():%H:%M:%S}] Squad adjuster FAILED "
-              f"(non-critical): {e}")
-
-
 def job_daily_data_refresh() -> None:
     """Daily enrichment refresh: squad availability and Understat xG.
 
@@ -296,9 +266,6 @@ def job_weekly_retrain() -> None:
         except Exception as e:
             logger.error(f"EFL retrain failed: {e}", exc_info=True)
             print(f"[{datetime.now():%H:%M:%S}] EFL retrain FAILED: {e}")
-
-    # ── Squad adjuster ──
-    _retrain_squad_adjuster()
 
     print(f"[{datetime.now():%H:%M:%S}] Weekly retrain complete.")
 
