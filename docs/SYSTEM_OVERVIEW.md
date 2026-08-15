@@ -61,7 +61,7 @@ Each source has one job:
 | **football-data.org API** | Recent match results | Keeping results current between CSV updates |
 | **Understat (scraper)** | Expected goals (xG), shot quality, tactical stats | Richer PL features (PL only) |
 | **FPL API** | Team strengths, player availability, injuries | PL features + live squad news |
-| **FPL-Core-Insights (GitHub)** | Per-player match stats (xG, xA, tackles…) | The Squad Adjuster (2024-25 onwards only) |
+| **FPL-Core-Insights (GitHub)** | Per-player match stats (xG, xA, tackles…) | The 16 squad-availability features — **computed but currently reaching no model** (§5g) |
 | **Open-Meteo** | Match-day weather | Minor features (wind/rain suppress goals slightly) |
 | **The-Odds-API** | Live bookmaker odds: O/U 2.5 + alt lines + BTTS from 14+ books | The "what does the market charge?" side |
 | **OddsPapi** | Live odds from 100+ books incl. Pinnacle (the sharpest) and Betfair exchange | Sharp reference prices, alt lines, Asian handicap |
@@ -159,13 +159,32 @@ it to add value, so the EFL ensemble is 3-model. (A guard clips its scaled
 inputs to ±5 standard deviations, after one feature once drifted to +257 σ and
 produced nonsense.)
 
-### 5d. Stacking: combining four opinions into one
+### 5d. Stacking: combining the models' opinions into one
 
 Rather than hand-picking weights, a **stacker** (a small logistic regression)
 *learns* how much to trust each model. Crucial detail — it's trained on
 **out-of-fold (OOF)** predictions: each base model predicting seasons it was
 NOT trained on. Otherwise the stacker would reward whichever model memorised
-the training data best. Learned weights: XGB ≈ 2.2, LGB ≈ 1.2, DC ≈ 1.1.
+the training data best.
+
+**The live PL stacker takes all four models**, LogReg included. Read straight
+out of `models/pl_trained_state.pkl` on 2026-08-14 (`n_features_in_ = 4`):
+
+| Input | XGB | LGB | **LR** | DC |
+|---|---|---|---|---|
+| Coefficient | 1.306 | 0.820 | **1.048** | 1.247 |
+
+(intercept −2.197). LogReg carries *more* weight than LightGBM — so the
+long-standing claim that it "added noise and was dropped" does not describe
+the model that prices bets. That claim, and the often-quoted weights
+XGB ≈ 2.2 / LGB ≈ 1.2 / DC ≈ 1.1, come from `model.py` — the **Research
+Path** script (`oof_df[["xgb","lgb","dc"]]`, three inputs), which is not what
+`scheduler.py` retrains. The live path is `predict.py:400`
+(`oof_df[["xgb","lgb","lr","dc"]]`), as are `backtest.py:309` and the test
+fixtures. See **Training Path** in `CONTEXT.md`.
+
+EFL genuinely is three-input (`championship_model.py:546`) — it has no LR at
+all. Full detail: `docs/MODELS_DEEP_DIVE.md`.
 
 ### 5e. Walk-forward validation: never peek at the future
 
@@ -190,14 +209,36 @@ Known honest caveat: test-set probabilities still drift ~3–6% hot. Rankings
 are reliable; edges are computed *relatively*, so edge detection survives this
 — but it's why conservatism layers (below) exist.
 
-### 5g. The Squad Adjuster: injury news, bolted on
+### 5g. Squad availability: computed, deliberately not used
 
-Player-level data only exists from 2024-25, so it can't train inside the main
-model (it would be blank for 90% of history). Instead a small second-stage
-model takes the ensemble's probability + 16 squad-availability features (key
-absences, missing attack/defence strength from FPL data) and nudges the
-probability. Worth ~+1.7pp accuracy; will strengthen as seasons of player data
-accumulate.
+Player-level availability data (from FPL-Core-Insights) only exists from
+2024-25. It therefore **cannot** train inside the main models: it would be
+blank for ~90% of training history, and the trees would learn "this field is
+missing → this is an old match" — a date proxy dressed up as a squad signal.
+
+The pipeline still computes all 16 of these features every run, but they are
+**absent from `ALL_FEATURES`, so none of them reach any model**:
+
+```
+SQUAD_FEATURES   0/16 in ALL_FEATURES   ← the availability family
+PLAYER_FEATURES  4/4                    ← injury burden + key absences (FPL API)
+ROSTER_FEATURES 12/12
+XG_FEATURES      8/8
+```
+
+A second-stage "Squad Adjuster" used to consume them — a small logistic
+regression taking (ensemble probability + 16 squad features) → adjusted
+probability. **It was deleted on 2026-08-14** (`eba6dcc`): nothing downstream
+ever read its output, and it had been training against a legacy 2026-05-04
+single model rather than the current ensemble, failing on every retrain for
+eleven days without anyone noticing.
+
+So squad news currently has **no route to a Recommendation**. The features are
+kept because the constraint is temporal, not structural: once 3–4 seasons of
+player data accumulate, they can graduate into the main models directly, which
+is the better design anyway. Note this is distinct from the *injury* signal —
+`Home_InjuryBurden` / `Away_InjuryBurden` come from the FPL API (`api/fpl.py`)
+and **are** live in the models.
 
 **Bottom line of Stage 3:** for each fixture and market, one calibrated
 probability — e.g. *"Arsenal v Chelsea: 58.3% over 2.5 goals."*
@@ -353,8 +394,10 @@ Four tabs:
 
 1. **Match Centre** — today's/upcoming fixtures: model probabilities per
    market, best odds and which bookmaker, edge %, confidence, Kelly stake %
-   (colour-binned; amber ≥5% flags an outlier worth sanity-checking), model
-   agreement, and squad-availability panels (with lineup-confirmed re-runs).
+   (colour-binned; amber ≥5% flags an outlier worth sanity-checking), and model
+   agreement. (No squad-availability panel — see §5g. `dashboard.py` has no
+   squad UI, and `compute_live_squad_features()` in `api/player_features.py`
+   has no callers.)
 2. **Bet Tracker** — log real bets; tracked to settlement with commission-aware
    net P&L.
 3. **Performance** — history of logged bets: win rate, ROI, P&L over time.
@@ -384,7 +427,7 @@ Four tabs:
 |---|---|
 | `data/dashboard.db` (PL) & `data/dashboard_efl.db` (EFL) — SQLite | 5 tables each: `match_analysis` (every scan result), `recommendations` (filtered bets + settlement), `predictions` (all positive-edge picks, for counterfactuals), `logged_bets` (real money, commission-netted), `bankroll` (snapshots) |
 | `CompleteDS_CSV.csv` / `CompleteDSChamp_CSV.csv` | Canonical training datasets (facts + computed features) |
-| `models/*.pkl` (PL) & `models/championship/*.pkl` (EFL) | Trained ensembles, pipeline caches, squad adjuster |
+| `models/*.pkl` (PL) & `models/championship/*.pkl` (EFL) | Trained ensembles, pipeline caches |
 | `data/betfair_*.csv` | Historical exchange prices (masters + per-league splits) |
 | `data/*_cache.json` | Live-odds API caches |
 | `logs/` | Job logs (rolling + timestamped) |

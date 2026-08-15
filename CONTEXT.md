@@ -66,7 +66,11 @@ _Avoid_: Meta-model, blender (conflicts with the model-market Blend)
 **Squad Adjuster** (removed 2026-08-14):
 A second-stage overlay that took the ensemble's base probability and adjusted it using player availability from the FPL API — a separate LogReg for injuries, suspensions and key absences, meaningful only for seasons 24+ because FPL data does not exist before that. **Deleted, because it was dead at both ends.** Its output `squad_adjuster.pkl` was rewritten every Sunday and loaded by nothing; it trained against `over_under_model.pkl` / `scaler.pkl` / `feature_list.pkl` dated 2026-05-04 — a legacy *single* model, not the current **Ensemble** — and had been failing outright since the 2026-08-03 publish retired columns that stale feature list still named.
 
-The 16 `SQUAD_FEATURES` it consumed are **still computed by `pipeline.py` and still reach no model**: they are absent from `ALL_FEATURES` because they are NaN for every training season before 24, which is the exact constraint the adjuster existed to work around. Squad availability therefore has **no route into a Recommendation** today, and giving it one again would be a strategy change rather than a repair. Note this does not orphan the FPL fetch — `PLAYER_FEATURES` comes from the same `api/player_features.py` and is live in both leagues' models.
+The 16 `SQUAD_FEATURES` it consumed are **still computed by `pipeline.py` and still reach no model**: they are absent from `ALL_FEATURES` because they are NaN for every training season before 24, which is the exact constraint the adjuster existed to work around. Squad availability therefore has **no route into a Recommendation** today, and giving it one again would be a strategy change rather than a repair.
+
+**This does orphan `api/player_features.py` entirely** — corrected 2026-08-14, an earlier revision of this entry claimed otherwise. That module produces *only* the 16 dead `SQUAD_FEATURES`, and its `compute_live_squad_features()` has had no callers since at least 2026-07-26. The four live `PLAYER_FEATURES` (`Home_InjuryBurden`, `Away_InjuryBurden`, `Home_KeyAbsences`, `Away_KeyAbsences`) come from a **different chain**: `api/fpl_historical.py` → `data/build_enriched_dataset.py` → the **Enriched Dataset**'s `home_injury_burden` columns → renamed by `pipeline.add_player_features`.
+
+**And they are PL-only, not both leagues.** `CompleteDSChamp_enriched.csv` is configured in `league_config.py` but **does not exist on disk**, so the EFL takes the `else DATA_PATH` branch of `pipeline.py:32` and reads its canonical directly. Verified 2026-08-14: PL cache carries `Home_InjuryBurden` at 22.3% coverage; the EFL cache does not carry the column at all, and **zero** player features appear in its 127 `ou_features`. The two leagues therefore take *different branches of the same line of code* — which is why claims about "the pipeline" must always name the league.
 _Avoid_: Player model, availability model
 
 **Dixon-Coles (DC)**:
@@ -99,7 +103,19 @@ The single source-of-truth match-results CSV for a league (PL: `CompleteDSPL_CSV
 **The division is verified on arrival, never assumed.** football-data.co.uk does not 404 a season it has not yet published — Apache's `mod_speling` redirects to the nearest filename it can find, so `E0.csv` for an unpublished season answers `301 → EC.csv` and serves the **National League** under a 200. Those rows are well-formed (real teams, real scores, every column the malformed-row filter checks), so nothing structural rejects them; only the `Div` column disagrees. Every download *and* every cached raw is therefore checked against the division that was requested, and a mismatch is discarded rather than cached — the season stays **absent**, which the **Freshness Gate** reports, instead of becoming quietly **wrong**, which nothing would. Confirmed live on 2026-08-14, when both 2026/27 files were still unpublished. Implemented as `_serves_division` in the shared builder.
 
 A gitignored build artefact: regenerable, never hand-edited.
-_Avoid_: Master file, raw data (the raw `E1_*.csv` season files are a distinct, upstream thing), **Enriched dataset** (superseded 2026-07-25 — enrichment is a *column class within* the canonical, not a separate file; the old `CompleteDSPL_enriched.csv` was an undocumented rival artefact that silently took precedence over the canonical and went two months stale)
+_Avoid_: Master file, raw data (the raw `E1_*.csv` season files are a distinct, upstream thing)
+
+**Enriched Dataset**:
+The **derived superset the models are actually trained on** — `CompleteDSPL_enriched.csv` — equal to the **Canonical Dataset** plus 8 enrichment columns (`home_xg`/`away_xg`, `home_injury_burden`/`away_injury_burden`, `home_key_absences`/`away_key_absences`, `home_squad_depth`/`away_squad_depth`). Built by `data/build_enriched_dataset.py` immediately after the canonical, from `api/fpl_historical.py`'s `team_injury_burden.csv`.
+
+**`load_data()` prefers it, and this is intended** — `pipeline.py:32` reads `ENRICHED_DATA_PATH if os.path.exists(...) else DATA_PATH`. So "the pipeline reads the canonical" is *not* literally true, and reasoning about training data must name this file.
+
+Verified 2026-08-14: 9,880 rows both, **75 canonical cols ⊂ 83 enriched cols, zero canonical columns dropped**, regenerated three minutes after the canonical in the same build (08:24:03 → 08:27:30). It is a strict superset kept in sync, **not** the stale rival artefact an earlier revision of this document described. That earlier claim — that the file had been superseded on 2026-07-25 and enrichment now lived as a column class inside the canonical — was **wrong about the code**: the fallback at `pipeline.py:32` was never removed and the file was never retired. Corrected here rather than in code, because the artefact is doing its job.
+
+**Its rollover consequence is the part that bites.** A new season must land in **both** artefacts. If the canonical gains season 26 and the enriched rebuild does not run, `load_data()` returns a frame with **zero season-26 rows** — every temporal split boundary would then be dividing data that does not contain the season at all, and training would complete normally and write valid pickles. Same "failure that looks like success" family as the `301 → EC.csv` substitution.
+
+Still a gitignored, regenerable build artefact: never hand-edited, and never a place to add a column that belongs in the canonical.
+_Avoid_: Enriched dataset as *a synonym for* the Canonical Dataset (they are different files with different column counts), master file
 
 **Data Refresh**:
 Re-running the build → pipeline-cache → retrain chain so the models learn from newer match data, **without changing any strategy logic** (blend weights, agreement thresholds, Kelly fraction, DC parameters, model architecture all stay byte-for-byte identical). A data refresh re-fits learned parameters only; it is explicitly *not* a strategy change and does not require the same approval gate. The weekly Sunday retrain is an automated data refresh.
@@ -172,6 +188,34 @@ A performance metric comparing the odds captured at bet time against the final p
 _Avoid_: Line movement, odds drift
 
 ### Validation
+
+**Training Path (Production vs Research)**:
+Two different code paths train models in this repo, they **derive their season boundaries differently**, and confusing them has already produced three wrong documents. Any statement about "what the model trains on" must say which path it means.
+
+| | **Production Path** | **Research Path** |
+|---|---|---|
+| PL | `predict.py:320 train()` | `model.py:1749 main()` |
+| EFL | `championship_predict.py:533 train()` | `championship_model.py:664 main()` |
+| Invoked by | `scheduler.py:217` weekly retrain; `scan.py:474/487` inline retrain | a human typing `python model.py` |
+| Season boundaries | **derived from the data** — PL `SeasonIndex >= 14`, EFL `>= 0`; early-stopping validation season is `max(SeasonIndex)` present | **hardcoded constants** — `config.py:37-39` `TRAIN`/`VAL`/`TEST_SEASONS` (PL), `championship_model.py:79 TEST_SEASON` (EFL) |
+| Held-out test season | **none** | yes |
+| Writes | `pl_trained_state.pkl` / `efl_trained_state.pkl` — **the pickles that price live bets** | `over_under_model.pkl` and console metrics |
+
+**The Production Path never reads the split constants.** `TRAIN_SEASONS`, `VAL_SEASONS`, `TEST_SEASONS` and `TEST_SEASON` govern the Research Path only. A change to them alters backtest and evaluation output; it does **not** change what the live models learn. See [ADR 0009](docs/adr/0009-one-season-boundary-contract-per-training-path.md).
+
+**The Research Path's allowlist/denylist mismatch** (verified 2026-08-14): `pipeline.py:1554` partitions by `isin(TRAIN)/isin(VAL)/isin(TEST)` — an *allowlist*, so a season named in none is dropped — while `model.py:1769` selects `>= TRAIN_MIN_SEASON & ~isin(TEST_SEASONS)` — a *denylist*, which includes it. Both run in the same job on the same data. With data past `TEST_SEASONS`, `walk_forward_cv` (whose folds come from `max(SeasonIndex)`, not from config) then trains a fold whose window has the test season punched out of the middle. `championship_model.py` avoids the *mismatch* by partitioning one scalar with `<` and `==`, but not the *staleness* — any season above `TEST_SEASON` still falls outside both.
+
+**Early-Stopping Season**:
+The single season the Production Path holds back to decide how many trees XGBoost/LightGBM should add. **The most recent season holding at least 50 fixtures** — not simply the latest season present. The same eligible list, taking its last two, sets the **Base Rate** window.
+
+The threshold exists because the season is derived from the data, not configured: before it, `train_seasons[-1]` made a newly-started season the Early-Stopping Season **on its first ingested fixture**, so a dozen August matches would decide the tree count, and the Base Rate would slide from two complete seasons (760 PL matches) to one-plus-a-fragment (392) — halving its sample and dropping a whole season, silently, on the first weekly retrain after the new season's rows landed. No config change or deploy was needed to trigger it.
+
+50 is not a new number: `walk_forward_cv` already skips any fold whose validation season holds fewer (`model.py:1280`). Implemented as `predictor_utils.seasons_for_validation`, shared by both leagues. Where no season clears the bar — reachable only on tiny or synthetic datasets — it falls back to every season present and logs a warning rather than raising, so small-data experiments still train.
+
+**The Base Rate follows the same threshold, deliberately.** This document defines the Base Rate as the stable historical calibration anchor and **Regime** as the mechanism that tracks in-season drift. Letting a fragment of the current season into the anchor does Regime's job badly and the anchor's job worse.
+
+**Early stopping is followed by a refit.** XGB and LGB are refit on the full training frame at the tree count early stopping chose (`predictor_utils.refit_at_best_iteration`). Without it, guarding the season choice would have made staleness permanent: XGB and LGB were previously *kept* as fitted on everything-except-the-Early-Stopping-Season, while LogReg and Dixon-Coles — fitted two lines below on the full frame — were not. See [ADR 0009](docs/adr/0009-one-season-boundary-contract-per-training-path.md).
+_Avoid_: Validation season (ambiguous — the Research Path's `VAL_SEASONS` is a different, configured thing), holdout
 
 **Walk-Forward (CV)**:
 The cross-validation methodology used throughout this system. Train on all seasons up to N, validate on season N+1, slide forward and repeat. Prevents temporal leakage (seeing future data when predicting past matches). Produces out-of-fold predictions for each validation season which become training data for the stacker.
