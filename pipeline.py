@@ -1548,9 +1548,31 @@ def initialize_promoted_features(df):
     return df, filled
 
 
+class SeasonPartitionError(RuntimeError):
+    """A season in the data belongs to none of TRAIN/VAL/TEST (ADR 0009)."""
+
+
 def temporal_split(df):
     """Split data by season index (no random shuffling).
-    Training restricted to seasons with xG data (14+) for better signal."""
+    Training restricted to seasons with xG data (14+) for better signal.
+
+    Raises SeasonPartitionError if any season present in `df` and eligible for
+    training falls into none of the three sets. See ADR 0009: this partition is
+    an allowlist while model.py's walk-forward selection is a denylist, so an
+    unallocated season silently disappears here and reappears there.
+    """
+    eligible = df.loc[df["SeasonIndex"] >= TRAIN_MIN_SEASON, "SeasonIndex"]
+    allocated = set(TRAIN_SEASONS) | set(VAL_SEASONS) | set(TEST_SEASONS)
+    orphans = sorted(set(eligible.unique()) - allocated)
+    if orphans:
+        raise SeasonPartitionError(
+            f"Season(s) {orphans} are present in the data and >= "
+            f"TRAIN_MIN_SEASON ({TRAIN_MIN_SEASON}) but belong to no split. "
+            f"TRAIN={min(TRAIN_SEASONS)}-{max(TRAIN_SEASONS)}, "
+            f"VAL={VAL_SEASONS}, TEST={TEST_SEASONS}. "
+            f"Roll the boundaries forward (ADR 0009)."
+        )
+
     train = df[df["SeasonIndex"].isin(TRAIN_SEASONS) & (df["SeasonIndex"] >= TRAIN_MIN_SEASON)].copy()
     val = df[df["SeasonIndex"].isin(VAL_SEASONS)].copy()
     test = df[df["SeasonIndex"].isin(TEST_SEASONS)].copy()

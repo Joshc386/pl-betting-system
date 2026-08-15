@@ -8,8 +8,13 @@ and ``championship_predict.py`` (EFLPredictor) duplicate:
   this module handles *how* it gets to/from disk.
 - **Regime shift computation** — the RegimeDetector algorithm is
   league-agnostic; only the clamp keys and outcome functions differ.
+- **Validation season selection** — which seasons are big enough to judge a
+  model on (ADR 0009).
 
-Zero impact on model output — these are pure infrastructure helpers.
+The first two are pure infrastructure with zero impact on model output.
+``seasons_for_validation`` is **not**: it decides the Early-Stopping Season and
+the Base Rate window, so it changes what the models learn. It lives here
+because both predictors need identical behaviour, not because it is incidental.
 """
 
 from __future__ import annotations
@@ -29,6 +34,74 @@ from config import (
     REGIME_TRIGGER_THRESHOLD,
     REGIME_MIN_MATCHES,
 )
+
+
+# ── Validation Season Selection (ADR 0009) ─────────────────────────
+
+# A season needs this many fixtures before a model can be judged on it.
+# Not a new threshold: walk_forward_cv already skips any fold whose validation
+# season holds fewer (model.py:1280, `len(val_df) < 50`). Named here because
+# that one is a bare literal and this is the second place needing it.
+MIN_VALIDATION_FIXTURES = 50
+
+
+def seasons_for_validation(
+    season_index: pd.Series,
+    minimum: int = MIN_VALIDATION_FIXTURES,
+    log: Callable[[str], None] | None = None,
+) -> list[int]:
+    """Seasons holding enough fixtures to validate against, ascending.
+
+    The caller takes ``[-1]`` for the Early-Stopping Season and ``[-2:]`` for
+    the Base Rate window. Both previously used every season present, so a
+    newly-started season became the sole early-stopping set on its first
+    ingested fixture and simultaneously halved the Base Rate's sample.
+    """
+    counts = season_index.value_counts()
+    eligible = sorted(int(s) for s in counts[counts >= minimum].index)
+
+    if eligible:
+        return eligible
+
+    # Only reachable on tiny or synthetic datasets — production would need both
+    # canonicals to be broken, which earlier checks catch first.
+    fallback = sorted(int(s) for s in counts.index)
+    if log:
+        log(f"  WARNING: no season has >= {minimum} fixtures "
+            f"(largest: {int(counts.max()) if len(counts) else 0}). "
+            f"Falling back to all {len(fallback)} season(s).")
+    return fallback
+
+
+def refit_at_best_iteration(model, X_all, y_all, feature_names=None):
+    """Refit an early-stopped GBDT on the full frame at its chosen tree count.
+
+    Early stopping holds a season back to decide *how many trees*, then leaves
+    the model fitted on everything except that season. LogReg and Dixon-Coles
+    are fitted on the full frame, so without this step XGB and LGB alone stay a
+    season behind their own ensemble (ADR 0009).
+
+    Mirrors `championship_model.py:493-511`, but copies the full parameter set
+    via ``get_params()`` rather than re-listing nine hyperparameters by hand —
+    a hand-written list silently drops any parameter later added to the
+    trainer, which is the failure mode this ADR exists to remove.
+    """
+    params = dict(model.get_params())
+
+    best = getattr(model, "best_iteration", None)
+    if best is None:
+        best = getattr(model, "best_iteration_", None)
+    # Early stopping may never trigger (the model used every tree it was given).
+    # Refit at the full count rather than returning the partially-fitted model —
+    # keeping it would silently restore the staleness this function removes.
+    params["n_estimators"] = int(best) if best else int(params["n_estimators"])
+    if "early_stopping_rounds" in params:
+        params["early_stopping_rounds"] = None  # no eval set on the refit
+
+    refit = type(model)(**params)
+    X = pd.DataFrame(X_all, columns=feature_names) if feature_names else X_all
+    refit.fit(X, y_all)
+    return refit
 
 
 # ── Pickle Save / Load ─────────────────────────────────────────────

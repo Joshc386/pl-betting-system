@@ -52,7 +52,10 @@ from config import (
     MARKET_MULTIPLIERS, DEVIG_DISCOUNT,
     DC_LAMBDA_MIN, DC_LAMBDA_MAX,
 )
-from predictor_utils import save_pickle, load_pickle, compute_regime_shift
+from predictor_utils import (
+    save_pickle, load_pickle, compute_regime_shift, seasons_for_validation,
+    refit_at_best_iteration,
+)
 from model import DixonColesPredictor
 from league_config import get_league_config
 from api.odds_api import (
@@ -556,9 +559,15 @@ class ChampionshipPredictor:
             train_df, target="BTTS", predict_fn="predict_proba_btts_df")
         self._log(f"  BTTS DC params: {self._btts_dc_kwargs}")
 
-        # Early stopping split
-        train_seasons = sorted(train_df["SeasonIndex"].unique())
+        # Early-Stopping Season + Base Rate window (ADR 0009). Only seasons with
+        # enough fixtures to judge a model on — see predict.py for the reasoning.
+        train_seasons = seasons_for_validation(
+            train_df["SeasonIndex"], log=self._log)
         last_season = train_seasons[-1]
+        newest = int(train_df["SeasonIndex"].max())
+        if last_season != newest:
+            self._log(f"  Early-Stopping Season: S{last_season} "
+                      f"(S{newest} has too few fixtures)")
         es_val_mask = train_df["SeasonIndex"] == last_season
         es_train_mask = ~es_val_mask
 
@@ -572,9 +581,15 @@ class ChampionshipPredictor:
         X_val = train_df.loc[es_val_mask, self._ou_features].values
         y_val = train_df.loc[es_val_mask, "Over_2_5"].values
 
-        ou_xgb = train_xgb_champ(X_tr, y_tr, X_val, y_val)
-        ou_lgb = train_lgb_champ(X_tr, y_tr, X_val, y_val,
-                                  feature_names=self._ou_features)
+        # Early-stop for the tree count, then refit on the full frame (ADR 0009)
+        X_all = train_df[self._ou_features].values
+        y_all = train_df["Over_2_5"].values
+        ou_xgb = refit_at_best_iteration(
+            train_xgb_champ(X_tr, y_tr, X_val, y_val), X_all, y_all)
+        ou_lgb = refit_at_best_iteration(
+            train_lgb_champ(X_tr, y_tr, X_val, y_val,
+                            feature_names=self._ou_features),
+            X_all, y_all, feature_names=self._ou_features)
         ou_dc = DixonColesPredictor(**self._dc_kwargs)
         ou_dc.fit(train_df)
 
@@ -590,11 +605,15 @@ class ChampionshipPredictor:
         X_val_15 = train_df.loc[es_val_mask, self._ou15_features].values
         y_val_15 = train_df.loc[es_val_mask, "Over_1_5"].values
 
-        ou15_xgb = train_xgb_ou15_champ(X_tr_15, y_tr_15,
-                                          X_val_15, y_val_15)
-        ou15_lgb = train_lgb_ou15_champ(X_tr_15, y_tr_15,
-                                          X_val_15, y_val_15,
-                                          feature_names=self._ou15_features)
+        X_all_15 = train_df[self._ou15_features].values
+        y_all_15 = train_df["Over_1_5"].values
+        ou15_xgb = refit_at_best_iteration(
+            train_xgb_ou15_champ(X_tr_15, y_tr_15, X_val_15, y_val_15),
+            X_all_15, y_all_15)
+        ou15_lgb = refit_at_best_iteration(
+            train_lgb_ou15_champ(X_tr_15, y_tr_15, X_val_15, y_val_15,
+                                 feature_names=self._ou15_features),
+            X_all_15, y_all_15, feature_names=self._ou15_features)
         # Option 2 Step 1: use O/U 1.5-specific DC kwargs rather than the
         # O/U 2.5 ones. Low-score markets prefer smaller half_life + stronger
         # rho.
@@ -614,9 +633,15 @@ class ChampionshipPredictor:
         X_val_b = train_df.loc[es_val_mask, self._btts_features].values
         y_val_b = train_df.loc[es_val_mask, "BTTS"].values
 
-        btts_xgb = train_xgb_btts_champ(X_tr_b, y_tr_b, X_val_b, y_val_b)
-        btts_lgb = train_lgb_btts_champ(X_tr_b, y_tr_b, X_val_b, y_val_b,
-                                          feature_names=self._btts_features)
+        X_all_b = train_df[self._btts_features].values
+        y_all_b = train_df["BTTS"].values
+        btts_xgb = refit_at_best_iteration(
+            train_xgb_btts_champ(X_tr_b, y_tr_b, X_val_b, y_val_b),
+            X_all_b, y_all_b)
+        btts_lgb = refit_at_best_iteration(
+            train_lgb_btts_champ(X_tr_b, y_tr_b, X_val_b, y_val_b,
+                                 feature_names=self._btts_features),
+            X_all_b, y_all_b, feature_names=self._btts_features)
         # Option 2 Step 1: use BTTS-specific DC kwargs
         btts_dc = DixonColesPredictor(**self._btts_dc_kwargs)
         btts_dc.fit(train_df)

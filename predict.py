@@ -24,7 +24,10 @@ from config import (
     EARLY_SEASON_MATCHES, EARLY_BLEND_WEIGHT,
     EARLY_MIN_EDGE, EARLY_KELLY_FRACTION,
 )
-from predictor_utils import save_pickle, load_pickle, compute_regime_shift
+from predictor_utils import (
+    save_pickle, load_pickle, compute_regime_shift, seasons_for_validation,
+    refit_at_best_iteration,
+)
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, brier_score_loss
 from model import (
@@ -354,9 +357,17 @@ class LivePredictor:
         )
         self._log(f"  BTTS DC params: {self._btts_dc_kwargs}")
 
-        # Use last 2 seasons for early stopping validation
-        train_seasons = sorted(train_df["SeasonIndex"].unique())
+        # Early-Stopping Season + Base Rate window (ADR 0009). Only seasons with
+        # enough fixtures to judge a model on: previously this was every season
+        # present, so a newly started season became the sole early-stopping set
+        # on its first ingested fixture.
+        train_seasons = seasons_for_validation(
+            train_df["SeasonIndex"], log=self._log)
         last_season = train_seasons[-1]
+        newest = int(train_df["SeasonIndex"].max())
+        if last_season != newest:
+            self._log(f"  Early-Stopping Season: S{last_season} "
+                      f"(S{newest} has too few fixtures)")
         es_val_mask = train_df["SeasonIndex"] == last_season
         es_train_mask = ~es_val_mask
 
@@ -370,9 +381,16 @@ class LivePredictor:
         X_es_val = train_df.loc[es_val_mask, self._ou_features].values
         y_es_val = train_df.loc[es_val_mask, "Over_2_5"].values
 
-        ou_xgb = train_xgb(X_es_train, y_es_train, X_es_val, y_es_val)
-        ou_lgb = train_lgb(X_es_train, y_es_train, X_es_val, y_es_val,
-                           feature_names=self._ou_features)
+        # Early-stop to choose the tree count, then refit on the full frame so
+        # XGB/LGB see the Early-Stopping Season too — LogReg and DC below
+        # already do (ADR 0009).
+        ou_xgb = refit_at_best_iteration(
+            train_xgb(X_es_train, y_es_train, X_es_val, y_es_val),
+            X_train_ou, y_train_ou)
+        ou_lgb = refit_at_best_iteration(
+            train_lgb(X_es_train, y_es_train, X_es_val, y_es_val,
+                      feature_names=self._ou_features),
+            X_train_ou, y_train_ou, feature_names=self._ou_features)
         ou_lr, ou_lr_scaler = train_logreg(X_train_ou, y_train_ou)
         ou_dc = DixonColesPredictor(**self._dc_kwargs)
         ou_dc.fit(train_df)
@@ -463,9 +481,13 @@ class LivePredictor:
         y_es_val_b = ((train_df.loc[es_val_mask, "Home_Goals"] > 0) &
                       (train_df.loc[es_val_mask, "Away_Goals"] > 0)).astype(int).values
 
-        btts_xgb = train_xgb_btts(X_es_train_b, y_es_train_b, X_es_val_b, y_es_val_b)
-        btts_lgb = train_lgb_btts(X_es_train_b, y_es_train_b, X_es_val_b, y_es_val_b,
-                                   feature_names=self._btts_features)
+        btts_xgb = refit_at_best_iteration(
+            train_xgb_btts(X_es_train_b, y_es_train_b, X_es_val_b, y_es_val_b),
+            X_train_btts, y_train_btts)
+        btts_lgb = refit_at_best_iteration(
+            train_lgb_btts(X_es_train_b, y_es_train_b, X_es_val_b, y_es_val_b,
+                           feature_names=self._btts_features),
+            X_train_btts, y_train_btts, feature_names=self._btts_features)
         btts_lr, btts_lr_scaler = train_logreg(X_train_btts, y_train_btts)
         # Use BTTS-tuned DC kwargs (Option 2 Step 1) rather than the
         # O/U 2.5 ones — different market, different optimal half-life/rho.

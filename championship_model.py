@@ -73,10 +73,19 @@ OU15_FEATURES_PATH = os.path.join(MODEL_DIR, "champ_ou15_features.pkl")
 BTTS_MODEL_PATH = os.path.join(MODEL_DIR, "champ_btts_model.pkl")
 BTTS_FEATURES_PATH = os.path.join(MODEL_DIR, "champ_btts_features.pkl")
 
-# Walk-forward parameters
+# Walk-forward parameters — RESEARCH PATH ONLY (ADR 0009)
+# These govern this module's main(), not the live EFL models.
+# championship_predict.py's train() — what scheduler.py retrains — filters on
+# SeasonIndex >= MIN_TRAIN_SEASON and derives its Early-Stopping Season from the
+# data; it never reads TEST_SEASON. See CONTEXT.md "Training Path".
+#
+# Note the partition here is `< TEST_SEASON` / `== TEST_SEASON`, which is
+# exhaustive between those two rules but not above them: any season past
+# TEST_SEASON falls outside both. At TEST_SEASON=24 with data through 25,
+# season 25 was in neither wf_df nor test_df.
 MIN_TRAIN_SEASON = 0     # Earliest season (2000/01)
 START_VAL_SEASON = 15    # First validation season (~8000 training matches)
-TEST_SEASON = 24         # Held-out test (2024/25)
+TEST_SEASON = 26         # Held-out test (2026/27, in progress)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

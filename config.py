@@ -29,14 +29,22 @@ MODEL_PATH = os.path.join(MODEL_DIR, f"over_under_model{_LEAGUE_SUFFIX}.pkl")
 SCALER_PATH = os.path.join(MODEL_DIR, f"scaler{_LEAGUE_SUFFIX}.pkl")
 FEATURE_LIST_PATH = os.path.join(MODEL_DIR, f"feature_list{_LEAGUE_SUFFIX}.pkl")
 
-# ── Temporal split boundaries ──
-# Train on seasons 14-23 initially; val (season 24) used for early stopping / pruning.
-# After early stopping, model.py retrains on train+val (14-24) for final models.
+# ── Temporal split boundaries — RESEARCH PATH ONLY (ADR 0009) ──
+# These govern model.py's main() and the backtests, NOT the live models.
+# predict.py's train() — what scheduler.py retrains and what writes the pickles
+# that price bets — derives its boundaries from the data (SeasonIndex >= 14, and
+# the Early-Stopping Season from max(SeasonIndex)) and never reads these.
+# Changing them alters evaluation output only. See CONTEXT.md "Training Path".
+#
+# Train on seasons 14-24; val (season 25) used for early stopping / pruning.
+# After early stopping, model.py retrains on train+val (14-25) for final models.
 # Walk-forward CV (in model.py) provides robust multi-fold evaluation.
-# Season 25 (2025/26, in progress) is the held-out test set.
-TRAIN_SEASONS = list(range(0, 24))       # Seasons 0-23 (2000/01 - 2023/24)
-VAL_SEASONS = [24]                       # Season 24 (2024/25) — early stopping, then folded into train
-TEST_SEASONS = [25]                      # Season 25 (2025/26 - current)
+# Season 26 (2026/27, in progress) is the held-out test set.
+# temporal_split() asserts every season present here is allocated to one of the
+# three — an unallocated season used to vanish silently (ADR 0009).
+TRAIN_SEASONS = list(range(0, 25))       # Seasons 0-24 (2000/01 - 2024/25)
+VAL_SEASONS = [25]                       # Season 25 (2025/26) — early stopping, then folded into train
+TEST_SEASONS = [26]                      # Season 26 (2026/27 - current)
 
 # ── Features ──
 # Columns from CompleteDSPL_CSV.csv to use directly
