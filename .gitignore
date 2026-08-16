@@ -24,6 +24,11 @@ tmp_session_holding/
 # Reports — kept local, not part of source
 reports/
 
+# Test fixtures are source, not data. They must survive the blanket format
+# ignores above (*.csv especially) or regression tests silently stop running
+# on a clean checkout — the failure mode is a green suite that proves nothing.
+!tests/fixtures/**
+
 # Historical odds-data archives (hundreds of thousands of files, GBs of data —
 # checked into local working copies but not source-controlled)
 BTTS_data/

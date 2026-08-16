@@ -126,6 +126,247 @@ def adequacy_label(n: int, ci_lo: float, ci_hi: float) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Historical agreement (ADR 0010)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def realised_edge(won, fair_prob) -> float:
+    """What a set of bets actually beat the market by.
+
+    ``mean(won) - mean(fair_prob)``. Where ``edge`` is the claim the model
+    makes before kickoff, this is that claim graded against outcomes.
+
+    Unlike hit rate it is comparable across markets, which is the whole
+    reason it exists: PL O/U 1.5 Over wins ~75% of the time and EFL O/U 3.5
+    ~35%, so a raw hit rate mostly reports which market you are looking at.
+    Subtracting the fair price removes the base rate, leaving an unskilled
+    bet at ~0 in any market. It is also not an ROI estimand, so it is
+    immune to the historical-``_first``-price vs best-of-14-books mismatch
+    that makes backtest and live ROI unpoolable.
+
+    Meaningful only over a set — for one bet this is a noisy Bernoulli
+    residual.
+
+    Returns:
+        The realised edge, or nan for empty input.
+    """
+    w = np.asarray(won, dtype=float)
+    f = np.asarray(fair_prob, dtype=float)
+    if w.size == 0:
+        return float("nan")
+    return float(w.mean() - f.mean())
+
+
+def clustered_bootstrap_ci(won, fair_prob, fixture_ids,
+                           n_resamples: int = 2000, alpha: float = 0.05,
+                           seed: int = 0) -> tuple[float, float]:
+    """Percentile CI for ``realised_edge``, resampling fixtures not rows.
+
+    One fixture can produce several bets — an O/U 2.5 bet and a BTTS bet on
+    the same match — and their outcomes are driven by the same goals. O/U
+    2.5 Over is outright *nested* inside O/U 1.5 Over: if the total beat
+    2.5 it has already beaten 1.5. Treating those as independent trials,
+    which ``wilson_ci`` and ``bootstrap_ci`` both do, reports an interval
+    narrower than the evidence supports.
+
+    Drawing whole fixtures keeps the interval honest under that correlation
+    without having to model its shape.
+
+    Args:
+        won: 1/0 outcome per bet
+        fair_prob: market fair probability per bet
+        fixture_ids: cluster key per bet — bets sharing one settle together
+        n_resamples: bootstrap iterations
+        alpha: significance level
+        seed: RNG seed — same data, same CI
+
+    Returns:
+        (lo, hi). Returns (nan, nan) when there are fewer than two fixtures.
+    """
+    w = np.asarray(won, dtype=float)
+    f = np.asarray(fair_prob, dtype=float)
+    if w.size == 0:
+        return (float("nan"), float("nan"))
+
+    # Positional row indices per fixture, so a drawn fixture brings all
+    # of its bets along.
+    groups: dict = {}
+    for pos, key in enumerate(fixture_ids):
+        groups.setdefault(key, []).append(pos)
+    clusters = [np.asarray(v, dtype=int) for v in groups.values()]
+    if len(clusters) < 2:
+        return (float("nan"), float("nan"))
+
+    rng = np.random.default_rng(seed)
+    stats = np.empty(n_resamples, dtype=float)
+    n_clusters = len(clusters)
+    for i in range(n_resamples):
+        pick = rng.integers(0, n_clusters, size=n_clusters)
+        idx = np.concatenate([clusters[j] for j in pick])
+        stats[i] = w[idx].mean() - f[idx].mean()
+    return (float(np.percentile(stats, 100 * alpha / 2)),
+            float(np.percentile(stats, 100 * (1 - alpha / 2))))
+
+
+_MODEL_NAMES = ("xgb", "lgb", "dc", "lr")
+
+# The six (league, market) cells with an OOF cache.
+OOF_CELLS = (("PL", "ou25"), ("PL", "btts"), ("PL", "ou15"),
+             ("EFL", "ou25"), ("EFL", "btts"), ("EFL", "ou15"))
+
+
+def load_oof_cell(league: str, market: str,
+                  cache_dir=None) -> Optional[pd.DataFrame]:
+    """Load one OOF cache, or None when it has not been generated.
+
+    ``reports/`` is gitignored, so these are build artefacts that may
+    legitimately be absent. None is returned rather than an empty frame so
+    callers can tell "not generated yet" from "generated and empty" — the
+    dashboard must say which, never render a silent blank.
+    """
+    from pathlib import Path
+
+    if cache_dir is None:
+        cache_dir = Path(__file__).resolve().parent / "reports" / \
+            "roi_validate" / "oof_cache"
+    path = Path(cache_dir) / f"{league.lower()}_{market}.parquet"
+    if not path.exists():
+        return None
+    return pd.read_parquet(path)
+
+
+def replay_oof_gate(oof_df: pd.DataFrame,
+                    config: Optional[dict] = None) -> pd.DataFrame:
+    """Replay an OOF cache through the live gate, keeping both sides.
+
+    The backtest runners drop rejected bets before recording them, so the
+    agreement levels the gate turns down leave no trace. The OOF cache
+    holds every fixture the model priced, so the gate can be applied here
+    and its threshold moved — which is what makes "where should min_agree
+    sit?" answerable at all (ADR 0010).
+
+    Arithmetic mirrors ``backtest.py`` exactly: per-model probabilities are
+    logit-shift calibrated, the market is de-vigged proportionally, and
+    ``n_agree`` counts models beating the fair price on the side being
+    evaluated.
+
+    Both sides are returned. Callers wanting a pre-gate view must keep one
+    side per fixture — see ``agreement_bins`` — because the two sides are
+    antisymmetric by construction.
+
+    Returns:
+        One row per (fixture, side) with fixture, season, side, side_col,
+        n_models, n_agree, model_prob, fair_prob, odds, edge, ev, won and
+        passes.
+    """
+    from scripts.roi_validate import (DEFAULT_CONFIG, _calibrate_single,
+                                      _implied_fair_prob)
+
+    cfg = {**DEFAULT_CONFIG, **(config or {})}
+    bw = cfg["blend_weight"]
+    min_edge = cfg["min_edge"]
+    min_agree = cfg["min_agree"]
+
+    rows: list[dict] = []
+    for _, r in oof_df.iterrows():
+        per_model = [
+            _calibrate_single(float(r[f"{m}_prob"]), float(r[f"{m}_shift"]))
+            for m in _MODEL_NAMES
+            if r.get(f"{m}_prob") is not None and pd.notna(r.get(f"{m}_prob"))
+        ]
+        if not per_model:
+            continue
+        pm = np.array(per_model, dtype=float)
+
+        fair_a, fair_b = _implied_fair_prob(r.get("odds_a"), r.get("odds_b"))
+        if np.isnan(fair_a) or np.isnan(fair_b):
+            continue
+        model_a = float(pm.mean())
+        fixture = f'{r["date"]}|{r["home_team"]}|{r["away_team"]}'
+
+        for label, model_p, fair_p, odds, col in (
+            (r["side_a_label"], model_a, fair_a, r["odds_a"], "a"),
+            (r["side_b_label"], 1.0 - model_a, fair_b, r["odds_b"], "b"),
+        ):
+            if odds is None or pd.isna(odds) or float(odds) <= 1:
+                continue
+            odds = float(odds)
+            # per_model must reflect the side being evaluated
+            pm_side = pm if col == "a" else 1.0 - pm
+            n_agree = int(np.sum(pm_side > fair_p))
+            blended = bw * model_p + (1 - bw) * fair_p
+            edge = blended - fair_p
+            ev = blended * odds - 1
+            won = ((int(r["outcome"]) == 1 and col == "a")
+                   or (int(r["outcome"]) == 0 and col == "b"))
+            rows.append({
+                "fixture": fixture, "season": int(r["season"]),
+                "side": label, "side_col": col,
+                "n_models": int(pm.size), "n_agree": n_agree,
+                "model_prob": model_p, "fair_prob": fair_p, "odds": odds,
+                "edge": edge, "ev": ev, "won": bool(won),
+                "passes": bool(ev > 0 and edge >= min_edge
+                               and n_agree >= min_agree),
+            })
+    return pd.DataFrame(rows)
+
+
+def agreement_bins(replayed: pd.DataFrame, gated: bool = False,
+                   seed: int = 0) -> pd.DataFrame:
+    """Bin replayed OOF rows by agreement count, with clustered CIs.
+
+    Two views, and the difference matters:
+
+    ``gated=True`` keeps only bets the live gate would place. At most one
+    side of a fixture can pass (the two sides' edges sum to zero and
+    ``min_edge`` is positive), so no de-duplication is needed. This view
+    answers "how have the bins we bet performed?" and structurally cannot
+    contain agreement below ``min_agree``.
+
+    ``gated=False`` keeps **side_a only** — one row per fixture. Both sides
+    would make bins 0 and N the same fixtures mirrored, with realised edges
+    that are exact negatives and a self-mirroring middle bin pinned to
+    +0.00%; that is arithmetic, not evidence. Restricted to one side, the
+    full 0..N range becomes readable and answers the question the gated
+    view cannot: where *should* the threshold sit?
+
+    Never pool cells into one call — agreement pays in PL O/U 2.5 and PL
+    BTTS and in no other cell, and averaging them together hides it
+    (ADR 0010).
+
+    Returns:
+        One row per agreement level: n_agree, n_rows, n_fixtures,
+        realised_edge, ci_lo, ci_hi, claimed_edge, hit_rate, adequacy.
+    """
+    if replayed.empty:
+        return pd.DataFrame()
+    sub = (replayed[replayed["passes"]] if gated
+           else replayed[replayed["side_col"] == "a"])
+    if sub.empty:
+        return pd.DataFrame()
+
+    out = []
+    for n in sorted(sub["n_agree"].unique()):
+        b = sub[sub["n_agree"] == n]
+        lo, hi = clustered_bootstrap_ci(
+            b["won"].to_numpy(dtype=float),
+            b["fair_prob"].to_numpy(dtype=float),
+            b["fixture"].tolist(), seed=seed)
+        out.append({
+            "n_agree": int(n),
+            "n_rows": len(b),
+            "n_fixtures": b["fixture"].nunique(),
+            "realised_edge": realised_edge(b["won"], b["fair_prob"]),
+            "ci_lo": lo,
+            "ci_hi": hi,
+            "claimed_edge": float(b["edge"].mean()),
+            "hit_rate": float(b["won"].mean()),
+            "adequacy": adequacy_label(len(b), lo, hi),
+        })
+    return pd.DataFrame(out)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Edge Bucket Analysis
 # ═══════════════════════════════════════════════════════════════════════════════
 
