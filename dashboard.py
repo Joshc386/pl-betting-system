@@ -101,6 +101,110 @@ def _format_market(code: str) -> str:
     return str(code) if code is not None else ""
 
 
+# Ensemble sizes live with the models, not here — imported so the Match Centre
+# denominator cannot drift from what each league actually trains.
+from staking import ENSEMBLE_SIZE  # noqa: E402
+
+
+def _model_agreement(
+    per_model_json: str | None,
+    fair_p: float | None,
+    side: str,
+    league: str | None = None,
+) -> tuple[str, int | None, int | None]:
+    """How many ensemble models independently back this side.
+
+    Recreates the ``n_agree`` count that ``staking.decide_bet`` applies as a
+    recommendation gate (``min_agree=2``), from data already stored on the
+    row — no schema change needed. A model "agrees" when its own probability
+    for this side beats the market fair probability, i.e. it would take the
+    bet on its own.
+
+    Four shapes come back from ``per_model_json`` and each means something
+    different:
+
+      * ``{"xgb", "lgb", "lr", "dc"}`` (PL) or ``{"xgb", "lgb", "dc"}``
+        (EFL, no LogReg) — a real vote. Returns "3/4", "2/3" etc.
+      * ``{"dc_poisson"}`` — alt-line markets (PL O/U 1.5, EFL O/U 3.5) are
+        pure Dixon-Coles, so no vote was ever taken. Returns "DC", *not*
+        "1/1", because one model agreeing with itself is not agreement.
+      * every value identical across 2+ models — the 8-10 Apr 2026 rows
+        where one blended number was written into every slot. Counting that
+        as unanimity inflated the 4/4 bucket by 24pp, so it returns "!" and
+        is excluded from the agreement breakdown rather than believed.
+      * missing/empty — returns "—".
+
+    Args:
+        per_model_json: raw JSON string from ``match_analysis`` or
+            ``recommendations``.
+        fair_p: market fair probability for this side (de-vigged consensus
+            or Pinnacle sharp price) — the same threshold the live path
+            counts against.
+        side: "over"/"under"/"yes"/"no". Under and No invert each model's
+            probability, mirroring ``1 - per_model`` in predict.py.
+
+    Returns:
+        ``(label, n_agree, n_models)``. The counts are None whenever the
+        label is not a real vote, so callers can filter on them.
+    """
+    if not per_model_json or not isinstance(per_model_json, str):
+        return ("—", None, None)
+    try:
+        probs = json.loads(per_model_json)
+    except (json.JSONDecodeError, TypeError):
+        return ("—", None, None)
+    if not isinstance(probs, dict) or not probs:
+        return ("—", None, None)
+
+    values = [float(v) for v in probs.values() if v is not None]
+    if not values:
+        return ("—", None, None)
+
+    # Alt lines: Dixon-Coles only, no ensemble vote exists.
+    #
+    # Two callers want different things here, and both are right for their
+    # surface. The Model Analytics breakdown (no `league`) excludes these
+    # rows — one model agreeing with itself is not agreement, and folding it
+    # into the vote distribution would misstate it. The Match Centre passes
+    # `league` and gets "1/3": there it sits next to genuine 3/3 rows while
+    # carrying the board's largest edges, so what matters is that two of the
+    # league's three models never weighed in. "DC" alone does not convey that
+    # at a glance; a fraction against the full ensemble does.
+    if set(probs.keys()) == {"dc_poisson"}:
+        if league is None:
+            return ("DC", None, None)
+        total = ENSEMBLE_SIZE.get(league, len(values))
+        if fair_p is None or not pd.notna(fair_p) or fair_p <= 0:
+            return ("—", None, None)
+        # No inversion here, unlike the ensemble branch below. The two paths
+        # store different things under the same key: predict.py:1383 writes
+        # {"dc_poisson": vb["model_prob"]} where model_prob is already the
+        # probability *for this row's side*, whereas the ensemble branch stores
+        # Over-probabilities and derives Under as 1 - v. Applying the ensemble's
+        # inversion to an alt line would report the opposite of what the model
+        # said.
+        n_alt = sum(1 for v in values if v > fair_p)
+        return (f"{n_alt}/{total}", n_alt, total)
+
+    # Degenerate legacy rows — one number copied into every model slot.
+    if len(values) > 1 and len(set(round(v, 10) for v in values)) == 1:
+        return ("!", None, None)
+
+    if fair_p is None or not pd.notna(fair_p) or fair_p <= 0:
+        return ("—", None, None)
+
+    invert = str(side).lower() in ("under", "no")
+    n_agree = sum(
+        1 for v in values if ((1.0 - v) if invert else v) > fair_p
+    )
+    # Denominator: the league's full ensemble when the caller names one, so a
+    # row that stored only some models still reads against everything that
+    # could have voted. Falls back to the stored count for the analytics
+    # caller, preserving its existing numbers exactly.
+    total = ENSEMBLE_SIZE.get(league, len(values)) if league else len(values)
+    return (f"{n_agree}/{total}", n_agree, total)
+
+
 def _clv_card(label: str, value: str, colour: str) -> dbc.Card:
     """Create a small summary card for CLV metrics.
 
@@ -270,6 +374,98 @@ def _make_odds_status(league: str) -> html.Div:
                   className=f"small {_quota_colour(op_used, QUOTA_LIMITS['oddspapi'])}",
                   style={"fontWeight": "600"}),
     ], className="mb-2", style={"fontFamily": "monospace"})
+
+
+def _make_job_status() -> html.Div:
+    """Top-of-dashboard widget: did the scheduled jobs actually run?
+
+    Deliberately **not** league-scoped — Task Scheduler runs one ingest and one
+    settlement covering both leagues, so showing this per-league would make a
+    system-wide miss look like a PL or EFL problem.
+
+    Answers the question nothing else does. Windows reports `LastTaskResult: 0`
+    for the last run that *happened*, so a day a job never ran still reads
+    healthy (ADR 0006's counterexample, 2026-08-14). Read-only; no network.
+    """
+    from job_health import (
+        read_job_status, unsettled_backlog, data_coverage, JobState,
+    )
+    from league_config import LEAGUES as _LG
+
+    proj_dir = os.path.dirname(os.path.abspath(__file__))
+
+    _COLOUR = {
+        JobState.OK: "text-success",
+        JobState.STALE: "text-warning",
+        JobState.FAILED: "text-danger",
+        JobState.MISSING: "text-danger",
+    }
+    _MARK = {
+        JobState.OK: "✓",
+        JobState.STALE: "!",
+        JobState.FAILED: "✗",
+        JobState.MISSING: "✗",
+    }
+
+    def _age(hours):
+        if hours is None:
+            return "never"
+        return f"{hours:.0f}h" if hours < 48 else f"{hours / 24:.1f}d"
+
+    children = [html.Span("Jobs: ", className="text-muted small")]
+    for i, s in enumerate(read_job_status(os.path.join(proj_dir, "logs"))):
+        if i:
+            children.append(html.Span("·", className="text-muted small me-2"))
+        children.append(html.Span(
+            f"{s.name} {_age(s.age_hours)} {_MARK[s.state]}",
+            className=f"small me-2 {_COLOUR[s.state]}",
+            style={"fontWeight": "600"},
+            title=(f"{s.name}: last run "
+                   f"{s.last_run:%d %b %H:%M}" if s.last_run else
+                   f"{s.name}: no log found — this job has never run, or its "
+                   f"log was cleared"),
+        ))
+
+    # Backlog spans both leagues: rows past the 3-day settle horizon that no
+    # scheduled run will ever reach again.
+    backlog = sum(
+        unsettled_backlog(os.path.join(proj_dir, "data", db))
+        for db in ("dashboard.db", "dashboard_efl.db")
+    )
+    children += [
+        html.Span("│ Backlog ", className="text-muted small"),
+        html.Span(
+            str(backlog),
+            className=("small me-3 "
+                       + ("text-success" if backlog == 0 else "text-warning")),
+            style={"fontWeight": "600"},
+            title=("Unsettled rows older than the 3-day settlement window "
+                   "(scheduler.py passes days_back=3). Anything here needs a "
+                   "manual settle with a wider window — repeated scheduled "
+                   "runs will never pick it up."),
+        ),
+    ]
+
+    # Data coverage — a correct ingest adds nothing while upstream has not
+    # published, so this is the number that moves when 2026/27 lands.
+    children.append(html.Span("│ Data ", className="text-muted small"))
+    for i, lg in enumerate(("PL", "EFL")):
+        cfg = _LG[lg]
+        path = (cfg["enriched_csv_path"]
+                if os.path.exists(cfg["enriched_csv_path"])
+                else cfg["csv_path"])
+        season = data_coverage(path)
+        if i:
+            children.append(html.Span("·", className="text-muted small me-2"))
+        children.append(html.Span(
+            f"{lg} S{season}" if season is not None else f"{lg} –",
+            className="small me-2 text-muted",
+            style={"fontWeight": "600"},
+            title=f"Highest season present in {os.path.basename(path)}",
+        ))
+
+    return html.Div(children, className="mb-1",
+                    style={"fontFamily": "monospace"})
 
 
 def _make_stats_row(league: str) -> html.Div:
@@ -449,6 +645,14 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
     # one DB hit instead of two.
     _recommended: set[tuple] = set()
     _stake_lookup: dict[tuple, float] = {}
+    # Which filter the recommendation actually cleared. Ensemble bets go
+    # through staking.decide_bet, which rejects n_agree < min_agree=2, so a
+    # stored n_agree of 0 can only have come from the alt-line path at
+    # predict.py:1374 — that path writes ``"n_agree": 0`` and never calls
+    # decide_bet, so it faces neither the agreement gate nor shrink_edge.
+    # Those are materially weaker terms and REC should not hide that behind
+    # the same tick an ensemble bet gets.
+    _rec_alt: dict[tuple, bool] = {}
     try:
         rec_df = get_active_recommendations(league)
         settled_rec_df = get_settled_recommendations(league)
@@ -458,6 +662,14 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
                     _key = (r["home_team"], r["away_team"],
                             r["market"], r["side"])
                     _recommended.add(_key)
+                    if _key not in _rec_alt:
+                        # Absent/NaN n_agree (legacy rows) reads as False:
+                        # a plain tick understates a DC-only bet, whereas a
+                        # false "DC" would libel a real ensemble bet.
+                        _na = r.get("n_agree")
+                        _rec_alt[_key] = (
+                            pd.notna(_na) and _na is not None and int(_na) == 0
+                        )
                     _sp = r.get("stake_pct")
                     if pd.notna(_sp) and _sp is not None:
                         # Active recs win over settled (latest-wins): only
@@ -511,7 +723,28 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
                 fair_p = implied_p
             edge = (model_p - fair_p) * 100 if pd.notna(model_p) else None
         else:
+            fair_p = None
             edge = row["edge_pct"]
+
+        # Model agreement — recomputed from the same fair_p the edge uses,
+        # so the column can never disagree with the Edge % beside it.
+        # `league` gives the denominator the league's full ensemble (4 PL,
+        # 3 EFL) rather than however many models happened to be stored, so a
+        # Dixon-Coles-only alt line reads 1/3 instead of a reassuring 1/1.
+        agree_label, agree_n, agree_total = _model_agreement(
+            row.get("per_model_json"), fair_p, row["side"], league)
+
+        # Expected value per £1 staked, as a percentage. Mirrors
+        # ``ev = blended_p * odds - 1`` in staking.py:350, with one
+        # difference worth knowing: staking blends the model probability
+        # toward the market before computing EV, whereas match_analysis
+        # only stores the raw ensemble probability. So this column is the
+        # model's own view of EV and will read slightly richer than the
+        # ``ev`` the recommendation filter gated on.
+        if pd.notna(model_p) and pd.notna(best_odds) and best_odds > 1:
+            ev_pct = (model_p * best_odds - 1.0) * 100
+        else:
+            ev_pct = None
 
         # Always assign confidence — even for negative edges
         conf = row.get("confidence", "") or ""
@@ -524,6 +757,8 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
                 conf = "low"
             else:
                 conf = "negative"
+
+        _rk = (row["home_team"], row["away_team"], row["market"], row["side"])
 
         entry = {
             "fixture": f"{row['home_team']} v {row['away_team']}",
@@ -546,6 +781,8 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
                 else None
             ),
             "confidence": conf,
+            "ev": round(ev_pct, 1) if ev_pct is not None else None,
+            "agree": agree_label,
             "n_books": int(row["n_books"]) if pd.notna(row.get("n_books")) else None,
             # Hidden: bookmaker odds JSON for callback recalculation
             "_bm_odds": json.dumps(bm_odds) if bm_odds else "{}",
@@ -561,9 +798,35 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
             "_kickoff": row.get("kickoff", ""),
             "_model_prob": model_p if pd.notna(model_p) else None,
             "_fair_odds": float(fair_odds) if pd.notna(fair_odds) else None,
-            "rec": ("\u2713" if (row["home_team"], row["away_team"],
-                                row["market"], row["side"]) in _recommended
-                    else ""),
+            # REC answers one question only \u2014 did this row clear the
+            # recommendation filter. The agreement count lives in its own
+            # AGREE column, which carries it for every row rather than only
+            # the shortlist: a 3/3 that was *not* recommended is exactly the
+            # case worth seeing, and folding agreement into REC hides it.
+            # A column whose meaning changes with the state of another field
+            # is the trap the Bankroll/Total Staked card fell into.
+            #
+            # The tick is still graded by conviction \u2014 see the REC rules in
+            # style_data_conditional: amber when a recommendation sits below
+            # the min_agree=2 gate, so a large Edge cannot pass unqualified.
+            #
+            # "\u2713 DC" marks a bet that cleared only the alt-line filter
+            # (Dixon-Coles alone, no agreement gate, no edge shrinkage). A
+            # bare "\u2713" cleared the full ensemble filter. "DC" is already
+            # this codebase's word for Dixon-Coles-only \u2014 see the label
+            # _model_agreement returns when no league is passed.
+            "rec": (
+                ("\u2713 DC" if _rec_alt.get(_rk) else "\u2713")
+                if _rk in _recommended
+                else ""
+            ),
+            # Hidden flag so the REC colour keys off which filter was
+            # actually cleared, rather than re-deriving it from agreement.
+            "_rec_alt": 1 if (_rk in _recommended and _rec_alt.get(_rk)) else 0,
+            # Hidden numerics so REC can be coloured by agreement strength —
+            # filter_query cannot compare the halves of a "2/3" string.
+            "_agree_n": agree_n,
+            "_agree_total": agree_total,
             "taken": ("Yes" if _predictions_taken.get(
                 (row["home_team"], row["away_team"],
                  row["market"], row["side"])) else ""),
@@ -593,7 +856,11 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
                   .symbol_suffix("%")},
         {"name": "Stake %", "id": "stake_pct", "type": "numeric",
          "format": Format(precision=2, scheme=Scheme.fixed).symbol_suffix("%")},
+        {"name": "EV %", "id": "ev", "type": "numeric",
+         "format": Format(precision=1, scheme=Scheme.fixed,
+                          sign=Sign.positive).symbol_suffix("%")},
         {"name": "Conf", "id": "confidence", "type": "text"},
+        {"name": "Agree", "id": "agree", "type": "text"},
         {"name": "Books", "id": "n_books", "type": "numeric"},
         {"name": "Rec", "id": "rec", "type": "text"},
         {"name": "Taken", "id": "taken", "type": "text",
@@ -704,6 +971,36 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
                 "backgroundColor": _COLOURS["card"], "color": _COLOURS["text"],
             },
             style_data_conditional=[
+                # ── Row-level rules first, column rules after ──────────────
+                # Dash folds every matching rule with Object.assign in list
+                # order, so the LAST match wins. These two used to sit at the
+                # end of this list, which had two consequences, both visible
+                # on the board:
+                #   * the odd-row stripe overwrote the high-confidence tint,
+                #     so the same bet was green or not depending purely on
+                #     where it landed after sorting;
+                #   * both row rules overwrote the Stake % tier backgrounds,
+                #     erasing the staking colour on every odd row.
+                # General before specific fixes both: a column rule now always
+                # beats a row rule, and row parity no longer carries meaning.
+                {
+                    "if": {"row_index": "odd"},
+                    "backgroundColor": "#1a2640",
+                },
+                # High confidence, in two shades so the zebra survives the
+                # override. Confidence must read the same in either shade —
+                # the parity is decoration, the green is the signal.
+                {
+                    "if": {"filter_query": '{confidence} = "high"',
+                           "row_index": "even"},
+                    "backgroundColor": "#1a2e1a",
+                },
+                {
+                    "if": {"filter_query": '{confidence} = "high"',
+                           "row_index": "odd"},
+                    "backgroundColor": "#213a24",
+                },
+                # ── Column-level rules ────────────────────────────────────
                 # Strong positive edge (>4%) — bright cyan, bold
                 {
                     "if": {"filter_query": "{edge} > 4",
@@ -722,11 +1019,72 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
                            "column_id": "edge"},
                     "color": "#ff6b6b",
                 },
-                # Recommended bet marker — green checkmark
+                # REC — coloured by how much of the ensemble backs
+                # the bet. Majority, but not unanimous.
                 {
-                    "if": {"filter_query": '{rec} = "\u2713"',
+                    "if": {"filter_query":
+                           '{_agree_n} >= 2 && {_agree_n} < {_agree_total}'
+                           ' && {rec} != ""',
                            "column_id": "rec"},
-                    "color": "#69db7c", "fontWeight": "bold", "fontSize": "16px",
+                    "color": "#69db7c", "fontWeight": "bold",
+                },
+                # Unanimous across the league's whole ensemble — brighter.
+                {
+                    "if": {"filter_query":
+                           '{_agree_n} > 1 && {_agree_n} = {_agree_total}'
+                           ' && {rec} != ""',
+                           "column_id": "rec"},
+                    "color": "#00d4aa", "fontWeight": "bold",
+                },
+                # Alt-line recommendation: Dixon-Coles alone cleared a filter
+                # with no agreement gate and no edge shrinkage. Listed last so
+                # it wins outright — these carry the board's largest edges and
+                # must never read as ensemble-backed. Keyed on the stored
+                # n_agree, not on recomputed agreement, so a shifting market
+                # price cannot flip the tick's meaning after the fact.
+                {
+                    "if": {"filter_query": "{_rec_alt} = 1",
+                           "column_id": "rec"},
+                    "color": "#ffd43b", "fontWeight": "bold",
+                },
+                # EV — same green/red split as Edge, since a negative-EV
+                # bet is never recommended regardless of what edge says.
+                {
+                    "if": {"filter_query": "{ev} > 0", "column_id": "ev"},
+                    "color": "#69db7c",
+                },
+                {
+                    "if": {"filter_query": "{ev} < 0", "column_id": "ev"},
+                    "color": "#ff6b6b",
+                },
+                # Model agreement. Unanimous is highlighted but deliberately
+                # not in the "good" accent colour — on settled data so far
+                # unanimity underperforms the DC-only alt lines, so the
+                # column is a fact to read, not a buy signal.
+                {
+                    "if": {"filter_query": '{agree} = "4/4" || {agree} = "3/3"',
+                           "column_id": "agree"},
+                    "color": "#e0e0e0", "fontWeight": "bold",
+                },
+                # Below the min_agree=2 gate — these never become
+                # recommendations, so they read muted.
+                {
+                    "if": {"filter_query": '{agree} = "0/4" || {agree} = "1/4"'
+                                           ' || {agree} = "0/3" || {agree} = "1/3"',
+                           "column_id": "agree"},
+                    "color": "#8898aa",
+                },
+                # Alt lines — Dixon-Coles only, no vote was taken.
+                {
+                    "if": {"filter_query": '{agree} = "DC"',
+                           "column_id": "agree"},
+                    "color": "#da77f2",
+                },
+                # Degenerate legacy row (one number in every model slot).
+                {
+                    "if": {"filter_query": '{agree} = "!"',
+                           "column_id": "agree"},
+                    "color": "#ffd43b", "fontWeight": "bold",
                 },
                 # Stake bins -- only colour cells with a value (None renders
                 # blank, so non-recommended bets stay neutral).
@@ -762,16 +1120,6 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
                     "color": "#ffd966",
                     "fontWeight": "bold",
                 },
-                # High confidence row highlight
-                {
-                    "if": {"filter_query": '{confidence} = "high"'},
-                    "backgroundColor": "#1a2e1a",
-                },
-                # Alternating row colours
-                {
-                    "if": {"row_index": "odd"},
-                    "backgroundColor": "#1a2640",
-                },
             ],
             style_cell_conditional=[
                 {"if": {"column_id": "fixture"}, "width": "220px"},
@@ -785,8 +1133,11 @@ def _build_match_centre(league: str, show_all: bool = False) -> html.Div:
                 {"if": {"column_id": "edge"}, "width": "70px", "textAlign": "center"},
                 {"if": {"column_id": "stake_pct"}, "width": "80px", "textAlign": "center"},
                 {"if": {"column_id": "confidence"}, "width": "60px", "textAlign": "center"},
+                {"if": {"column_id": "ev"}, "width": "70px", "textAlign": "center"},
+                {"if": {"column_id": "agree"}, "width": "60px", "textAlign": "center"},
                 {"if": {"column_id": "n_books"}, "width": "60px", "textAlign": "center"},
-                {"if": {"column_id": "rec"}, "width": "45px", "textAlign": "center"},
+                # Widened from 45px: "1/3" needs more room than a tick did.
+                {"if": {"column_id": "rec"}, "width": "60px", "textAlign": "center"},
                 {"if": {"column_id": "taken"}, "width": "70px", "textAlign": "center"},
             ],
             dropdown={
@@ -1613,6 +1964,306 @@ def _make_monthly_breakdown(settled: pd.DataFrame) -> html.Div:
 # Model Analytics Tab
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _bootstrap_roi_ci(
+    profits: np.ndarray,
+    stakes: np.ndarray,
+    n_resamples: int = 2000,
+    seed: int = 0,
+) -> tuple[float, float]:
+    """Bootstrap CI for stake-weighted ROI, resampling bets.
+
+    ``edge_analytics.bootstrap_ci`` takes the mean of per-bet ROI ratios,
+    which is stake-*invariant*: a win contributes ``odds-1`` and a loss
+    ``-1`` no matter what was staked. Pairing that interval with a
+    stake-weighted point estimate (``total_profit / total_staked``) puts
+    the two on different estimands — which is why the Kelly and flat rows
+    of the old counterfactual table showed byte-identical CIs around
+    different numbers.
+
+    This resamples bet *indices* and recomputes the ratio of sums on each
+    resample, so the interval brackets the same quantity the point
+    estimate reports.
+
+    Args:
+        profits: per-bet profit, in bankroll fractions.
+        stakes: per-bet stake, same units.
+
+    Returns:
+        ``(lo, hi)`` at 95%, or ``(nan, nan)`` when undefined.
+    """
+    n = len(profits)
+    if n == 0:
+        return (float("nan"), float("nan"))
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, n, size=(n_resamples, n))
+    resampled_profit = profits[idx].sum(axis=1)
+    resampled_stake = stakes[idx].sum(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratios = np.where(
+            resampled_stake > 0, resampled_profit / resampled_stake, np.nan)
+    ratios = ratios[~np.isnan(ratios)]
+    if ratios.size == 0:
+        return (float("nan"), float("nan"))
+    return (float(np.percentile(ratios, 2.5)),
+            float(np.percentile(ratios, 97.5)))
+
+
+def _make_agreement_breakdown(league: str) -> html.Div:
+    """Settled recommendations binned by how many models backed the bet.
+
+    Answers the question the ``min_agree`` gate assumes but never tested:
+    does more ensemble agreement mean a better bet? The gate passes bets at
+    2-of-4 (2-of-3 for EFL), so if unanimity were meaningfully better the
+    threshold would be leaving money on the table — and if it were worse,
+    the gate is selecting for correlated errors.
+
+    Rows where one blended number was written into every model slot (8-10
+    Apr 2026) are excluded: counting that as 4/4 inflated the unanimous
+    bucket's hit rate by 24pp. Alt-line bets are reported on their own
+    ``DC`` row rather than folded in, because Dixon-Coles alone never cast
+    a vote to agree with.
+    """
+    from edge_analytics import wilson_ci, adequacy_label
+
+    try:
+        recs = get_settled_recommendations(league)
+    except Exception as exc:
+        logger.warning("agreement breakdown: could not load recs: %s", exc)
+        return html.Div()
+
+    if recs.empty or "per_model_json" not in recs.columns:
+        return html.Div()
+
+    def _num(value) -> float:
+        """Coerce to float, mapping missing/unparseable to 0.0.
+
+        Written out rather than `pd.to_numeric(...) or 0` because NaN is
+        truthy — the `or` form passes NaN straight through.
+        """
+        coerced = pd.to_numeric(value, errors="coerce")
+        return 0.0 if pd.isna(coerced) else float(coerced)
+
+    buckets: dict[str, list[dict]] = {}
+    n_degenerate = 0
+    n_no_outcome = 0
+    for _, r in recs.iterrows():
+        label, n_agree, n_models = _model_agreement(
+            r.get("per_model_json"), r.get("fair_prob"), r.get("side", ""))
+        if label == "!":
+            n_degenerate += 1
+            continue
+        if label == "—":
+            continue
+        # `or 0` is not a missing-value guard here: NaN is truthy, so
+        # `pd.to_numeric(None, errors="coerce") or 0` returns NaN, and the
+        # int(sum(...)) below then raises. A settled row with no recorded
+        # outcome — a void or abandoned fixture — took the whole tab down.
+        won = pd.to_numeric(r.get("won"), errors="coerce")
+        if pd.isna(won):
+            # No outcome means the bet has nothing to say about agreement.
+            # Counting it as a loss would understate every bucket it lands in.
+            n_no_outcome += 1
+            continue
+        key = "DC only (alt lines)" if label == "DC" else label
+        buckets.setdefault(key, []).append({
+            "won": float(won),
+            "profit": float(_num(r.get("profit_pct"))),
+            "stake": float(_num(r.get("stake_pct"))),
+            "ev": pd.to_numeric(r.get("ev"), errors="coerce"),
+        })
+
+    if not buckets:
+        return html.Div()
+
+    _BADGE = {"ok": "🟢 OK", "marginal": "🟡 Marginal", "noise": "🔴 Noise"}
+
+    def _sort_key(k: str) -> tuple:
+        # Real votes first, descending agreement; DC row last.
+        if k.startswith("DC"):
+            return (1, 0)
+        return (0, -int(k.split("/")[0]))
+
+    rows = []
+    for key in sorted(buckets, key=_sort_key):
+        bets = buckets[key]
+        n = len(bets)
+        wins = int(sum(b["won"] for b in bets))
+        profits = np.array([b["profit"] for b in bets], dtype=float)
+        stakes = np.array([b["stake"] for b in bets], dtype=float)
+        total_staked = float(stakes.sum())
+        roi = float(profits.sum()) / total_staked if total_staked > 0 else np.nan
+        wr_lo, wr_hi = wilson_ci(wins, n)
+        roi_lo, roi_hi = _bootstrap_roi_ci(profits, stakes)
+        evs = np.array([b["ev"] for b in bets], dtype=float)
+        evs = evs[~np.isnan(evs)]
+        rows.append({
+            "agreement": key,
+            "n_bets": n,
+            "avg_ev": float(evs.mean()) if evs.size else np.nan,
+            "hit_rate": wins / n if n else np.nan,
+            "hit_ci": f"{wr_lo:.0%} – {wr_hi:.0%}",
+            "roi": roi,
+            "roi_ci": (
+                f"{roi_lo:+.0%} to {roi_hi:+.0%}"
+                if not np.isnan(roi_lo) else "—"
+            ),
+            "adequacy": _BADGE.get(
+                adequacy_label(n, roi_lo, roi_hi), "🔴 Noise"),
+        })
+
+    notes = [
+        "A model agrees when its own probability for this side beats the "
+        "market fair price — the same count the min_agree=2 gate applies. ",
+        html.Strong("More agreement is not assumed to be better: "),
+        "this table exists to test that, not to illustrate it.",
+    ]
+    if n_degenerate:
+        notes.append(html.Br())
+        notes.append(
+            f"{n_degenerate} early row(s) excluded — one blended number was "
+            f"written into every model slot, so their 4/4 was not real "
+            f"agreement.")
+    if n_no_outcome:
+        notes.append(html.Br())
+        notes.append(
+            f"{n_no_outcome} settled row(s) excluded — marked settled but "
+            f"carrying no win/loss outcome (a void or abandoned fixture). "
+            f"Counting them either way would bias the bucket they fall in.")
+
+    return html.Div([
+        html.H6("Model Agreement", className="text-light mt-4 mb-2"),
+        html.P(notes, className="text-muted small"),
+        _make_analytics_table(
+            pd.DataFrame(rows), "agreement-table",
+            columns=[
+                {"name": "Agreement", "id": "agreement"},
+                {"name": "Bets", "id": "n_bets"},
+                {"name": "Avg EV", "id": "avg_ev",
+                 "type": "numeric", "format": {"specifier": "+.1%"}},
+                {"name": "Hit Rate", "id": "hit_rate",
+                 "type": "numeric", "format": {"specifier": ".1%"}},
+                {"name": "95% CI", "id": "hit_ci"},
+                {"name": "ROI", "id": "roi",
+                 "type": "numeric", "format": {"specifier": "+.1%"}},
+                {"name": "ROI 95% CI", "id": "roi_ci"},
+                {"name": "Adequacy", "id": "adequacy"},
+            ],
+        ),
+    ])
+
+
+def _make_historical_agreement(league: str, cache_dir=None) -> html.Div:
+    """Agreement bins from the walk-forward OOF caches (ADR 0010).
+
+    Sits apart from the live Model Agreement table above and is never summed
+    with it: this reads walk-forward OOF predictions across six seasons,
+    that reads a few dozen settled Recommendations. Different samples,
+    different prices, same question.
+
+    Rendered per cell. Agreement pays in PL O/U 2.5 and PL BTTS and in no
+    other cell, and pooling markets averages that away.
+    """
+    from edge_analytics import (OOF_CELLS, agreement_bins, load_oof_cell,
+                                replay_oof_gate)
+
+    cells = [(lg, mk) for lg, mk in OOF_CELLS if lg == league]
+    blocks: list = []
+    missing: list[str] = []
+
+    for lg, mk in cells:
+        oof = load_oof_cell(lg, mk, cache_dir=cache_dir)
+        if oof is None:
+            missing.append(_format_market(mk))
+            continue
+        replayed = replay_oof_gate(oof)
+        pre = agreement_bins(replayed, gated=False)
+        gated = agreement_bins(replayed, gated=True)
+        if pre.empty:
+            continue
+
+        for label, table in (("Every fixture priced", pre),
+                             ("Bets the gate placed", gated)):
+            if table.empty:
+                continue
+            df = table.copy()
+            df["adequacy"] = df["adequacy"].map(
+                {"ok": "🟢 OK", "marginal": "🟡 Marginal",
+                 "noise": "🔴 Noise"}).fillna("🔴 Noise")
+            df["ci"] = [
+                "—" if pd.isna(lo) else f"{lo:+.1%} to {hi:+.1%}"
+                for lo, hi in zip(df["ci_lo"], df["ci_hi"])
+            ]
+            blocks.append(html.Div([
+                html.H6(f"{_format_market(mk)} — {label}",
+                        className="text-light mt-3 mb-1"),
+                _make_analytics_table(
+                    df, f"hist-agree-{lg}-{mk}-{label[:3].lower()}",
+                    columns=[
+                        {"name": "Agreement", "id": "n_agree"},
+                        {"name": "Bets", "id": "n_rows"},
+                        {"name": "Realised Edge", "id": "realised_edge",
+                         "type": "numeric",
+                         "format": {"specifier": "+.2%"}},
+                        {"name": "95% CI", "id": "ci"},
+                        {"name": "Claimed Edge", "id": "claimed_edge",
+                         "type": "numeric",
+                         "format": {"specifier": "+.2%"}},
+                        {"name": "Hit Rate", "id": "hit_rate",
+                         "type": "numeric", "format": {"specifier": ".1%"}},
+                        {"name": "Adequacy", "id": "adequacy"},
+                    ],
+                ),
+            ]))
+
+    if not blocks:
+        return html.Div([
+            html.H6("Historical Agreement (walk-forward OOF)",
+                    className="text-light mt-4 mb-2"),
+            html.P(
+                f"OOF caches not yet generated for {league} "
+                f"({', '.join(missing) if missing else 'no cells'}). "
+                f"Run scripts/generate_oof_cache.py to populate them.",
+                className="text-warning small"),
+        ])
+
+    notes = [
+        html.Strong("Realised Edge is the headline, not hit rate. "),
+        "Realised Edge is mean(won) − mean(fair price): it scores an "
+        "unskilled bet at ~0 in any market, so O/U 1.5 (which goes over "
+        "~75% of the time) and O/U 3.5 can be read side by side. Hit rate "
+        "cannot do that — it mostly reports which market you are looking "
+        "at. Read Realised against Claimed: the gap is what the model "
+        "over-promised.",
+        html.Br(),
+        html.Strong("“Every fixture priced” keeps one side per fixture "
+                    "(Over/Yes). "),
+        "Counting both sides would force the 0 and top bins to be exact "
+        "mirrors, because the two sides' agreement counts always sum to "
+        "the model count. Read the 0 bin as “nobody backed Over”.",
+        html.Br(),
+        html.Strong("Agreement below the gate cannot appear in the lower "
+                    "table. "),
+        "min_agree runs before a bet is recorded, so that view can only "
+        "ask whether the threshold should be higher. The upper table is "
+        "the one that can ask whether it should be lower.",
+        html.Br(),
+        "Intervals resample fixtures rather than bets, since several bets "
+        "on one match settle together. Never compare across leagues: PL "
+        "counts out of 4 models, EFL out of 3.",
+    ]
+    if missing:
+        notes.append(html.Br())
+        notes.append(f"Not generated: {', '.join(missing)}.")
+
+    return html.Div([
+        html.Hr(className="mt-4"),
+        html.H6("Historical Agreement (walk-forward OOF)",
+                className="text-light mt-4 mb-2"),
+        html.P(notes, className="text-muted small"),
+        *blocks,
+    ])
+
+
 def _build_analytics(league: str) -> html.Div:
     """Build the Model Analytics view.
 
@@ -1748,96 +2399,6 @@ def _build_analytics(league: str) -> html.Div:
                 ),
                 dbc.Row(cards, className="mb-3"),
             ]))
-
-            # ══════════════════════════════════════════════════════════════
-            # NEW: Strategy Counterfactuals
-            # Compares Kelly-rec'd vs flat-rec'd vs flat-all-positive-edge
-            # on the same settled outcomes. Directly answers "did the
-            # recommendation filter and Kelly sizing each earn their keep?"
-            # ══════════════════════════════════════════════════════════════
-            try:
-                from edge_analytics import counterfactual_strategies
-                # Pass settled recs only — counterfactual_strategies
-                # filters by settled==1 internally, and using only
-                # settled rows here means avg_kelly is a stable
-                # historical mean rather than being skewed by whatever
-                # active recs happen to be open right now.
-                _settled_recs_df = get_settled_recommendations(league)
-                cf_df = counterfactual_strategies(all_preds, _settled_recs_df)
-            except Exception as exc:
-                logger.warning("counterfactual_strategies failed: %s", exc)
-                cf_df = pd.DataFrame()
-
-            if not cf_df.empty:
-                # Table rows — one per strategy. We render the CIs inline
-                # under each ROI as muted small text so the user reads
-                # "+6.4% (CI -7% to +20%)" as a single visual unit.
-                cf_table_rows = []
-                for _, r in cf_df.iterrows():
-                    if pd.isna(r["roi"]):
-                        roi_cell = "—"
-                        wr_cell = "—"
-                        pl_cell = "—"
-                    else:
-                        roi_cell = html.Div([
-                            html.Div(f"{r['roi']*100:+.2f}%",
-                                     style={"fontWeight": "bold",
-                                            "color": "#69db7c" if r["roi"] > 0 else "#ff6b6b"}),
-                            html.Div(
-                                f"CI {r['roi_lo']*100:+.1f}% to {r['roi_hi']*100:+.1f}%"
-                                if not pd.isna(r["roi_lo"]) else "CI —",
-                                style={"fontSize": "10px", "color": "#888",
-                                       "fontStyle": "italic"},
-                            ),
-                        ])
-                        wr_cell = html.Div([
-                            html.Div(f"{r['win_rate']*100:.1f}%",
-                                     style={"fontWeight": "bold"}),
-                            html.Div(
-                                f"CI {r['win_rate_lo']*100:.0f}% – {r['win_rate_hi']*100:.0f}%",
-                                style={"fontSize": "10px", "color": "#888",
-                                       "fontStyle": "italic"},
-                            ),
-                        ])
-                        pl_cell = html.Div(
-                            f"{r['pl_pct']*100:+.2f}%",
-                            style={"color": "#69db7c" if r["pl_pct"] > 0 else "#ff6b6b",
-                                   "fontWeight": "bold"},
-                        )
-                    cf_table_rows.append(html.Tr([
-                        html.Td(r["strategy"], style={"fontWeight": "500"}),
-                        html.Td(int(r["n_bets"]), style={"textAlign": "center"}),
-                        html.Td(wr_cell, style={"textAlign": "center"}),
-                        html.Td(roi_cell, style={"textAlign": "center"}),
-                        html.Td(pl_cell, style={"textAlign": "center"}),
-                    ]))
-
-                cf_table = dbc.Table([
-                    html.Thead(html.Tr([
-                        html.Th("Strategy"),
-                        html.Th("Bets", style={"textAlign": "center"}),
-                        html.Th("Win Rate", style={"textAlign": "center"}),
-                        html.Th("ROI (per £ risked)", style={"textAlign": "center"}),
-                        html.Th("P/L (bankroll)", style={"textAlign": "center"}),
-                    ])),
-                    html.Tbody(cf_table_rows),
-                ], bordered=True, hover=True, color="dark",
-                   className="table-sm mb-2")
-
-                sections.append(html.Div([
-                    html.H5("Strategy Counterfactuals",
-                            className="text-light mt-4 mb-2"),
-                    html.P([
-                        "Same settled outcomes, three strategies. ",
-                        html.Strong("Row 1 vs Row 2"),
-                        " tells you whether Kelly sizing earned its variance. ",
-                        html.Strong("Row 2 vs Row 3"),
-                        " tells you whether the recommendation filter "
-                        "(n_agree, EV-after-vig, Kelly>0) actually picks winners. ",
-                        "Differences within overlapping CIs aren't meaningful yet."
-                    ], className="text-muted small mb-2"),
-                    cf_table,
-                ]))
 
             # ══════════════════════════════════════════════════════════════
             # NEW: Cumulative P/L Over Time
@@ -2365,6 +2926,16 @@ def _build_analytics(league: str) -> html.Div:
             ],
         ))
 
+        # Model agreement bins — sits beside the edge bins because they
+        # answer the same shape of question about different inputs.
+        sections.append(_make_agreement_breakdown(league))
+
+    # The same question asked of six seasons of walk-forward OOF predictions
+    # rather than a few dozen settled bets. Deliberately outside the
+    # `if settled` block above: it reads no live data, so it has something
+    # to say before a single bet has been placed.
+    sections.append(_make_historical_agreement(league))
+
     # ── Calibration Chart ──
     # Drops bins with n < 5 (those are pure noise — a single bet can swing
     # actual win rate from 0% to 100%) and renders a Wilson 95% CI as
@@ -2687,6 +3258,12 @@ def create_app() -> Dash:
             ], md=4, className="text-end pt-2"),
         ], className="py-3 border-bottom border-secondary mb-3"),
 
+        # ── Scheduled-job health strip ──
+        # Global, not league-scoped: one ingest and one settlement cover both
+        # leagues. Answers "did the job actually run?", which no Windows field
+        # does — see ADR 0006's counterexample.
+        html.Div(id="job-status-row"),
+
         # ── Cache freshness + API quota strip ──
         # Updated alongside stats-row whenever the league/scan/interval
         # callback fires. Read-only; never triggers network calls.
@@ -2735,7 +3312,8 @@ def create_app() -> Dash:
         [Output("tab-content", "children"),
          Output("stats-row", "children"),
          Output("status-text", "children"),
-         Output("odds-status-row", "children")],
+         Output("odds-status-row", "children"),
+         Output("job-status-row", "children")],
         [Input("content-tabs", "active_tab"),
          Input("league-selector", "active_tab"),
          Input("btn-scan", "n_clicks"),
@@ -2765,6 +3343,9 @@ def create_app() -> Dash:
         # Recompute the freshness/quota strip every callback so post-scan
         # refreshes pick up the newly written cache timestamp + quota delta.
         odds_status = _make_odds_status(league)
+        # Global, so it does not vary with `league` — but recomputed on the
+        # same tick so a scan or the 30-min interval refreshes it too.
+        job_status = _make_job_status()
 
         if active_tab == "tab-matches":
             # Path B: pass the show_all toggle through so the Match Centre
@@ -2780,7 +3361,7 @@ def create_app() -> Dash:
         else:
             content = html.P("Select a tab.", className="text-muted")
 
-        return content, stats, status, odds_status
+        return content, stats, status, odds_status, job_status
 
     # ── Reset bookmaker dropdown ──────────────────────────────────────────
     @app.callback(

@@ -264,6 +264,15 @@ def apply_portfolio_constraints(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Model agreement — read side
+# ─────────────────────────────────────────────────────────────────────────────
+
+# How many models each league's ensemble runs. The EFL has no LogReg (too few
+# matches to fit one), so three is its full complement, not a shortfall.
+ENSEMBLE_SIZE: dict[str, int] = {"PL": 4, "EFL": 3}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # decide_bet — the shared bet-evaluation core
 # ─────────────────────────────────────────────────────────────────────────────
 

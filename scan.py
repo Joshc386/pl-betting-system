@@ -27,6 +27,29 @@ from league_config import get_league_config
 logger = logging.getLogger(__name__)
 
 
+def _rec_per_model(rec) -> dict:
+    """The per-model breakdown stored on a recommendation, or ``{}``.
+
+    ``recommendations`` keeps ``per_model_json`` as a JSON string; the row
+    dicts this module hands to ``save_match_analysis`` want it as a mapping
+    under ``per_model_probs``. Returns an empty dict for a missing or
+    unparseable value so the caller stays a single expression — an empty dict
+    leaves ``save_match_analysis`` free to carry the previous value forward.
+    """
+    if rec is None:
+        return {}
+    raw = rec.get("per_model_json") if hasattr(rec, "get") else None
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # OddsPapi ↔ Odds-API format converters
 # ═════════════════════════════════════════════════════════════════════════════
@@ -649,6 +672,13 @@ def run_scan(league: str) -> str:
                         "edge_source": edge_source_lookup.get(
                             (home, away, "ou25", side)),
                         "n_books": best_ou.get("n_books"),
+                        # Carry the per-model breakdown from the matching
+                        # recommendation. Without it this rebuild writes
+                        # per_model_json = "{}" over the predictor's own row
+                        # (db.py carries it forward, but only if nothing
+                        # newer arrives first), and the Match Centre's REC
+                        # column loses the agreement count.
+                        "per_model_probs": _rec_per_model(rec),
                         "bookmaker_odds": _extract_bookmaker_odds(
                             match, "ou25", side),
                     })
@@ -695,6 +725,13 @@ def run_scan(league: str) -> str:
                             (home, away, "btts", side)),
                         "edge_pct": edge, "confidence": conf,
                         "n_books": best_btts.get("n_books"),
+                        # Carry the per-model breakdown from the matching
+                        # recommendation. Without it this rebuild writes
+                        # per_model_json = "{}" over the predictor's own row
+                        # (db.py carries it forward, but only if nothing
+                        # newer arrives first), and the Match Centre's REC
+                        # column loses the agreement count.
+                        "per_model_probs": _rec_per_model(rec),
                         "bookmaker_odds": _extract_bookmaker_odds(
                             match, "btts", side),
                     })
@@ -743,6 +780,13 @@ def run_scan(league: str) -> str:
                         "edge_source": edge_source_lookup.get(
                             (home, away, "ou15", side)),
                         "n_books": ou15.get("n_books"),
+                        # Carry the per-model breakdown from the matching
+                        # recommendation. Without it this rebuild writes
+                        # per_model_json = "{}" over the predictor's own row
+                        # (db.py carries it forward, but only if nothing
+                        # newer arrives first), and the Match Centre's REC
+                        # column loses the agreement count.
+                        "per_model_probs": _rec_per_model(rec),
                         "bookmaker_odds": _extract_bookmaker_odds(
                             match, "ou15", side),
                     })
@@ -782,6 +826,12 @@ def run_scan(league: str) -> str:
                                   if fair_p and fair_p > 0 else None),
                     "edge_pct": edge, "confidence": conf,
                     "n_books": rec.get("n_books"),
+                    # Same reason as the three market blocks above. This is
+                    # the path EFL's O/U 3.5 rows take — the alt lines that
+                    # carry the board's largest edges — so without it exactly
+                    # the least-corroborated rows show AGREE as "—" rather
+                    # than the 1/3 that says only Dixon-Coles backed them.
+                    "per_model_probs": _rec_per_model(rec),
                     "bookmaker_odds": {},
                 })
 
@@ -810,6 +860,13 @@ def run_scan(league: str) -> str:
                         "edge_pct": ea_row.get("edge_pct"),
                         "confidence": ea_row.get("confidence"),
                         "n_books": ea_row.get("n_books"),
+                        # This row is being re-derived from the stored
+                        # match_analysis row, so its breakdown is already
+                        # right there — carry it rather than writing "{}"
+                        # over it. `_rec_per_model` takes anything with a
+                        # .get, and maps a NaN cell to {} like any other
+                        # unparseable value.
+                        "per_model_probs": _rec_per_model(ea_row),
                         "bookmaker_odds": {},
                     })
 

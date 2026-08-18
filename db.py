@@ -269,7 +269,27 @@ def save_match_analysis(rows: list[dict], league: str = "PL") -> int:
             model_p = r.get("model_prob")
             edge = r.get("edge_pct")
             conf = r.get("confidence")
-            per_model = r.get("per_model_probs", {})
+            per_model = r.get("per_model_probs") or {}
+
+            # Carry the per-model breakdown forward on its own terms, not as a
+            # side effect of the model_prob rescue below. Two paths write here:
+            # the predictor's own _match_analysis (scan.py:510) supplies
+            # per_model_probs for every evaluated line, while the rows scan.py
+            # rebuilds (scan.py:817) supply model_prob but no breakdown. Since
+            # this function deletes and re-inserts per fixture, the rebuild used
+            # to overwrite the predictor's rows with per_model_json = "{}" —
+            # and the `if model_p is None` guard never fired to stop it,
+            # because the rebuild always has a model_prob. That is why the
+            # Match Centre's AGREE column read "—" on every row.
+            if not per_model:
+                _key = (r["home_team"], r["away_team"], r["market"], r["side"])
+                _prev = existing.get(_key)
+                if _prev:
+                    try:
+                        per_model = json.loads(
+                            _prev.get("per_model_json") or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        per_model = {}
 
             # If this row has no model_prob, carry forward from existing data
             if model_p is None:
@@ -293,12 +313,21 @@ def save_match_analysis(rows: list[dict], league: str = "PL") -> int:
                     else:
                         edge = prev["edge_pct"]
                         conf = prev["confidence"]
-                    try:
-                        per_model = json.loads(
-                            prev.get("per_model_json", "{}")
-                        )
-                    except (json.JSONDecodeError, TypeError):
-                        pass
+                    # Only when this row still has nothing. The block above
+                    # already carried the breakdown forward on its own terms;
+                    # overwriting unconditionally here would discard a good
+                    # breakdown the row supplied whenever the stored value was
+                    # "{}" — the same erasure the carry-forward exists to stop,
+                    # arriving from the other direction. Note `or "{}"`, not
+                    # `.get(k, "{}")`: the key exists with a NULL value on rows
+                    # written before per_model_json was populated.
+                    if not per_model:
+                        try:
+                            per_model = json.loads(
+                                prev.get("per_model_json") or "{}"
+                            )
+                        except (json.JSONDecodeError, TypeError):
+                            pass
 
             conn.execute(
                 """INSERT INTO match_analysis
