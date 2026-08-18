@@ -108,6 +108,102 @@ def _season_code(season_idx: int) -> str:
     return f"{start:02d}{end:02d}"
 
 
+class ColumnCoverageError(RuntimeError):
+    """A newly added season lost columns the existing ones populate."""
+
+
+# Filled by `scripts/betfair_monthly_update.py`, not by the season CSV, and on
+# a monthly cadence. A season added mid-cycle legitimately has them empty, so
+# judging them would fail every rollover and train the operator to switch the
+# check off. Named explicitly rather than pattern-matched: the point is that
+# each entry has a known other owner, not that "odds columns are exempt".
+_LAGGING_COLUMNS: tuple[str, ...] = (
+    "Odds_Over_1.5", "Odds_Under_1.5", "Odds_Source_1.5",
+    "Odds_Over_2.5", "Odds_Under_2.5", "Odds_Source_2.5",
+)
+
+
+def coverage_regressions(
+    df: pd.DataFrame,
+    season_idx: int,
+    *,
+    reference_seasons: int = 3,
+    populated: float = 0.8,
+    floor: float = 0.2,
+    exclude: tuple[str, ...] = _LAGGING_COLUMNS,
+) -> list[tuple[str, float, float]]:
+    """Columns the reference seasons populate that *season_idx* does not.
+
+    `_map_columns` reads every match stat and odds column with `df.get(...)`,
+    which returns None when the upstream feed renames or drops one. That
+    becomes an all-NaN column, the build succeeds, and the models absorb the
+    nulls into confident-looking probabilities — the same "failure that looks
+    like success" the Freshness Gate exists to catch, one layer earlier. The
+    hard-indexed columns (Date, teams, goals, FTR) already raise KeyError, so
+    this covers the silent half.
+
+    Compares rates rather than naming columns, so it needs no hardcoded copy
+    of football-data.co.uk's schema to drift out of date.
+
+    Args:
+        df: The whole canonical, including the new season.
+        season_idx: The season being added.
+        reference_seasons: How many prior seasons to compare against.
+        populated: A column must be at least this filled in the reference to
+            be judged at all — enrichment (xG, injuries) is legitimately
+            sparse and must not be flagged.
+        floor: Below this fill rate in the new season, report it.
+
+    Returns:
+        (column, new_rate, reference_rate) per regression, worst first. Empty
+        when there is no prior season to compare against.
+    """
+    seasons = sorted(s for s in df["SeasonIndex"].dropna().unique()
+                     if s < season_idx)
+    if not seasons:
+        return []
+    ref = df[df["SeasonIndex"].isin(seasons[-reference_seasons:])]
+    new = df[df["SeasonIndex"] == season_idx]
+    if new.empty or ref.empty:
+        return []
+
+    out: list[tuple[str, float, float]] = []
+    for col in df.columns:
+        if col == "SeasonIndex" or col in exclude:
+            continue
+        ref_rate = float(ref[col].notna().mean())
+        if ref_rate < populated:
+            continue
+        new_rate = float(new[col].notna().mean())
+        if new_rate < floor:
+            out.append((col, new_rate, ref_rate))
+    return sorted(out, key=lambda r: r[1])
+
+
+def assert_column_coverage(df: pd.DataFrame, season_idx: int, **kwargs) -> None:
+    """Raise unless a newly added season matches the shape of its predecessors.
+
+    Mirrors `assert_known_teams` (ADR 0008) and `assert_fresh` (ADR 0005):
+    one function asks, one insists.
+
+    Raises:
+        ColumnCoverageError: naming every regressed column and both rates.
+    """
+    bad = coverage_regressions(df, season_idx, **kwargs)
+    if not bad:
+        return
+    named = "; ".join(
+        f"{col} {new:.0%} filled vs {ref:.0%} in prior seasons"
+        for col, new, ref in bad
+    )
+    raise ColumnCoverageError(
+        f"Season {season_idx} lost {len(bad)} column(s) the prior seasons "
+        f"populate: {named}. The upstream feed most likely renamed them; "
+        f"check the raw CSV's header before rebuilding, because these land "
+        f"as silent nulls that training will not reject."
+    )
+
+
 def _serves_division(df: pd.DataFrame, div: str) -> bool:
     """True when every row of *df* belongs to the division that was asked for.
 
@@ -1204,6 +1300,14 @@ def build(
         print(f"  O/U {line}: betfair {int(src.get('betfair', 0))}, "
               f"b365 {int(src.get('b365', 0))}, "
               f"none {int(df[f'Odds_Source_{line}'].isna().sum())}")
+
+    # Step 9: the newest season must arrive in the same shape as the ones it
+    # joins. Checked before the write, so a feed that renamed a column leaves
+    # the canonical untouched rather than half-null.
+    newest = int(df["SeasonIndex"].max())
+    print(f"Checking column coverage for season {newest}...")
+    assert_column_coverage(df, newest)
+    print("  coverage matches prior seasons")
 
     # Save
     df.to_csv(s["output_path"], index=False)

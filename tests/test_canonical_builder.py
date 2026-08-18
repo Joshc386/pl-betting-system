@@ -16,6 +16,9 @@ import pandas as pd
 import pytest
 
 from data.build_canonical_dataset import (
+    ColumnCoverageError,
+    assert_column_coverage,
+    coverage_regressions,
     _LEAGUES,
     _backfill_canonical_values,
     _preserve_canonical_only_rows,
@@ -890,3 +893,113 @@ def test_stray_non_utf8_byte_does_not_lose_the_season(monkeypatch, tmp_path):
     cached = mod.download_season(4, "E0", str(tmp_path), use_cache=True)
     assert cached is not None
     assert len(cached) == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Column coverage on season addition
+#
+# `_map_columns` reads match stats with `df.get(...)`, so an upstream rename
+# yields an all-NaN column and the build still succeeds. These tests pin the
+# check that catches it before the rows reach training.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _seasons(spec: dict[int, dict[str, list]]) -> pd.DataFrame:
+    """Build a frame of {season_idx: {column: values}}."""
+    frames = []
+    for idx, cols in spec.items():
+        f = pd.DataFrame(cols)
+        f["SeasonIndex"] = idx
+        frames.append(f)
+    return pd.concat(frames, ignore_index=True)
+
+
+def test_column_that_arrives_empty_is_flagged():
+    """The rename case: populated for years, all-NaN in the new season."""
+    df = _seasons({
+        24: {"Home_Shots": [12.0, 9.0, 14.0, 11.0]},
+        25: {"Home_Shots": [10.0, 13.0, 8.0, 15.0]},
+        26: {"Home_Shots": [None, None, None, None]},
+    })
+
+    flagged = coverage_regressions(df, season_idx=26)
+
+    assert [c for c, _, _ in flagged] == ["Home_Shots"]
+
+
+def test_legitimately_sparse_enrichment_is_not_flagged():
+    """xG and injury columns only exist for seasons upstream covers.
+
+    Flagging those would block every season addition, and the check would be
+    turned off — which is worse than not having it.
+    """
+    df = _seasons({
+        24: {"home_xg": [None, None, 1.2, None]},
+        25: {"home_xg": [None, None, None, 0.9]},
+        26: {"home_xg": [None, None, None, None]},
+    })
+
+    assert coverage_regressions(df, season_idx=26) == []
+
+
+def test_a_complete_new_season_passes():
+    df = _seasons({
+        25: {"Home_Shots": [12.0, 9.0, 14.0, 11.0]},
+        26: {"Home_Shots": [10.0, 13.0, 8.0, 15.0]},
+    })
+
+    assert coverage_regressions(df, season_idx=26) == []
+
+
+def test_the_first_season_has_nothing_to_compare_against():
+    df = _seasons({0: {"Home_Shots": [None, None]}})
+
+    assert coverage_regressions(df, season_idx=0) == []
+
+
+def test_only_prior_seasons_form_the_reference():
+    """A later season must not vouch for an earlier one's missing column."""
+    df = _seasons({
+        25: {"Home_Shots": [None, None, None, None]},
+        26: {"Home_Shots": [10.0, 13.0, 8.0, 15.0]},
+    })
+
+    assert coverage_regressions(df, season_idx=25) == []
+
+
+def test_assert_names_every_regressed_column_and_both_rates():
+    """With no bypass flag, the message is the only route to action."""
+    df = _seasons({
+        25: {"Home_Shots": [12.0, 9.0], "Home_Corners": [4.0, 6.0]},
+        26: {"Home_Shots": [None, None], "Home_Corners": [None, None]},
+    })
+
+    with pytest.raises(ColumnCoverageError) as exc:
+        assert_column_coverage(df, season_idx=26)
+
+    assert "Home_Shots" in str(exc.value)
+    assert "Home_Corners" in str(exc.value)
+    assert "0%" in str(exc.value)
+
+
+def test_assert_is_silent_when_the_season_is_well_formed():
+    df = _seasons({
+        25: {"Home_Shots": [12.0, 9.0]},
+        26: {"Home_Shots": [10.0, 13.0]},
+    })
+
+    assert_column_coverage(df, season_idx=26)
+
+
+def test_betfair_populated_columns_are_not_judged():
+    """They are filled monthly by a separate job, not by the season CSV.
+
+    Judging them would fail every rollover added mid-cycle, and a check that
+    cries wolf at every rollover is a check that gets switched off.
+    """
+    df = _seasons({
+        25: {"Odds_Over_1.5": [1.2, 1.3], "Home_Shots": [12.0, 9.0]},
+        26: {"Odds_Over_1.5": [None, None], "Home_Shots": [10.0, 13.0]},
+    })
+
+    assert coverage_regressions(df, season_idx=26) == []
