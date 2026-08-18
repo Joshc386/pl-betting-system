@@ -224,7 +224,23 @@ class TestBoundariesAreWired:
         import scan
         import scheduler
 
-        retrain = inspect.getsource(scheduler.job_weekly_retrain)
+        # The scheduled entry point is a thin wrapper that holds the sleep
+        # request open (keep_system_awake, added after Modern Standby killed a
+        # retrain mid-run); the retrain body — and so the gate — moved into
+        # _weekly_retrain. Both halves are asserted because either alone is
+        # blind: reading the wrapper misses the gate entirely, and reading the
+        # body would still pass if the wrapper stopped calling it.
+        # Matched line-wise, not as a substring: "_weekly_retrain()" also
+        # occurs inside "def job_weekly_retrain()", so a plain `in` check
+        # passes even when the wrapper's body is empty.
+        entry = inspect.getsource(scheduler.job_weekly_retrain)
+        assert any(line.strip() == "_weekly_retrain()"
+                   for line in entry.splitlines()), (
+            "job_weekly_retrain no longer runs _weekly_retrain, so the gate "
+            "asserted below is unreachable from the scheduled job"
+        )
+
+        retrain = inspect.getsource(scheduler._weekly_retrain)
         assert 'assert_fresh("PL")' in retrain
         assert 'assert_fresh("EFL")' in retrain
 

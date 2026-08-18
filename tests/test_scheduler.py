@@ -467,3 +467,65 @@ class TestRunNow:
         for key in valid_keys:
             # We'd need to mock the actual functions to run them
             pass
+
+
+# ── Power request around the weekly retrain (ADR 0006 counterexample #2) ──
+# The 2026-08-17 retrain died 18 minutes in because Modern Standby entered on
+# "Reason: Idle Timeout" underneath it, and Task Scheduler still logged the run
+# as successfully completed. These cover the guard that defers that timeout.
+
+class TestKeepSystemAwake:
+    """The sleep hold must never outlive the job it protects."""
+
+    def test_the_hold_is_released_when_the_job_raises(self, monkeypatch):
+        """A failing retrain must not leak a power request.
+
+        A leaked ES_CONTINUOUS keeps the machine awake indefinitely — a far
+        worse failure than the sleep it prevents, and one nobody would
+        connect back to a retrain that errored days earlier.
+        """
+        import scheduler
+
+        calls = []
+
+        class _FakeKernel32:
+            def SetThreadExecutionState(self, flags):
+                calls.append(flags)
+                return 1
+
+        monkeypatch.setattr(scheduler.sys, "platform", "win32")
+        monkeypatch.setattr(
+            scheduler, "keep_system_awake", scheduler.keep_system_awake)
+        import ctypes
+        monkeypatch.setattr(ctypes, "windll",
+                            type("W", (), {"kernel32": _FakeKernel32()})())
+
+        with pytest.raises(RuntimeError, match="retrain blew up"):
+            with scheduler.keep_system_awake("test"):
+                raise RuntimeError("retrain blew up")
+
+        assert calls[-1] == scheduler._ES_CONTINUOUS, (
+            "the hold was not released — ES_CONTINUOUS alone is the release")
+
+    def test_a_refused_power_request_does_not_block_the_job(self, monkeypatch):
+        """Failing to hold the request must not stop the retrain running.
+
+        Not being able to defer sleep is a reason to warn, not a reason to
+        skip a retrain the models depend on.
+        """
+        import scheduler
+
+        class _RefusingKernel32:
+            def SetThreadExecutionState(self, flags):
+                return 0  # documented failure return
+
+        monkeypatch.setattr(scheduler.sys, "platform", "win32")
+        import ctypes
+        monkeypatch.setattr(ctypes, "windll",
+                            type("W", (), {"kernel32": _RefusingKernel32()})())
+
+        ran = False
+        with scheduler.keep_system_awake("test") as held:
+            ran = True
+        assert ran, "the job was skipped because the power request failed"
+        assert held is False
