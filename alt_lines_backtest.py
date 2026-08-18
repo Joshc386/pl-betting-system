@@ -295,19 +295,36 @@ def backtest_alt_lines_season(
 
 
 def run_full_backtest(config: dict | None = None,
-                      verbose: bool = True) -> tuple[pd.DataFrame, list[dict]]:
+                      verbose: bool = True,
+                      data: dict | None = None,
+                      ) -> tuple[pd.DataFrame, list[dict]]:
     """Run walk-forward backtest across all available seasons.
+
+    Args:
+        data: pre-loaded ``run_pipeline()`` result, so a process running
+            several PL backtests pays the pipeline load once. Omit and it
+            loads its own — the previous behaviour exactly.
+
+    There is deliberately no ``dc_kwargs`` argument here, unlike the O/U and
+    BTTS runners. This function tunes Dixon-Coles on ``merged_df`` — the
+    frame *after* the Betfair goal-odds merge, which keeps only matches that
+    have odds — not on ``full_df``. Its tuned parameters therefore come from
+    a different row set, and accepting a shared value would silently change
+    what this backtest reports.
 
     Returns:
         Tuple of (all_bets_df, season_metrics_list).
     """
     config = config or ALT_LINES_CONFIG.copy()
 
-    if verbose:
-        print("Loading pipeline data + Betfair goal odds...")
+    if data is None:
+        if verbose:
+            print("Loading pipeline data + Betfair goal odds...")
+        data = run_pipeline(verbose=False)
 
-    data = run_pipeline(verbose=False)
-    full_df = data["full_df"]
+    # Copied because the DateOnly assignment below mutates in place; with an
+    # injected frame that would write a column into the caller's shared data.
+    full_df = data["full_df"].copy()
     features = [f for f in ALL_FEATURES if f in full_df.columns]
 
     # Add DateOnly for merge

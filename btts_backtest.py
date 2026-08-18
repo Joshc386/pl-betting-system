@@ -435,11 +435,23 @@ def btts_backtest_season(train_df, test_df, features, config=None, dc_kwargs=Non
 # Walk-forward BTTS backtest
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def run_btts_backtest(config=None, start_season=19, end_season=25, verbose=True):
+def run_btts_backtest(config=None, start_season=19, end_season=25, verbose=True,
+                      data=None, dc_kwargs=None):
     """Walk-forward BTTS backtest across multiple seasons.
 
     BTTS odds are only available from S15+, but we backtest S19-S25
     (matching Over/Under range) for fair comparison.
+
+    Args:
+        data: pre-loaded ``run_pipeline()`` result; omit and it loads its own.
+        dc_kwargs: pre-tuned Dixon-Coles kwargs; omit and it tunes its own.
+            Shareable with ``backtest.run_backtest`` because both tune on
+            ``full_df[SeasonIndex >= 14]`` and ``merge_btts_odds`` is a left
+            join — it adds BTTSY/BTTSN columns without touching the row set,
+            so the frame the tuner sees is the same one.
+
+    Both arguments are a performance choice only: the defaults reproduce the
+    previous behaviour exactly.
     """
     if config is None:
         config = BTTS_DEFAULT_CONFIG.copy()
@@ -447,7 +459,8 @@ def run_btts_backtest(config=None, start_season=19, end_season=25, verbose=True)
     bw = config.get("blend_weight", 0.35)
 
     # Load pipeline data — use BTTS-specific feature set
-    data = run_pipeline(verbose=verbose)
+    if data is None:
+        data = run_pipeline(verbose=verbose)
     full_df = data["full_df"]
     features = [f for f in BTTS_ALL_FEATURES if f in full_df.columns]
     if verbose:
@@ -458,10 +471,11 @@ def run_btts_backtest(config=None, start_season=19, end_season=25, verbose=True)
     full_df = merge_btts_odds(full_df, btts_odds)
 
     # Tune Dixon-Coles params
-    if verbose:
-        print("Tuning Dixon-Coles hyperparameters...")
-    tune_df = full_df[full_df["SeasonIndex"] >= 14].copy()
-    dc_kwargs = tune_dc_params(tune_df)
+    if dc_kwargs is None:
+        if verbose:
+            print("Tuning Dixon-Coles hyperparameters...")
+        tune_df = full_df[full_df["SeasonIndex"] >= 14].copy()
+        dc_kwargs = tune_dc_params(tune_df)
 
     all_bets = []
     all_metrics = []

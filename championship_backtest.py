@@ -727,7 +727,9 @@ def backtest_season(train_df: pd.DataFrame, test_df: pd.DataFrame,
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def run_backtest(config: dict | None = None, start_season: int = 4,
-                 end_season: int = 24, verbose: bool = True
+                 end_season: int = 24, verbose: bool = True,
+                 data: dict | None = None,
+                 dc_kwargs: dict | None = None,
                  ) -> tuple[pd.DataFrame | None, list[dict], float]:
     """Walk-forward backtest across Championship seasons.
 
@@ -739,6 +741,16 @@ def run_backtest(config: dict | None = None, start_season: int = 4,
         start_season: first test season (4 = 2004/05).
         end_season: last test season (24 = 2024/25).
         verbose: print per-season results.
+        data: pre-loaded ``championship_pipeline.run_pipeline()`` result.
+            Omit and it loads its own.
+        dc_kwargs: pre-tuned Dixon-Coles kwargs from
+            ``tune_dc_params_champ``. Omit and it tunes its own.
+
+    Neither may be shared with the PL runners: this league has its own
+    pipeline and its own tuner (``tune_dc_params_champ``, on the whole
+    frame rather than ``SeasonIndex >= 14``). They exist so one process can
+    run several *Championship* backtests without repeating the work.
+    Defaults reproduce the previous behaviour exactly.
 
     Returns:
         Tuple of (all_bets_df, season_metrics, final_bankroll).
@@ -746,15 +758,17 @@ def run_backtest(config: dict | None = None, start_season: int = 4,
     if config is None:
         config = DEFAULT_CONFIG.copy()
 
-    if verbose:
-        print("Loading Championship pipeline data...")
-    data = run_pipeline(verbose=False)
+    if data is None:
+        if verbose:
+            print("Loading Championship pipeline data...")
+        data = run_pipeline(verbose=False)
     full_df = data["full_df"]
     features = list(data["features"])
 
-    if verbose:
-        print("Tuning Dixon-Coles hyperparameters...")
-    dc_kwargs = tune_dc_params_champ(full_df)
+    if dc_kwargs is None:
+        if verbose:
+            print("Tuning Dixon-Coles hyperparameters...")
+        dc_kwargs = tune_dc_params_champ(full_df)
 
     bw = config.get("blend_weight", 0.35)
     if verbose:
