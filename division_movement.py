@@ -85,6 +85,42 @@ def arrivals(
     return {t: arrival_route(pl_df, t, season) for t in current - previous}
 
 
+def arrivals_for(
+    ef_df: pd.DataFrame,
+    pl_df: pd.DataFrame,
+    season: int,
+    *,
+    fixture_teams: set[str] | None = None,
+) -> dict[str, str]:
+    """Arrivals for a season that may not be fully in the canonical yet.
+
+    :func:`arrivals` compares two seasons the canonical holds. A live caller
+    needs the same answer during two windows it does not cover: before the
+    season's first results land, when the canonical knows nothing about it,
+    and during its opening rounds, when it knows only the sides that happen
+    to have played. The fixture list closes both gaps — it names every side
+    in the division from the day prices appear.
+
+    Args:
+        ef_df: The EFL frame.
+        pl_df: The PL frame, which separates a side dropping in from one
+            coming up.
+        season: The season being seeded — see :func:`season_in_play`.
+        fixture_teams: Sides in this season's fixture list, if known.
+
+    Returns:
+        Team name -> ``RELEGATED`` or ``PROMOTED``, empty when the prior
+        season is absent. Arrival stays what CONTEXT.md defines it to be —
+        present in season N, absent in N-1 — never "has no rows yet", which
+        is a statement about the calendar rather than about the side.
+    """
+    previous = _season_teams(ef_df, season - 1)
+    if not previous:
+        return {}
+    current = _season_teams(ef_df, season) | (fixture_teams or set())
+    return {t: arrival_route(pl_df, t, season) for t in current - previous}
+
+
 def fit_seed_params(
     ef_df: pd.DataFrame,
     pl_df: pd.DataFrame,
@@ -213,6 +249,35 @@ def seed_features(
     route = arrival_route(pl_df, team, season)
     cohort = _cohort_teams(ef_df, season - 1, route)
     return _cohort(ef_df, season - 1, cohort, features)
+
+
+def season_in_play(df: pd.DataFrame) -> int:
+    """The season currently being played, whether or not it has rows yet.
+
+    Judged on match count, not dates. A season already under way is short of
+    a full one; a completed season is not. Dates were the obvious alternative
+    and are the wrong tool for the same reason
+    [ADR 0005](docs/adr/0005-freshness-gate.md) rejected them — an
+    international break and a dead ingestion look identical to a
+    "most recent match was N days ago" test.
+
+    Args:
+        df: A league's Canonical Dataset.
+
+    Returns:
+        The latest season when it is still in progress, otherwise the one
+        after it — the pre-season window, where the canonical holds no rows
+        for the season whose fixtures are already being priced.
+    """
+    counts = df.groupby("SeasonIndex").size()
+    latest = int(counts.index.max())
+    prior = counts[counts.index < latest]
+    if prior.empty:
+        return latest
+    # 0.9 admits a season that lost a handful of rows upstream while still
+    # separating "under way" from "complete" by a wide margin: one round is
+    # ~2% of a season, and the gap only narrows in its final fortnight.
+    return latest if counts[latest] < prior.median() * 0.9 else latest + 1
 
 
 def _season_teams(df: pd.DataFrame, season: int) -> set[str]:

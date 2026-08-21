@@ -30,7 +30,9 @@ from division_movement import (
     RELEGATED,
     SeedParams,
     arrivals,
+    arrivals_for,
     fit_seed_params,
+    season_in_play,
     seed_features,
 )
 
@@ -380,8 +382,14 @@ def test_both_callers_get_the_same_seed():
     predictor._pl_df = pl
     predictor._seed_params_cache = params
 
+    # Season 2 is the arrivals season, and the same number the training call
+    # below is given — the seed is drawn for a season, so both callers must
+    # name the same one. It used to be derived inside the predictor as
+    # ``latest + 1``, which silently became the wrong season once the season
+    # being played had rows of its own.
     live = predictor._synthesize_promoted_fixture(
         "NEWCO", "T01", latest,
+        season=2,
         home_missing=True, away_missing=False,
         home_rows=latest[latest["Home_Team"] == "NEWCO"],
         away_rows=latest[latest["Away_Team"] == "T01"],
@@ -506,3 +514,217 @@ def test_the_predictor_seeds_dixon_coles_from_the_fixture_list():
         assert dc.attack_home["DROPPER"] == 1.16, f"{market} kept a stale rating"
         assert dc.attack_home["NEWCO"] == 1.00, f"{market} not seeded"
         assert "T01" not in dc.attack_home, f"{market} seeded a continuing side"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Which season is being played
+#
+# Both predictor paths assumed the canonical's latest season was the completed
+# PRIOR season. True all off-season, false from matchday 1 — and on 2026-08-21,
+# when EFL season 26 landed with one round played, that assumption seeded six
+# established sides as arrivals and left the six real arrivals unseeded.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _season_of_size(season: int, matches: int, teams: int = 24) -> list[dict]:
+    """Rows for one season, `matches` long, drawn from a fixed team set."""
+    return [{
+        "SeasonIndex": season,
+        "Date": f"20{20 + season:02d}-01-{(i % 28) + 1:02d}",
+        "Home_Team": f"T{(i % teams) + 1:02d}",
+        "Away_Team": f"T{((i + 1) % teams) + 1:02d}",
+        "Home_LeaguePosition": (i % teams) + 1,
+        "Away_LeaguePosition": ((i + 1) % teams) + 1,
+    } for i in range(matches)]
+
+
+def test_season_in_play_is_the_partial_season_already_present():
+    """One round played is still that season — not the next one.
+
+    The regression: `latest + 1` reads a season that has begun as the season
+    *after* it, so every side in it looks like it has no history yet.
+    """
+    df = pd.DataFrame(
+        _season_of_size(24, 552) + _season_of_size(25, 552)
+        + _season_of_size(26, 12)
+    )
+
+    assert season_in_play(df) == 26
+
+
+def test_season_in_play_is_the_next_one_when_the_latest_is_complete():
+    """The pre-season window: fixtures are being priced for a season the
+    canonical holds no rows for, because none have been played."""
+    df = pd.DataFrame(_season_of_size(24, 552) + _season_of_size(25, 552))
+
+    assert season_in_play(df) == 26
+
+
+def _two_season_frame() -> pd.DataFrame:
+    """Season 25 complete with T01-T24; season 26 one round in, with six of
+    those replaced by arrivals — the 2026/27 shape."""
+    prior = _season_of_size(25, 552)
+    staying = [f"T{i:02d}" for i in range(1, 19)]
+    incoming = ["NEW1", "NEW2", "NEW3", "NEW4", "NEW5", "NEW6"]
+    current = [f"T{i:02d}" for i in range(1, 19)] + incoming
+    rows = [{
+        "SeasonIndex": 26,
+        "Date": f"2026-08-{14 + (i // 12):02d}",
+        "Home_Team": current[i],
+        "Away_Team": current[(i + 12) % 24],
+        "Home_LeaguePosition": i + 1,
+        "Away_LeaguePosition": ((i + 12) % 24) + 1,
+    } for i in range(12)]
+    assert set(staying) <= set(current)
+    return pd.DataFrame(prior + rows)
+
+
+def test_arrivals_found_once_the_season_has_begun():
+    """The regression that disabled the seed.
+
+    `_seed_dixon_coles` derived arrivals as ``fixtures - teams(latest
+    season)``. Once round 1 lands, the latest season *is* the current one and
+    contains every side, so the difference is empty and the real arrivals go
+    unseeded — carrying their exit-season Dixon-Coles ratings into live
+    pricing, which is the defect ADR 0011 exists to remove.
+    """
+    df = _two_season_frame()
+    pl = pd.DataFrame(_season_of_size(25, 380, teams=20))
+
+    found = arrivals_for(df, pl, season_in_play(df))
+
+    assert set(found) == {"NEW1", "NEW2", "NEW3", "NEW4", "NEW5", "NEW6"}
+
+
+def test_arrivals_found_before_the_season_has_begun():
+    """The pre-season window, which is when a returning side is most
+    dangerous: Dixon-Coles still carries its exit-season rating and the
+    canonical holds nothing to correct it with. Only the fixture list knows
+    who is in the division."""
+    # Two complete seasons: one to be the prior, one to measure a full
+    # season against. A single-season frame cannot say whether that season
+    # is finished, and the real canonical never is one.
+    df = pd.DataFrame(_season_of_size(24, 552) + _season_of_size(25, 552))
+    pl = pd.DataFrame(_season_of_size(25, 380, teams=20))
+    fixtures = {f"T{i:02d}" for i in range(1, 19)} | {
+        "NEW1", "NEW2", "NEW3", "NEW4", "NEW5", "NEW6"}
+
+    found = arrivals_for(df, pl, season_in_play(df), fixture_teams=fixtures)
+
+    assert set(found) == {"NEW1", "NEW2", "NEW3", "NEW4", "NEW5", "NEW6"}
+
+
+def test_an_established_side_is_never_an_arrival():
+    """Sides that were here last season are not arrivals, at either window."""
+    df = _two_season_frame()
+    pl = pd.DataFrame(_season_of_size(25, 380, teams=20))
+
+    found = arrivals_for(df, pl, season_in_play(df),
+                         fixture_teams={f"T{i:02d}" for i in range(1, 19)})
+
+    assert not any(t.startswith("T") for t in found)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Building the live feature row
+#
+# The predictor scoped its row search to the latest season alone. Once that
+# season is the one being played, a side that has not yet played at a given
+# venue has no row there — which the old code read as "new to the division"
+# and answered with an arrival seed. Six of twelve fixtures on 2026-08-22 were
+# built that way, every one of them between established sides.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _predictor(full_df: pd.DataFrame, pl_df: pd.DataFrame):
+    """A predictor with just the state the row builder reads.
+
+    Built with __new__ deliberately: the real constructor loads models and
+    trains, none of which this behaviour depends on, and a test that needed
+    them would be pinning the constructor rather than the row.
+    """
+    from championship_predict import ChampionshipPredictor
+
+    p = ChampionshipPredictor.__new__(ChampionshipPredictor)
+    p._full_df = full_df
+    p._pl_df = pl_df
+    p._seed_params_cache = SeedParams(priors={}, n_events=0)
+    p.verbose = False
+    return p
+
+
+def _venue_split_frame() -> pd.DataFrame:
+    """Season 25 complete; season 26 one round, in which T01 played away only.
+
+    T01's season-25 home rows carry a value nothing else does, so a row built
+    from its real history is impossible to confuse with a seeded one.
+    """
+    rows = []
+    for i in range(1, 25):
+        for match in range(2):
+            rows.append({
+                "SeasonIndex": 25,
+                "Date": f"2025-1{match}-{i:02d}",
+                "Home_Team": f"T{i:02d}",
+                "Away_Team": f"T{(i % 24) + 1:02d}",
+                "Home_LeaguePosition": i,
+                "Away_LeaguePosition": (i % 24) + 1,
+                "Home_Past5Goals": 7.0 if i == 1 else 1.0,
+                "Away_Past5Goals": 1.0,
+                "Home_Promoted": 0,
+                "Away_Promoted": 0,
+            })
+    # Round 1 of season 26: T01 away at T13, so it has no season-26 home row.
+    for i in range(12):
+        rows.append({
+            "SeasonIndex": 26,
+            "Date": "2026-08-15",
+            "Home_Team": f"T{i + 13:02d}",
+            "Away_Team": f"T{i + 1:02d}",
+            "Home_LeaguePosition": i + 13,
+            "Away_LeaguePosition": i + 1,
+            "Home_Past5Goals": 1.0,
+            "Away_Past5Goals": 1.0,
+            "Home_Promoted": 0,
+            "Away_Promoted": 0,
+        })
+    return pd.DataFrame(rows)
+
+
+def test_established_side_without_a_home_row_is_not_treated_as_an_arrival():
+    """T01 has played only away this season. It is not new to the division —
+    it has a full prior season here — so its own history must build the row."""
+    df = _venue_split_frame()
+    predictor = _predictor(df, pd.DataFrame(_season_of_size(25, 380, teams=20)))
+
+    row = predictor._fixture_feature_row("T01", "T02", df, season=26, arrivals={})
+
+    assert row is not None
+    assert row["Home_Past5Goals"] == 7.0     # its own history, not a cohort
+    assert row["Home_Promoted"] == 0         # never flagged as an arrival
+
+
+def test_a_genuine_arrival_is_still_seeded():
+    """The seed must survive the fix — an arrival has no history here at all,
+    which is precisely what the Division Movement Seed is for."""
+    df = _venue_split_frame()
+    predictor = _predictor(df, pd.DataFrame(_season_of_size(25, 380, teams=20)))
+
+    row = predictor._fixture_feature_row(
+        "NEWCO", "T02", df, season=26, arrivals={"NEWCO": PROMOTED})
+
+    assert row is not None
+    assert row["Home_Team"] == "NEWCO"
+    assert row["Home_Promoted"] == 1
+    # Seeded from the cohort, never from the value that marks real history.
+    assert row["Home_Past5Goals"] != 7.0
+
+
+def test_a_side_with_no_history_and_no_arrival_is_skipped():
+    """Neither an arrival nor known here: there is nothing honest to build a
+    row from, and inventing one would price a bet on a guess."""
+    df = _venue_split_frame()
+    predictor = _predictor(df, pd.DataFrame(_season_of_size(25, 380, teams=20)))
+
+    assert predictor._fixture_feature_row(
+        "GHOST", "T02", df, season=26, arrivals={}) is None

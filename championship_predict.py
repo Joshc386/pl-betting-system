@@ -72,8 +72,9 @@ from api.oddspapi import (
 from api.team_resolver import resolve_feed_team
 from division_movement import (
     SeedParams,
-    arrival_route,
+    arrivals_for,
     fit_seed_params,
+    season_in_play,
     seed_features,
 )
 import api.odds_api as odds_api_module
@@ -970,12 +971,80 @@ class ChampionshipPredictor:
             early_season=getattr(self, "_is_early_season", False),
         )
 
+    def _fixture_feature_row(
+        self,
+        home: str,
+        away: str,
+        df: pd.DataFrame,
+        *,
+        season: int,
+        arrivals: dict[str, str],
+    ) -> pd.Series | None:
+        """The feature row a model scores for an unplayed fixture.
+
+        Searches the season being played *and* the one before it. The narrower
+        window — the latest season alone — was correct only while that season
+        was the completed prior one. From matchday 1 it makes a side that has
+        not yet played at a venue indistinguishable from a side that has never
+        played in the division, and the two want opposite answers: real
+        history for the first, a Division Movement Seed for the second.
+
+        Arrival is decided by *arrivals*, never by whether rows happen to
+        exist — CONTEXT.md defines it as present in season N and absent in
+        N-1, which is a fact about the side, not about the calendar.
+
+        Args:
+            home: Home team name.
+            away: Away team name.
+            df: The full canonical.
+            season: The season being played.
+            arrivals: Sides new to the division, mapped to their route.
+
+        Returns:
+            The feature row, or None when a side is neither an arrival nor
+            has any history in the window to build from.
+        """
+        window = df[df["SeasonIndex"].isin((season, season - 1))]
+        if window.empty:
+            return None
+
+        exact = window[(window["Home_Team"] == home)
+                       & (window["Away_Team"] == away)]
+        if not exact.empty:
+            return exact.sort_values("Date").iloc[-1]
+
+        home_rows = window[window["Home_Team"] == home].sort_values("Date")
+        away_rows = window[window["Away_Team"] == away].sort_values("Date")
+        home_arriving = home in arrivals
+        away_arriving = away in arrivals
+
+        # Neither an arrival nor a side with history here: nothing honest to
+        # build from, so the fixture is skipped rather than guessed at.
+        if (not home_arriving and home_rows.empty) or (
+                not away_arriving and away_rows.empty):
+            return None
+
+        if home_arriving or away_arriving:
+            return self._synthesize_promoted_fixture(
+                home, away, window, season=season,
+                home_missing=home_arriving, away_missing=away_arriving,
+                home_rows=home_rows, away_rows=away_rows,
+            )
+
+        row = home_rows.iloc[-1].copy()
+        away_row = away_rows.iloc[-1]
+        for col in row.index:
+            if col.startswith("Away_"):
+                row[col] = away_row[col]
+        return row
+
     def _synthesize_promoted_fixture(
         self,
         home: str,
         away: str,
         latest_df: pd.DataFrame,
         *,
+        season: int,
         home_missing: bool,
         away_missing: bool,
         home_rows: pd.DataFrame,
@@ -1010,8 +1079,10 @@ class ChampionshipPredictor:
         # always trained on, the median overstated Over25_5 by 16 points.
         # The seed is the same one the pipeline uses, so the row a model
         # scores at kick-off matches the rows it learned from.
-        season = int(latest_df["SeasonIndex"].max()) + 1
-
+        #
+        # `season` is supplied rather than derived. Deriving it as
+        # ``latest + 1`` read a season already under way as the one after it,
+        # so from matchday 1 the seed was drawn for the wrong season.
         if home_missing and away_missing:
             template = latest_df.iloc[-1].copy()
         elif home_missing:
@@ -1055,15 +1126,11 @@ class ChampionshipPredictor:
         if self._full_df is None or self._full_df.empty:
             return {}
 
-        latest = int(self._full_df["SeasonIndex"].max())
-        rows = self._full_df[self._full_df["SeasonIndex"] == latest]
-        known = set(rows["Home_Team"]) | set(rows["Away_Team"])
-
-        pl_df = self._pl_canonical()
-        incoming = {
-            team: arrival_route(pl_df, team, latest + 1)
-            for team in current_teams - known
-        }
+        season = season_in_play(self._full_df)
+        incoming = arrivals_for(
+            self._full_df, self._pl_canonical(), season,
+            fixture_teams=current_teams,
+        )
         if not incoming:
             return {}
 
@@ -1217,8 +1284,7 @@ class ChampionshipPredictor:
 
         # Build fixture features
         df = self._full_df
-        latest_season = df["SeasonIndex"].max()
-        latest_df = df[df["SeasonIndex"] == latest_season].copy()
+        season = season_in_play(df)
 
         # Division Movement Seed (ADR 0011). Driven by the fixture list, not
         # the canonical: a side arriving this season has no rows here yet,
@@ -1229,7 +1295,7 @@ class ChampionshipPredictor:
             home, away = _match_champ_teams(match, self._our_teams)
             if home is not None and away is not None:
                 resolved.update((home, away))
-        self._seed_dixon_coles(resolved)
+        incoming = self._seed_dixon_coles(resolved)
 
         for match in matches:
             home, away = _match_champ_teams(match, self._our_teams)
@@ -1239,41 +1305,16 @@ class ChampionshipPredictor:
                     f"{match['away_team']} (team mapping failed)")
                 continue
 
-            # Find feature row for this fixture
-            fixture_mask = (
-                (latest_df["Home_Team"] == home)
-                & (latest_df["Away_Team"] == away)
-            )
-            if fixture_mask.sum() == 0:
-                # Synthesise from most recent home/away rows
-                home_rows = latest_df[latest_df["Home_Team"] == home]
-                away_rows = latest_df[latest_df["Away_Team"] == away]
-                home_missing = len(home_rows) == 0
-                away_missing = len(away_rows) == 0
-                if home_missing or away_missing:
-                    # Newly promoted team(s) — synthesise from league averages
-                    fixture_row = self._synthesize_promoted_fixture(
-                        home, away, latest_df,
-                        home_missing=home_missing,
-                        away_missing=away_missing,
-                        home_rows=home_rows,
-                        away_rows=away_rows,
-                    )
-                    if fixture_row is None:
-                        self._log(f"Skipping {home} vs {away} (no data)")
-                        continue
-                    self._log(
-                        f"Synthesised features for {home} vs {away} "
-                        f"(promoted team{'s' if home_missing and away_missing else ''})"
-                    )
-                else:
-                    fixture_row = home_rows.iloc[-1].copy()
-                    away_row = away_rows.iloc[-1]
-                    for col in fixture_row.index:
-                        if col.startswith("Away_"):
-                            fixture_row[col] = away_row[col]
-            else:
-                fixture_row = latest_df[fixture_mask].iloc[-1]
+            fixture_row = self._fixture_feature_row(
+                home, away, df, season=season, arrivals=incoming)
+            if fixture_row is None:
+                self._log(f"Skipping {home} vs {away} (no data)")
+                continue
+            seeded = [t for t in (home, away) if t in incoming]
+            if seeded:
+                self._log(
+                    f"Seeded {home} vs {away} "
+                    f"(new to the division: {', '.join(seeded)})")
 
             kickoff = match.get("commence_time", "")
             op_data = oddspapi_data.get((home, away))
