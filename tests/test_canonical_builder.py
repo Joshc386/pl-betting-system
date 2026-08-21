@@ -1003,3 +1003,59 @@ def test_betfair_populated_columns_are_not_judged():
     })
 
     assert coverage_regressions(df, season_idx=26) == []
+
+
+def test_partial_season_does_not_flag_rolling_window_features():
+    """A season one round old has no 10-match window filled — and neither had
+    any prior season at the same point.
+
+    Judging a partial season against complete ones flagged every window
+    feature: EFL 2026/27's opening 12 matches read 0% on Home_ScoringRate_10
+    against 87% across three complete seasons, which blocked the rollover
+    rebuild on the day upstream published. That is an artefact of comparing
+    unlike slices, not the upstream rename this check exists to catch.
+
+    The reference fill rate here is deliberately 87.5% — above the 80%
+    `populated` threshold. Below it the column is never judged at all and the
+    test would pass whatever the slicing does.
+    """
+    # Unfilled for the opening 2 matches, filled for the remaining 14: 87.5%,
+    # matching the real Home_ScoringRate_10 rate that triggered the block.
+    window = [None, None] + [1.5] * 14
+    df = _seasons({
+        24: {"Home_ScoringRate_10": window, "Home_Shots": [11.0] * 16},
+        25: {"Home_ScoringRate_10": window, "Home_Shots": [12.0] * 16},
+        26: {"Home_ScoringRate_10": [None, None], "Home_Shots": [10.0, 9.0]},
+    })
+
+    assert coverage_regressions(df, season_idx=26) == []
+
+
+def test_partial_season_still_flags_a_genuinely_missing_column():
+    """The slice must not blunt the check.
+
+    Same two-match new season as above, but a column upstream populates from
+    the first whistle arrives empty. That is the rename case and must survive.
+    """
+    df = _seasons({
+        24: {"Home_ScoringRate_10": [None, None, 1.4, 1.6], "Home_Shots": [11.0] * 4},
+        25: {"Home_ScoringRate_10": [None, None, 1.5, 1.3], "Home_Shots": [12.0] * 4},
+        26: {"Home_ScoringRate_10": [None, None], "Home_Shots": [None, None]},
+    })
+
+    flagged = coverage_regressions(df, season_idx=26)
+
+    assert [c for c, _, _ in flagged] == ["Home_Shots"]
+
+
+def test_complete_new_season_compares_against_whole_reference_seasons():
+    """Slicing to len(new) must be a no-op once the season is complete."""
+    df = _seasons({
+        24: {"Home_Shots": [11.0, 12.0, 13.0, 14.0]},
+        25: {"Home_Shots": [10.0, 11.0, 12.0, 13.0]},
+        26: {"Home_Shots": [None, None, None, None]},
+    })
+
+    flagged = coverage_regressions(df, season_idx=26)
+
+    assert [c for c, _, _ in flagged] == ["Home_Shots"]

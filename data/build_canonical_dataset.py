@@ -162,9 +162,36 @@ def coverage_regressions(
                      if s < season_idx)
     if not seasons:
         return []
-    ref = df[df["SeasonIndex"].isin(seasons[-reference_seasons:])]
     new = df[df["SeasonIndex"] == season_idx]
-    if new.empty or ref.empty:
+    if new.empty:
+        return []
+
+    # Compare like-for-like: the reference is each prior season's opening run,
+    # cut to the number of matches the new season actually has.
+    #
+    # A season one round old has no 10-match rolling window filled, and neither
+    # had any prior season at the same point. Judging a partial season against
+    # complete ones therefore flags every window feature: on the day EFL 2026/27
+    # was added, its 12 matches read 0% on Home_ScoringRate_10 against 87% across
+    # three complete seasons. That is a rollover artefact, not the upstream rename
+    # this check exists to catch, and the check has to survive the rollover to be
+    # worth having — that is exactly when the schema is most likely to move.
+    #
+    # Slicing preserves the power: measured on the first 12 matches of seasons
+    # 23-25, the window features read 0% and the real upstream columns
+    # (Home_Shots, Away_Corners, Home_Goals) read 100%, so a genuinely missing
+    # column is still 0% against ~100%. A complete new season takes every
+    # reference row and behaves exactly as before.
+    def _opening(season: float) -> pd.DataFrame:
+        rows = df[df["SeasonIndex"] == season]
+        # Sort when a Date is available; the canonical is assembled in date
+        # order anyway, and the synthetic frames in the tests carry no Date.
+        if "Date" in rows.columns:
+            rows = rows.sort_values("Date")
+        return rows.head(len(new))
+
+    ref = pd.concat([_opening(s) for s in seasons[-reference_seasons:]])
+    if ref.empty:
         return []
 
     out: list[tuple[str, float, float]] = []
