@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 from typing import Optional
 
-from pipeline import run_pipeline
+from pipeline import PROMOTED_ROLLING_FEATURES, bottom5_cohort, run_pipeline
+from division_movement import season_in_play
 from config import (
     ALL_FEATURES, BTTS_ALL_FEATURES,
     ALLOWED_ALT_LINES, ALT_LINES_OVER_ONLY,
@@ -799,6 +800,92 @@ class LivePredictor:
             early_season=getattr(self, "_is_early_season", False),
         )
 
+    def _fixture_feature_row(
+        self,
+        home: str,
+        away: str,
+        df: pd.DataFrame,
+        *,
+        season: int,
+        arrivals: set[str],
+    ) -> pd.Series | None:
+        """The feature row a model scores for an unplayed fixture.
+
+        A side promoted into the PL has no rows here, and the live path used
+        to answer that by skipping the fixture — so every market on Arsenal v
+        Coventry, Hull v Man United and Ipswich v Sunderland was empty while
+        the models had been trained on rows where exactly that gap was filled
+        from the bottom-five cohort. The seed used here is that same cohort,
+        from the same function, so the row a model scores matches the rows it
+        learned from.
+
+        The window is the season in play *and* the one before it. Scoped to
+        one season, a side that has not yet played at a venue looks identical
+        to one that has never played in the division — the mistake that seeded
+        six established EFL sides as arrivals on 2026-08-22.
+
+        Args:
+            home: Home team name.
+            away: Away team name.
+            df: The full canonical.
+            season: The season being played.
+            arrivals: Sides new to the division this season.
+
+        Returns:
+            The feature row, or None when a side is neither an arrival nor
+            has history in the window to build from.
+        """
+        window = df[df["SeasonIndex"].isin((season, season - 1))]
+        if window.empty:
+            return None
+
+        exact = window[(window["Home_Team"] == home)
+                       & (window["Away_Team"] == away)]
+        if not exact.empty:
+            return exact.sort_values("Date").iloc[-1]
+
+        home_rows = window[window["Home_Team"] == home].sort_values("Date")
+        away_rows = window[window["Away_Team"] == away].sort_values("Date")
+        home_arriving = home in arrivals
+        away_arriving = away in arrivals
+
+        # Neither new to the division nor known in it: nothing honest to build
+        # from, so the fixture is skipped rather than guessed at.
+        if (not home_arriving and home_rows.empty) or (
+                not away_arriving and away_rows.empty):
+            return None
+
+        if home_arriving and away_arriving:
+            template = window.iloc[-1].copy()
+        elif home_arriving:
+            template = away_rows.iloc[-1].copy()
+        else:
+            template = home_rows.iloc[-1].copy()
+
+        if not home_arriving:
+            row = home_rows.iloc[-1].copy()
+            for col in template.index:
+                if col.startswith("Home_"):
+                    template[col] = row[col]
+        if not away_arriving:
+            row = away_rows.iloc[-1]
+            for col in template.index:
+                if col.startswith("Away_"):
+                    template[col] = row[col]
+
+        cohort = bottom5_cohort(df, season - 1, PROMOTED_ROLLING_FEATURES)
+        for side, team, arriving in (
+            ("Home", home, home_arriving), ("Away", away, away_arriving),
+        ):
+            if not arriving:
+                continue
+            for feat, value in cohort.items():
+                if feat.startswith(f"{side}_") and feat in template.index:
+                    template[feat] = value
+            template[f"{side}_Team"] = team
+            template[f"{side}_Promoted"] = 1
+        return template
+
     def generate_recommendations(
         self,
         markets: tuple[str, ...] = ("totals", "btts"),
@@ -958,8 +1045,21 @@ class LivePredictor:
 
         # Build fixture features from historical data
         df = self._full_df
-        latest_season = df["SeasonIndex"].max()
-        latest_df = df[df["SeasonIndex"] == latest_season].copy()
+        season = season_in_play(df)
+        # Sides new to the division: in this season's fixture list, absent
+        # from the season before it. Taken from the fixture list because the
+        # canonical holds nothing for a season whose games are still to be
+        # played — and that pre-season window is the whole of a promoted
+        # side's first matchday.
+        _previous = df[df["SeasonIndex"] == season - 1]
+        _known = set(_previous["Home_Team"]) | set(_previous["Away_Team"])
+        _fixture_teams = set()
+        for _m in matches:
+            _h, _a = match_to_our_teams(_m, self._our_teams)
+            _fixture_teams.update(t for t in (_h, _a) if t is not None)
+        arrivals = _fixture_teams - _known if _known else set()
+        if arrivals:
+            self._log(f"New to the division: {', '.join(sorted(arrivals))}")
 
         recommendations = []
         self._match_analysis: list[dict] = []  # ALL fixture-market-side rows
@@ -971,27 +1071,18 @@ class LivePredictor:
                           f"(team mapping failed)")
                 continue
 
-            # Find most recent row for this fixture to get features
-            fixture_mask = (
-                (latest_df["Home_Team"] == home_mapped) &
-                (latest_df["Away_Team"] == away_mapped)
-            )
-            if fixture_mask.sum() == 0:
-                # Try to build features from most recent home/away rows
-                home_rows = latest_df[latest_df["Home_Team"] == home_mapped]
-                away_rows = latest_df[latest_df["Away_Team"] == away_mapped]
-                if len(home_rows) == 0 or len(away_rows) == 0:
-                    self._log(f"Skipping {home_mapped} vs {away_mapped} "
-                              f"(no recent data)")
-                    continue
-                fixture_row = home_rows.iloc[-1].copy()
-                # Override away-specific features from away team's latest row
-                away_row = away_rows.iloc[-1]
-                for col in fixture_row.index:
-                    if col.startswith("Away_"):
-                        fixture_row[col] = away_row[col]
-            else:
-                fixture_row = latest_df[fixture_mask].iloc[-1]
+            fixture_row = self._fixture_feature_row(
+                home_mapped, away_mapped, df,
+                season=season, arrivals=arrivals)
+            if fixture_row is None:
+                self._log(f"Skipping {home_mapped} vs {away_mapped} "
+                          f"(no recent data)")
+                continue
+            _seeded = [t for t in (home_mapped, away_mapped) if t in arrivals]
+            if _seeded:
+                self._log(
+                    f"Seeded {home_mapped} vs {away_mapped} from the "
+                    f"bottom-five cohort ({', '.join(_seeded)})")
 
             kickoff = match.get("commence_time", "")
 
