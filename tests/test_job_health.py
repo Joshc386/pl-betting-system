@@ -310,3 +310,110 @@ class TestIncompleteOutranksStalenessButNotFailure:
         status = {s.name: s for s in read_job_status(tmp_path)}
 
         assert status["Settle"].state is JobState.INCOMPLETE
+
+
+class TestUnpricedFixtures:
+    """A fixture the predictor could not price, while there is still time.
+
+    `scan.py:485` computes the set of scanned fixtures with no `model_prob`,
+    logs the count, runs the predictor — and never re-checks whether the gap
+    closed. Success and failure produce identical output.
+
+    On 2026-08-18 that line read `Missing model data for 1/12 fixtures`. The
+    one was Arsenal v Coventry, a promoted side with no cohort seed. The
+    predictor ran, still could not price it, and nothing said so. It reached
+    its 21 August kickoff with all six markets NULL, produced no prediction
+    and no recommendation, and left no trace anywhere except an absence.
+
+    Only fixtures still ahead of kickoff count, so this is something an
+    operator can act on and it returns to zero on its own.
+    """
+
+    @staticmethod
+    def _db(tmp_path, rows):
+        """A dashboard.db holding just what the unpriced query reads."""
+        import sqlite3
+        p = tmp_path / "dashboard.db"
+        c = sqlite3.connect(p)
+        c.execute("CREATE TABLE match_analysis (id INTEGER PRIMARY KEY, "
+                  "home_team TEXT, away_team TEXT, kickoff TEXT, "
+                  "market TEXT, model_prob REAL)")
+        for home, away, kickoff, market, prob in rows:
+            c.execute("INSERT INTO match_analysis "
+                      "(home_team, away_team, kickoff, market, model_prob) "
+                      "VALUES (?,?,?,?,?)", (home, away, kickoff, market, prob))
+        c.commit()
+        c.close()
+        return p
+
+    NOW = datetime(2026, 8, 18, 10, 0, 0)
+
+    def test_a_future_fixture_with_no_priced_market_counts(self, tmp_path):
+        db = self._db(tmp_path, [
+            ("Arsenal FC", "Coventry City FC", "2026-08-21T19:00:00Z",
+             "ou25", None),
+            ("Arsenal FC", "Coventry City FC", "2026-08-21T19:00:00Z",
+             "btts", None),
+        ])
+        from job_health import unpriced_fixtures
+
+        assert unpriced_fixtures(db, now=self.NOW) == 1
+
+    def test_one_priced_market_is_enough_to_clear_it(self, tmp_path):
+        """Partial coverage is a different, weaker signal — not this one."""
+        db = self._db(tmp_path, [
+            ("Arsenal FC", "Coventry City FC", "2026-08-21T19:00:00Z",
+             "ou25", 0.61),
+            ("Arsenal FC", "Coventry City FC", "2026-08-21T19:00:00Z",
+             "btts", None),
+        ])
+        from job_health import unpriced_fixtures
+
+        assert unpriced_fixtures(db, now=self.NOW) == 0
+
+    def test_a_fixture_past_kickoff_no_longer_counts(self, tmp_path):
+        """Nothing can be done about it, and the badge must reach zero again."""
+        db = self._db(tmp_path, [
+            ("Arsenal FC", "Coventry City FC", "2026-08-21T19:00:00Z",
+             "ou25", None),
+        ])
+        from job_health import unpriced_fixtures
+
+        assert unpriced_fixtures(db, now=datetime(2026, 8, 22, 9, 0)) == 0
+
+    def test_it_counts_fixtures_not_market_rows(self, tmp_path):
+        """Arsenal v Coventry was six NULL rows. That is one problem, not six."""
+        db = self._db(tmp_path, [
+            ("Arsenal FC", "Coventry City FC", "2026-08-21T19:00:00Z", m, None)
+            for m in ("ou25", "ou25", "btts", "btts", "ou15", "ou15")
+        ])
+        from job_health import unpriced_fixtures
+
+        assert unpriced_fixtures(db, now=self.NOW) == 1
+
+    def test_separate_fixtures_count_separately(self, tmp_path):
+        db = self._db(tmp_path, [
+            ("Arsenal FC", "Coventry City FC", "2026-08-21T19:00:00Z",
+             "ou25", None),
+            ("Hull City AFC", "Manchester United FC", "2026-08-22T11:30:00Z",
+             "ou25", None),
+            ("Brentford FC", "Tottenham Hotspur FC", "2026-08-22T16:30:00Z",
+             "ou25", 0.55),
+        ])
+        from job_health import unpriced_fixtures
+
+        assert unpriced_fixtures(db, now=self.NOW) == 2
+
+    def test_missing_database_is_zero_not_a_crash(self, tmp_path):
+        from job_health import unpriced_fixtures
+
+        assert unpriced_fixtures(tmp_path / "absent.db", now=self.NOW) == 0
+
+    def test_absent_table_is_zero_not_a_crash(self, tmp_path):
+        """Never block a dashboard load over a health badge."""
+        import sqlite3
+        p = tmp_path / "dashboard.db"
+        sqlite3.connect(p).close()
+        from job_health import unpriced_fixtures
+
+        assert unpriced_fixtures(p, now=self.NOW) == 0

@@ -111,6 +111,56 @@ def unsettled_backlog(
     return total
 
 
+def unpriced_fixtures(
+    db_path: str | Path,
+    now: datetime | None = None,
+) -> int:
+    """Fixtures still ahead of kickoff that the predictor priced nothing for.
+
+    ``scan.py`` computes the set of scanned fixtures with no ``model_prob``,
+    logs the count, runs the predictor — and never re-checks whether the gap
+    closed. A predictor that ran and fixed it and one that ran and could not
+    produce identical output.
+
+    On 2026-08-18 that line read ``Missing model data for 1/12 fixtures``. The
+    one was Arsenal v Coventry, a promoted side with no cohort seed. It
+    reached its 21 August kickoff with all six markets NULL, yielding no
+    prediction and no recommendation, and left no trace but an absence.
+
+    A fixture counts only while something can still be done about it, so this
+    returns to zero on its own once the slate has kicked off. One priced
+    market clears a fixture: partial coverage is a real but different signal,
+    and this one is for "the predictor produced nothing at all".
+
+    Kickoffs are stored UTC and ``now`` is local, matching
+    :func:`unsettled_backlog`. That skews the boundary by the UK offset, which
+    on a fixture-level alarm costs at most an hour of notice on a fixture
+    already about to start. Never raises.
+    """
+    db_path = Path(db_path)
+    if not db_path.exists():
+        return 0
+
+    cutoff = (now or datetime.now()).isoformat()
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return 0
+    try:
+        return conn.execute(
+            "SELECT COUNT(*) FROM ("
+            "  SELECT home_team, away_team, kickoff FROM match_analysis"
+            "  WHERE kickoff > ?"
+            "  GROUP BY home_team, away_team, kickoff"
+            "  HAVING SUM(model_prob IS NOT NULL) = 0)",
+            (cutoff,),
+        ).fetchone()[0]
+    except sqlite3.Error:
+        return 0  # table absent in this league's schema
+    finally:
+        conn.close()
+
+
 def data_coverage(csv_path: str | Path) -> int | None:
     """Highest SeasonIndex in a canonical/enriched CSV, or None. Never raises.
 

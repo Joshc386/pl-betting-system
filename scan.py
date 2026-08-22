@@ -536,6 +536,28 @@ def run_scan(league: str) -> str:
                     "Predictor run complete: %d recs, %d analysis rows",
                     len(_recs), len(_analysis),
                 )
+
+                # Did the gap actually close? Without this, a predictor that
+                # ran and fixed it and one that ran and could not are
+                # indistinguishable in the log. On 2026-08-18 this branch
+                # reported "Missing model data for 1/12 fixtures", ran, still
+                # could not price Arsenal v Coventry, and said nothing; the
+                # fixture reached kickoff three days later with all six
+                # markets NULL. Inside the try, so a surprise here is caught
+                # below rather than failing the scan.
+                _priced_now = {
+                    (a.get("home_team"), a.get("away_team"))
+                    for a in _analysis if a.get("model_prob") is not None
+                }
+                _still_missing = _missing_fixtures - _priced_now
+                if _still_missing:
+                    logger.warning(
+                        "Predictor produced no probability for %d fixture(s): "
+                        "%s. These yield no prediction and no recommendation.",
+                        len(_still_missing),
+                        ", ".join(f"{h} v {a}"
+                                  for h, a in sorted(_still_missing)),
+                    )
             except FreshnessError as e:
                 # Caught before the generic handler so the reason survives.
                 # "Predictor run during scan failed" buries the one thing the

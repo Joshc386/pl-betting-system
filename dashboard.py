@@ -388,7 +388,8 @@ def _make_job_status() -> html.Div:
     healthy (ADR 0006's counterexample, 2026-08-14). Read-only; no network.
     """
     from job_health import (
-        read_job_status, unsettled_backlog, data_coverage, JobState,
+        read_job_status, unsettled_backlog, unpriced_fixtures, data_coverage,
+        JobState,
     )
     from league_config import LEAGUES as _LG
 
@@ -445,6 +446,29 @@ def _make_job_status() -> html.Div:
                    "(scheduler.py passes days_back=3). Anything here needs a "
                    "manual settle with a wider window — repeated scheduled "
                    "runs will never pick it up."),
+        ),
+    ]
+
+    # Fixtures the predictor priced nothing for, while there is still time to
+    # act. scan.py logs the gap before running the predictor but never checks
+    # whether it closed, so until now this state was invisible: Arsenal v
+    # Coventry sat here for six days and reached kickoff unpriced.
+    unpriced = sum(
+        unpriced_fixtures(os.path.join(proj_dir, "data", db))
+        for db in ("dashboard.db", "dashboard_efl.db")
+    )
+    children += [
+        html.Span("│ Unpriced ", className="text-muted small"),
+        html.Span(
+            str(unpriced),
+            className=("small me-3 "
+                       + ("text-success" if unpriced == 0 else "text-warning")),
+            style={"fontWeight": "600"},
+            title=("Fixtures still ahead of kickoff that the model produced "
+                   "no probability for on any market — usually a promoted "
+                   "side the predictor cannot seed. They yield no prediction "
+                   "and no recommendation, and disappear silently at "
+                   "kickoff."),
         ),
     ]
 
