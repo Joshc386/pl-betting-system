@@ -16,7 +16,10 @@ data/*.bz2
 *.zip
 # Pre-ingest / pre-rebuild snapshots. The daily ingest job writes one per
 # league per run, so these accumulate; they are data, never source.
-*.bak
+# The trailing wildcard is load-bearing: the job stamps a run tag *after*
+# the extension (foo.csv.bak-20260821-085148-preseason26), so a bare *.bak
+# matches none of the files this rule exists to ignore.
+*.bak*
 
 # Holding folder used during git surgery (Option β-tight PR split)
 tmp_session_holding/
