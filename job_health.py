@@ -35,15 +35,26 @@ SETTLE_HORIZON_DAYS = 3
 
 _BACKLOG_TABLES = ("predictions", "recommendations", "logged_bets")
 
-# Each job's rolling log, and the ages at which it stops being reassuring.
+# Each job's log glob, and the ages at which it stops being reassuring.
 # Thresholds are 1.5x and 3x the job's own cadence: enough slack that a late
 # catch-up after a weekend away is not an alarm, tight enough that a genuinely
 # missed run surfaces on the next dashboard load.
+#
+# Retrain reads its dated archives rather than `weekly_retrain.log`, because
+# the .bat writes that rolling copy on its *last line* — interrupt the batch
+# and the copy never happens, so the rolling log keeps reporting the previous
+# week. That is ADR 0006's failure reproduced one layer below Task Scheduler,
+# and it hid the interrupted 2026-08-17 run for twelve days. An archive is
+# written as the run goes, so it exists whatever happens afterwards.
+#
+# The pattern is deliberately `weekly_retrain_*` and not `*retrain*`:
+# `retrain_manual_*.log` answers a different question (are the models
+# current) from this one (did the scheduled job fire).
 JOBS: dict[str, tuple[str, float, float]] = {
-    #  label       log filename            amber(h)  red(h)
+    #  label       log glob                 amber(h)  red(h)
     "Ingest":  ("daily_ingest.log",           36,      72),
     "Settle":  ("daily_settle.log",           36,      72),
-    "Retrain": ("weekly_retrain.log",        9 * 24,  14 * 24),
+    "Retrain": ("weekly_retrain_*.log",      9 * 24,  14 * 24),
 }
 
 _EXIT_RE = re.compile(r"exit=(-?\d+)")
@@ -52,6 +63,7 @@ _EXIT_RE = re.compile(r"exit=(-?\d+)")
 class JobState(Enum):
     OK = "ok"
     STALE = "stale"
+    INCOMPLETE = "incomplete"  # ran, but never stamped an exit code
     FAILED = "failed"
     MISSING = "missing"
 
@@ -134,22 +146,34 @@ def read_job_status(
     now = now or datetime.now()
 
     out: list[JobStatus] = []
-    for name, (filename, amber, red) in JOBS.items():
-        path = log_dir / filename
-        if not path.exists():
+    for name, (pattern, amber, red) in JOBS.items():
+        # Newest match wins. For the daily jobs the glob is a literal name and
+        # matches at most one file; for Retrain it spans the dated archives.
+        candidates = sorted(log_dir.glob(pattern), key=os.path.getmtime)
+        if not candidates:
             out.append(JobStatus(name, None, None, None, JobState.MISSING))
             continue
+        path = candidates[-1]
 
         last_run = datetime.fromtimestamp(os.path.getmtime(path))
         age = (now - last_run).total_seconds() / 3600
         exit_code = _parse_exit_code(path)
 
-        # A non-zero exit outranks age: a job that ran an hour ago and failed
-        # is worse news than one that is merely late.
+        # Ordering, worst first. A non-zero exit outranks age: a job that ran
+        # an hour ago and failed is worse news than one that is merely late.
+        # A long silence outranks *how* the last run ended — four days dead
+        # matters more than its footer. Below that, a missing `exit=` means
+        # the run was killed mid-flight, which is the more useful of the two
+        # things a merely-amber age could be telling you.
+        #
+        # One known false positive: a retrain still running has no footer yet,
+        # so it reads INCOMPLETE for its ~25-70 minutes. It clears itself.
         if exit_code:
             state = JobState.FAILED
         elif age >= red:
             state = JobState.FAILED
+        elif exit_code is None:
+            state = JobState.INCOMPLETE
         elif age >= amber:
             state = JobState.STALE
         else:

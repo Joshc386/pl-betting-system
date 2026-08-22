@@ -84,7 +84,8 @@ class TestJobStatus:
 
     def test_retrain_uses_a_weekly_cadence_not_a_daily_one(self, tmp_path):
         """5 days is healthy for the Sunday retrain, dead for a daily job."""
-        _write_log(tmp_path, "weekly_retrain.log", exit_code=0, age_hours=5 * 24)
+        _write_log(tmp_path, "weekly_retrain_20260817.log", exit_code=0,
+                   age_hours=5 * 24)
         _write_log(tmp_path, "daily_settle.log", exit_code=0, age_hours=5 * 24)
 
         status = {s.name: s for s in read_job_status(tmp_path)}
@@ -99,7 +100,7 @@ class TestJobStatus:
         status = {s.name: s for s in read_job_status(tmp_path)}
 
         assert status["Settle"].exit_code is None
-        assert status["Settle"].state is JobState.OK  # recent; age is the signal
+        assert status["Settle"].state is JobState.INCOMPLETE
 
     def test_last_exit_line_wins_when_a_log_holds_several(self, tmp_path):
         """The rolling log is overwritten per run, but be explicit about it."""
@@ -213,3 +214,99 @@ class TestDataCoverage:
         from job_health import data_coverage
 
         assert data_coverage(tmp_path / "absent.csv") is None
+
+
+class TestRetrainReadsTheArchives:
+    """The rolling copy is written on the happy path only.
+
+    `scripts/weekly_retrain.bat` writes the dated archive as it goes, then
+    `copy /Y`s it to `weekly_retrain.log` on its **last line**. Interrupt the
+    batch and that copy never runs, so the rolling log keeps reporting the
+    previous week — the exact failure ADR 0006 was written about, reproduced
+    one layer below Task Scheduler.
+
+    On 2026-08-17 the scheduled retrain was interrupted at 08:16, 25 minutes
+    in. `weekly_retrain_20260817.log` ends in a literal Ctrl-C with no `exit=`
+    footer, and it is the only archive of seventeen missing one. The rolling
+    log froze at 10 August, and job health reported that run for twelve days.
+
+    So the archives are the source of truth: a run that started wrote one,
+    whatever happened to it afterwards.
+    """
+
+    def test_the_newest_archive_dates_the_job(self, tmp_path):
+        _write_log(tmp_path, "weekly_retrain_20260810.log", exit_code=0,
+                   age_hours=12 * 24)
+        _write_log(tmp_path, "weekly_retrain_20260817.log", exit_code=0,
+                   age_hours=5 * 24)
+
+        status = {s.name: s for s in read_job_status(tmp_path)}
+
+        assert status["Retrain"].age_hours == pytest.approx(5 * 24, abs=0.1)
+
+    def test_an_interrupted_run_still_dates_the_job(self, tmp_path):
+        """The 2026-08-17 regression: no footer, no rolling copy, still ran."""
+        _write_log(tmp_path, "weekly_retrain.log", exit_code=0,
+                   age_hours=12 * 24)
+        _write_log(tmp_path, "weekly_retrain_20260817.log", exit_code=None,
+                   age_hours=5 * 24)
+
+        status = {s.name: s for s in read_job_status(tmp_path)}
+
+        assert status["Retrain"].age_hours == pytest.approx(5 * 24, abs=0.1)
+        assert status["Retrain"].state is JobState.INCOMPLETE
+
+    def test_a_stale_rolling_copy_cannot_outrank_a_newer_archive(self, tmp_path):
+        """Precisely the state on disk 2026-08-22: rolling copy 12 days behind."""
+        _write_log(tmp_path, "weekly_retrain.log", exit_code=0,
+                   age_hours=12 * 24)
+        _write_log(tmp_path, "weekly_retrain_20260817.log", exit_code=0,
+                   age_hours=5 * 24)
+
+        status = {s.name: s for s in read_job_status(tmp_path)}
+
+        assert status["Retrain"].state is JobState.OK
+
+    def test_a_manual_retrain_is_not_the_scheduled_job(self, tmp_path):
+        """Two different questions. `retrain_manual_*` answers the other one.
+
+        The 18 and 21 August manual runs produced the live pickles, but they
+        say nothing about whether the Sunday task fired.
+        """
+        _write_log(tmp_path, "weekly_retrain_20260810.log", exit_code=0,
+                   age_hours=12 * 24)
+        _write_log(tmp_path, "retrain_manual_20260821_0906.log", exit_code=0,
+                   age_hours=1)
+
+        status = {s.name: s for s in read_job_status(tmp_path)}
+
+        assert status["Retrain"].age_hours == pytest.approx(12 * 24, abs=0.1)
+
+
+class TestIncompleteOutranksStalenessButNotFailure:
+    """Where a missing `exit=` sits in the ordering."""
+
+    def test_a_nonzero_exit_still_wins(self, tmp_path):
+        _write_log(tmp_path, "daily_settle.log", exit_code=3, age_hours=1)
+
+        status = {s.name: s for s in read_job_status(tmp_path)}
+
+        assert status["Settle"].state is JobState.FAILED
+
+    def test_long_silence_still_wins(self, tmp_path):
+        """4 days dead matters more than how the last run ended."""
+        _write_log(tmp_path, "daily_settle.log", exit_code=None,
+                   age_hours=4 * 24)
+
+        status = {s.name: s for s in read_job_status(tmp_path)}
+
+        assert status["Settle"].state is JobState.FAILED
+
+    def test_incomplete_beats_merely_late(self, tmp_path):
+        """Inside the amber band, that it broke is the more useful of the two."""
+        _write_log(tmp_path, "daily_settle.log", exit_code=None,
+                   age_hours=40)
+
+        status = {s.name: s for s in read_job_status(tmp_path)}
+
+        assert status["Settle"].state is JobState.INCOMPLETE

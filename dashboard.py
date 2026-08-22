@@ -397,12 +397,14 @@ def _make_job_status() -> html.Div:
     _COLOUR = {
         JobState.OK: "text-success",
         JobState.STALE: "text-warning",
+        JobState.INCOMPLETE: "text-warning",
         JobState.FAILED: "text-danger",
         JobState.MISSING: "text-danger",
     }
     _MARK = {
         JobState.OK: "✓",
         JobState.STALE: "!",
+        JobState.INCOMPLETE: "⋯",
         JobState.FAILED: "✗",
         JobState.MISSING: "✗",
     }
