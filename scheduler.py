@@ -598,7 +598,18 @@ def job_plan_today() -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def job_generate_predictions() -> None:
-    """Full PL prediction (retrain + odds + save). Used by CLI run-predict."""
+    """Full PL prediction (retrain + odds + save). Used by CLI run-predict.
+
+    Held awake for the same reason as the weekly retrain: this job retrains
+    Dixon-Coles, so it runs well past the idle timeout Modern Standby uses.
+    A run on 2026-08-21 died at 18:03 with standby having entered at 17:54.
+    """
+    with keep_system_awake("PL predictions"):
+        _generate_predictions()
+
+
+def _generate_predictions() -> None:
+    """The PL prediction itself. Wrapped by :func:`job_generate_predictions`."""
     logger.info("Starting PL prediction generation...")
     try:
         from predict import LivePredictor
@@ -630,7 +641,20 @@ def job_generate_predictions() -> None:
 
 
 def job_generate_champ_predictions() -> None:
-    """Full Championship prediction. Used by CLI run-champ."""
+    """Full Championship prediction. Used by CLI run-champ.
+
+    Held awake for the same reason as the PL job above — it retrains
+    Dixon-Coles and runs long past Modern Standby's idle timeout.
+    """
+    with keep_system_awake("Championship predictions"):
+        _generate_champ_predictions()
+
+
+def _generate_champ_predictions() -> None:
+    """The Championship prediction itself.
+
+    Wrapped by :func:`job_generate_champ_predictions`.
+    """
     logger.info("Starting Championship prediction generation...")
     try:
         from championship_predict import ChampionshipPredictor
