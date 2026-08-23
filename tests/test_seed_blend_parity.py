@@ -374,3 +374,94 @@ class TestEFLServingMatchesTraining:
         assert row["Away_Past5Goals"] == pytest.approx(_COHORT_VALUE), (
             "the away half has no history yet and must still be seeded, "
             "however many home matches the side has played")
+
+
+class TestTheDixonColesSeedRetires:
+    """`_seed_dixon_coles` overwrote an arrival's rating on every scan.
+
+    The seed exists for the window before a side has results in the division:
+    its own docstring says the pre-season window is "exactly when a returning
+    side is most dangerous, because Dixon-Coles still carries the rating from
+    its *exit* season". But it was driven by `arrivals_for`, which is
+    season-long membership, so the overwrite never stopped. The weekly retrain
+    re-estimated the rating from real results and the next scan replaced it
+    with the route prior again, all season, for one of the three EFL ensemble
+    members.
+    """
+
+    class _StubDC:
+        """Records what the seed was asked to overwrite."""
+
+        def __init__(self):
+            self.seeded: dict[str, str] = {}
+
+        def seed_arrivals(self, incoming, priors):
+            self.seeded.update(incoming)
+
+    @staticmethod
+    def _predictor(matches_played: int):
+        from championship_predict import ChampionshipPredictor
+        from division_movement import SeedParams
+
+        others = ["T01", "T02", "T03", "T04", "T05"]
+        df = pd.DataFrame(
+            _prior_season(24, others + ["T06"])
+            + _arrival_season(25, "NEWCO", others, matches_played)
+        )
+        predictor = ChampionshipPredictor.__new__(ChampionshipPredictor)
+        predictor.verbose = False
+        predictor._full_df = df
+        predictor._pl_df = pd.DataFrame(
+            columns=["SeasonIndex", "Date", "Home_Team", "Away_Team",
+                     "Home_LeaguePosition", "Away_LeaguePosition"])
+        predictor._seed_params_cache = SeedParams(priors={}, n_events=0)
+        stub = TestTheDixonColesSeedRetires._StubDC()
+        predictor._ou_models = {"dc": stub}
+        predictor._ou15_models = None
+        predictor._btts_models = None
+        return predictor, stub
+
+    def test_before_a_ball_is_kicked_the_arrival_is_seeded(self):
+        """The case the seed was written for, and it must keep working."""
+        predictor, stub = self._predictor(matches_played=0)
+
+        seeded = predictor._seed_dixon_coles({"NEWCO", "T01", "T02"})
+
+        assert "NEWCO" in seeded
+        assert "NEWCO" in stub.seeded
+
+    def test_inside_the_window_the_arrival_is_still_seeded(self):
+        predictor, stub = self._predictor(matches_played=2)
+
+        seeded = predictor._seed_dixon_coles({"NEWCO", "T01", "T02"})
+
+        assert "NEWCO" in seeded, (
+            "two matches is not enough to rate a side on; the route prior is "
+            "still the better estimate")
+
+    def test_past_the_window_the_arrival_keeps_its_fitted_rating(self):
+        """The defect: the retrain's estimate was overwritten every scan."""
+        predictor, stub = self._predictor(matches_played=_SEED_WINDOW)
+
+        seeded = predictor._seed_dixon_coles({"NEWCO", "T01", "T02"})
+
+        assert "NEWCO" not in stub.seeded, (
+            f"after {_SEED_WINDOW} matches the side has a real record and "
+            "Dixon-Coles has fitted it; overwriting with the route prior "
+            "discards every result it has played")
+        assert "NEWCO" not in seeded
+
+    def test_deep_into_the_season_it_is_still_not_reseeded(self):
+        predictor, stub = self._predictor(matches_played=14)
+
+        predictor._seed_dixon_coles({"NEWCO", "T01", "T02"})
+
+        assert "NEWCO" not in stub.seeded
+
+    def test_an_established_side_is_never_seeded(self):
+        """Guards the test above: absence must mean the gate, not a typo."""
+        predictor, stub = self._predictor(matches_played=0)
+
+        predictor._seed_dixon_coles({"NEWCO", "T01", "T02"})
+
+        assert "T01" not in stub.seeded

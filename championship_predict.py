@@ -1164,6 +1164,24 @@ class ChampionshipPredictor:
         if not incoming:
             return {}
 
+        # The seed is for the window before a side has a record worth rating.
+        # Past it, Dixon-Coles has fitted the side on its actual results and
+        # the route prior would discard every one of them — including the
+        # estimate the weekly retrain had just produced, on the very next
+        # scan. Gated on `seed_weight` rather than a second threshold, so the
+        # rating and the feature row can never disagree about when the seed
+        # stops applying.
+        season_rows = self._full_df[self._full_df["SeasonIndex"] == season]
+        played = pd.concat(
+            [season_rows["Home_Team"], season_rows["Away_Team"]]
+        ).value_counts()
+        incoming = {
+            team: route for team, route in incoming.items()
+            if seed_weight(int(played.get(team, 0))) > 0
+        }
+        if not incoming:
+            return {}
+
         priors = self._seed_params().priors
         for models in (self._ou_models, self._ou15_models, self._btts_models):
             dc = (models or {}).get("dc")
