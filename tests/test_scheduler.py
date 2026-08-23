@@ -467,3 +467,119 @@ class TestRunNow:
         for key in valid_keys:
             # We'd need to mock the actual functions to run them
             pass
+
+
+# ── Power request around the weekly retrain (ADR 0006 counterexample #2) ──
+# The 2026-08-17 retrain died 18 minutes in because Modern Standby entered on
+# "Reason: Idle Timeout" underneath it, and Task Scheduler still logged the run
+# as successfully completed. These cover the guard that defers that timeout.
+
+class TestKeepSystemAwake:
+    """The sleep hold must never outlive the job it protects."""
+
+    def test_the_hold_is_released_when_the_job_raises(self, monkeypatch):
+        """A failing retrain must not leak a power request.
+
+        A leaked ES_CONTINUOUS keeps the machine awake indefinitely — a far
+        worse failure than the sleep it prevents, and one nobody would
+        connect back to a retrain that errored days earlier.
+        """
+        import scheduler
+
+        calls = []
+
+        class _FakeKernel32:
+            def SetThreadExecutionState(self, flags):
+                calls.append(flags)
+                return 1
+
+        monkeypatch.setattr(scheduler.sys, "platform", "win32")
+        monkeypatch.setattr(
+            scheduler, "keep_system_awake", scheduler.keep_system_awake)
+        import ctypes
+        monkeypatch.setattr(ctypes, "windll",
+                            type("W", (), {"kernel32": _FakeKernel32()})())
+
+        with pytest.raises(RuntimeError, match="retrain blew up"):
+            with scheduler.keep_system_awake("test"):
+                raise RuntimeError("retrain blew up")
+
+        assert calls[-1] == scheduler._ES_CONTINUOUS, (
+            "the hold was not released — ES_CONTINUOUS alone is the release")
+
+    def test_a_refused_power_request_does_not_block_the_job(self, monkeypatch):
+        """Failing to hold the request must not stop the retrain running.
+
+        Not being able to defer sleep is a reason to warn, not a reason to
+        skip a retrain the models depend on.
+        """
+        import scheduler
+
+        class _RefusingKernel32:
+            def SetThreadExecutionState(self, flags):
+                return 0  # documented failure return
+
+        monkeypatch.setattr(scheduler.sys, "platform", "win32")
+        import ctypes
+        monkeypatch.setattr(ctypes, "windll",
+                            type("W", (), {"kernel32": _RefusingKernel32()})())
+
+        ran = False
+        with scheduler.keep_system_awake("test") as held:
+            ran = True
+        assert ran, "the job was skipped because the power request failed"
+        assert held is False
+
+
+class TestEveryLongJobHoldsSleepOff:
+    """The hold was correct and tested — and only one job called it.
+
+    `keep_system_awake` shipped wrapping `job_weekly_retrain` alone, because
+    that was the job that had failed. On 2026-08-21 a PL prediction run died
+    the same way at 18:03, Modern Standby having entered at 17:54: same
+    defect, second location, ten weeks of tests passing throughout. Testing
+    the guard proves the guard works; only this proves it is reached.
+    """
+
+    # Jobs long enough for Modern Standby to catch. Modern Standby enters on
+    # an idle timeout of minutes, and each of these retrains Dixon-Coles,
+    # which alone takes ~13. Add a job here when it grows past a few minutes.
+    LONG_RUNNING = (
+        "job_weekly_retrain",
+        "job_generate_predictions",
+        "job_generate_champ_predictions",
+    )
+
+    @pytest.mark.parametrize("job_name", LONG_RUNNING)
+    def test_job_holds_sleep_off(self, job_name: str) -> None:
+        import inspect
+
+        import scheduler
+
+        source = inspect.getsource(getattr(scheduler, job_name))
+        assert "keep_system_awake(" in source, (
+            f"{job_name} runs long enough for Modern Standby to suspend it "
+            "but never holds the sleep request off; the machine can idle "
+            "underneath it and Task Scheduler will still call the run a "
+            "success"
+        )
+
+    @pytest.mark.parametrize("job_name", LONG_RUNNING)
+    def test_the_wrapper_still_runs_the_body(self, job_name: str) -> None:
+        """A hold around an empty wrapper protects nothing.
+
+        Matched line-wise rather than as a substring: `_generate_predictions()`
+        also occurs inside `def job_generate_predictions()`, so a plain `in`
+        check passes even when the wrapper's body is empty — the same vacuous
+        assertion that had to be fixed in `test_every_train_site_is_gated`.
+        """
+        import inspect
+
+        import scheduler
+
+        source = inspect.getsource(getattr(scheduler, job_name))
+        body = f"_{job_name.removeprefix('job_')}()"
+        assert any(line.strip() == body for line in source.splitlines()), (
+            f"{job_name} no longer calls {body}, so the work it holds the "
+            "machine awake for is not being run"
+        )

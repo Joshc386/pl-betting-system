@@ -16,6 +16,9 @@ import pandas as pd
 import pytest
 
 from data.build_canonical_dataset import (
+    ColumnCoverageError,
+    assert_column_coverage,
+    coverage_regressions,
     _LEAGUES,
     _backfill_canonical_values,
     _preserve_canonical_only_rows,
@@ -890,3 +893,281 @@ def test_stray_non_utf8_byte_does_not_lose_the_season(monkeypatch, tmp_path):
     cached = mod.download_season(4, "E0", str(tmp_path), use_cache=True)
     assert cached is not None
     assert len(cached) == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Column coverage on season addition
+#
+# `_map_columns` reads match stats with `df.get(...)`, so an upstream rename
+# yields an all-NaN column and the build still succeeds. These tests pin the
+# check that catches it before the rows reach training.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _seasons(spec: dict[int, dict[str, list]]) -> pd.DataFrame:
+    """Build a frame of {season_idx: {column: values}}."""
+    frames = []
+    for idx, cols in spec.items():
+        f = pd.DataFrame(cols)
+        f["SeasonIndex"] = idx
+        frames.append(f)
+    return pd.concat(frames, ignore_index=True)
+
+
+def test_column_that_arrives_empty_is_flagged():
+    """The rename case: populated for years, all-NaN in the new season."""
+    df = _seasons({
+        24: {"Home_Shots": [12.0, 9.0, 14.0, 11.0]},
+        25: {"Home_Shots": [10.0, 13.0, 8.0, 15.0]},
+        26: {"Home_Shots": [None, None, None, None]},
+    })
+
+    flagged = coverage_regressions(df, season_idx=26)
+
+    assert [c for c, _, _ in flagged] == ["Home_Shots"]
+
+
+def test_legitimately_sparse_enrichment_is_not_flagged():
+    """xG and injury columns only exist for seasons upstream covers.
+
+    Flagging those would block every season addition, and the check would be
+    turned off — which is worse than not having it.
+    """
+    df = _seasons({
+        24: {"home_xg": [None, None, 1.2, None]},
+        25: {"home_xg": [None, None, None, 0.9]},
+        26: {"home_xg": [None, None, None, None]},
+    })
+
+    assert coverage_regressions(df, season_idx=26) == []
+
+
+def test_a_complete_new_season_passes():
+    df = _seasons({
+        25: {"Home_Shots": [12.0, 9.0, 14.0, 11.0]},
+        26: {"Home_Shots": [10.0, 13.0, 8.0, 15.0]},
+    })
+
+    assert coverage_regressions(df, season_idx=26) == []
+
+
+def test_the_first_season_has_nothing_to_compare_against():
+    df = _seasons({0: {"Home_Shots": [None, None]}})
+
+    assert coverage_regressions(df, season_idx=0) == []
+
+
+def test_only_prior_seasons_form_the_reference():
+    """A later season must not vouch for an earlier one's missing column."""
+    df = _seasons({
+        25: {"Home_Shots": [None, None, None, None]},
+        26: {"Home_Shots": [10.0, 13.0, 8.0, 15.0]},
+    })
+
+    assert coverage_regressions(df, season_idx=25) == []
+
+
+def test_assert_names_every_regressed_column_and_both_rates():
+    """With no bypass flag, the message is the only route to action."""
+    df = _seasons({
+        25: {"Home_Shots": [12.0, 9.0], "Home_Corners": [4.0, 6.0]},
+        26: {"Home_Shots": [None, None], "Home_Corners": [None, None]},
+    })
+
+    with pytest.raises(ColumnCoverageError) as exc:
+        assert_column_coverage(df, season_idx=26)
+
+    assert "Home_Shots" in str(exc.value)
+    assert "Home_Corners" in str(exc.value)
+    assert "0%" in str(exc.value)
+
+
+def test_assert_is_silent_when_the_season_is_well_formed():
+    df = _seasons({
+        25: {"Home_Shots": [12.0, 9.0]},
+        26: {"Home_Shots": [10.0, 13.0]},
+    })
+
+    assert_column_coverage(df, season_idx=26)
+
+
+def test_betfair_populated_columns_are_not_judged():
+    """They are filled monthly by a separate job, not by the season CSV.
+
+    Judging them would fail every rollover added mid-cycle, and a check that
+    cries wolf at every rollover is a check that gets switched off.
+    """
+    df = _seasons({
+        25: {"Odds_Over_1.5": [1.2, 1.3], "Home_Shots": [12.0, 9.0]},
+        26: {"Odds_Over_1.5": [None, None], "Home_Shots": [10.0, 13.0]},
+    })
+
+    assert coverage_regressions(df, season_idx=26) == []
+
+
+def test_partial_season_does_not_flag_rolling_window_features():
+    """A season one round old has no 10-match window filled — and neither had
+    any prior season at the same point.
+
+    Judging a partial season against complete ones flagged every window
+    feature: EFL 2026/27's opening 12 matches read 0% on Home_ScoringRate_10
+    against 87% across three complete seasons, which blocked the rollover
+    rebuild on the day upstream published. That is an artefact of comparing
+    unlike slices, not the upstream rename this check exists to catch.
+
+    The reference fill rate here is deliberately 87.5% — above the 80%
+    `populated` threshold. Below it the column is never judged at all and the
+    test would pass whatever the slicing does.
+    """
+    # Unfilled for the opening 2 matches, filled for the remaining 14: 87.5%,
+    # matching the real Home_ScoringRate_10 rate that triggered the block.
+    window = [None, None] + [1.5] * 14
+    df = _seasons({
+        24: {"Home_ScoringRate_10": window, "Home_Shots": [11.0] * 16},
+        25: {"Home_ScoringRate_10": window, "Home_Shots": [12.0] * 16},
+        26: {"Home_ScoringRate_10": [None, None], "Home_Shots": [10.0, 9.0]},
+    })
+
+    assert coverage_regressions(df, season_idx=26) == []
+
+
+def test_partial_season_still_flags_a_genuinely_missing_column():
+    """The slice must not blunt the check.
+
+    Same two-match new season as above, but a column upstream populates from
+    the first whistle arrives empty. That is the rename case and must survive.
+    """
+    df = _seasons({
+        24: {"Home_ScoringRate_10": [None, None, 1.4, 1.6], "Home_Shots": [11.0] * 4},
+        25: {"Home_ScoringRate_10": [None, None, 1.5, 1.3], "Home_Shots": [12.0] * 4},
+        26: {"Home_ScoringRate_10": [None, None], "Home_Shots": [None, None]},
+    })
+
+    flagged = coverage_regressions(df, season_idx=26)
+
+    assert [c for c, _, _ in flagged] == ["Home_Shots"]
+
+
+def test_complete_new_season_compares_against_whole_reference_seasons():
+    """Slicing to len(new) must be a no-op once the season is complete."""
+    df = _seasons({
+        24: {"Home_Shots": [11.0, 12.0, 13.0, 14.0]},
+        25: {"Home_Shots": [10.0, 11.0, 12.0, 13.0]},
+        26: {"Home_Shots": [None, None, None, None]},
+    })
+
+    flagged = coverage_regressions(df, season_idx=26)
+
+    assert [c for c, _, _ in flagged] == ["Home_Shots"]
+
+
+class TestTheGuardJudgesTheSeasonThatWasAskedFor:
+    """Step 9 checked `SeasonIndex.max()`, not the season the config wants.
+
+    `build()` step 1 drops a season whose download returns nothing
+    (`if raw is not None and len(raw) > 0`). So an empty or failed download
+    for the configured season produced a canonical ending at the season
+    before, `newest` resolved to that, the guard compared it against seasons
+    older still, passed, and the build printed "coverage matches prior
+    seasons" over a canonical missing the entire current season.
+
+    That is the same silent-success shape the guard exists to catch, one
+    level up: it verified the shape of whatever arrived, never that the thing
+    asked for arrived at all.
+    """
+
+    @staticmethod
+    def _canonical(seasons):
+        rows = []
+        for idx, n in seasons:
+            for i in range(n):
+                rows.append({
+                    "SeasonIndex": idx,
+                    "Date": f"20{20 + idx}-01-{i % 28 + 1:02d}",
+                    "Home_Team": f"T{i % 12:02d}",
+                    "Away_Team": f"T{(i + 1) % 12:02d}",
+                    "HS": 10, "AS": 9,
+                })
+        return pd.DataFrame(rows)
+
+    def test_a_season_that_never_arrived_is_reported(self):
+        from data.build_canonical_dataset import (
+            MissingSeasonError, assert_season_present,
+        )
+
+        df = self._canonical([(23, 132), (24, 132), (25, 132)])
+
+        with pytest.raises(MissingSeasonError) as excinfo:
+            assert_season_present(df, 26)
+
+        assert "26" in str(excinfo.value)
+
+    def test_a_season_that_did_arrive_passes(self):
+        from data.build_canonical_dataset import assert_season_present
+
+        df = self._canonical([(24, 132), (25, 132), (26, 12)])
+
+        assert_season_present(df, 26)  # one round is still arrival
+
+    def test_the_guard_does_not_fall_back_to_an_older_season(self):
+        """The vacuous pass: 25 vs 22-24 says nothing about 26."""
+        from data.build_canonical_dataset import (
+            MissingSeasonError, assert_season_present,
+        )
+
+        df = self._canonical([(23, 132), (24, 132), (25, 132)])
+        assert int(df["SeasonIndex"].max()) == 25
+
+        with pytest.raises(MissingSeasonError):
+            assert_season_present(df, 26)
+
+
+class TestColumnsTheBuilderNullsItself:
+    """The guard flagged the builder's own deliberate nulling as a regression.
+
+    `_add_promotion_flags` sets Home_/Away_Promoted and Home_/Away_Relegated
+    to NaN for a season whose roster is not yet complete — "a part-loaded
+    season cannot say who is new, and guessing would assert something false".
+    The reference seasons have all four at 100%, so the new season reads 0%
+    against 100%, below the floor, and the rebuild aborts.
+
+    It fires between a season's opening fixture and the completion of round 1
+    (EFL round 1 routinely opens on a Friday night), and for as long as a
+    postponement leaves one side unplayed. These columns have a known owner
+    inside the builder, which is the same reason `_LAGGING_COLUMNS` exists.
+    """
+
+    @staticmethod
+    def _frame(flags_null):
+        import numpy as np
+        rows = []
+        for idx, n in ((23, 132), (24, 132), (25, 132), (26, 12)):
+            for i in range(n):
+                null = flags_null and idx == 26
+                rows.append({
+                    "SeasonIndex": idx,
+                    "Date": f"20{20 + idx}-01-{i % 28 + 1:02d}",
+                    "Home_Team": f"T{i % 12:02d}",
+                    "Away_Team": f"T{(i + 1) % 12:02d}",
+                    "HS": 10, "AS": 9,
+                    "Home_Promoted": np.nan if null else 0,
+                    "Away_Promoted": np.nan if null else 0,
+                    "Home_Relegated": np.nan if null else 0,
+                    "Away_Relegated": np.nan if null else 0,
+                })
+        return pd.DataFrame(rows)
+
+    def test_a_part_loaded_season_does_not_abort_the_rebuild(self):
+        assert_column_coverage(self._frame(flags_null=True), 26)
+
+    def test_a_real_column_loss_is_still_caught(self):
+        """Guards the test above: the exclusion must be narrow."""
+        import numpy as np
+
+        df = self._frame(flags_null=True)
+        df.loc[df["SeasonIndex"] == 26, "HS"] = np.nan
+
+        with pytest.raises(ColumnCoverageError) as excinfo:
+            assert_column_coverage(df, 26)
+
+        assert "HS" in str(excinfo.value)

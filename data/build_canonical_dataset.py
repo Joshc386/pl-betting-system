@@ -108,6 +108,179 @@ def _season_code(season_idx: int) -> str:
     return f"{start:02d}{end:02d}"
 
 
+class ColumnCoverageError(RuntimeError):
+    """A newly added season lost columns the existing ones populate."""
+
+
+# Filled by `scripts/betfair_monthly_update.py`, not by the season CSV, and on
+# a monthly cadence. A season added mid-cycle legitimately has them empty, so
+# judging them would fail every rollover and train the operator to switch the
+# check off. Named explicitly rather than pattern-matched: the point is that
+# each entry has a known other owner, not that "odds columns are exempt".
+_LAGGING_COLUMNS: tuple[str, ...] = (
+    "Odds_Over_1.5", "Odds_Under_1.5", "Odds_Source_1.5",
+    "Odds_Over_2.5", "Odds_Under_2.5", "Odds_Source_2.5",
+)
+
+# Columns this builder nulls on purpose, for the same "known other owner"
+# reason as the tuple above — except the owner is `_add_promotion_flags`, a
+# few hundred lines down. It blanks all four for a season whose roster is not
+# yet complete, because "a part-loaded season cannot say who is new, and
+# guessing would assert something false".
+#
+# The reference seasons carry them at 100%, so without this the new season
+# reads 0% against 100%, falls under the floor, and the rebuild aborts on the
+# builder's own deliberate act. That fires between a season's opening fixture
+# and the completion of round 1 — the EFL routinely opens on a Friday night —
+# and for as long as a postponement leaves one side unplayed. Precisely the
+# rollover window the guard was written to survive.
+_BUILDER_OWNED_COLUMNS: tuple[str, ...] = (
+    "Home_Promoted", "Away_Promoted", "Home_Relegated", "Away_Relegated",
+)
+
+
+def coverage_regressions(
+    df: pd.DataFrame,
+    season_idx: int,
+    *,
+    reference_seasons: int = 3,
+    populated: float = 0.8,
+    floor: float = 0.2,
+    exclude: tuple[str, ...] = _LAGGING_COLUMNS + _BUILDER_OWNED_COLUMNS,
+) -> list[tuple[str, float, float]]:
+    """Columns the reference seasons populate that *season_idx* does not.
+
+    `_map_columns` reads every match stat and odds column with `df.get(...)`,
+    which returns None when the upstream feed renames or drops one. That
+    becomes an all-NaN column, the build succeeds, and the models absorb the
+    nulls into confident-looking probabilities — the same "failure that looks
+    like success" the Freshness Gate exists to catch, one layer earlier. The
+    hard-indexed columns (Date, teams, goals, FTR) already raise KeyError, so
+    this covers the silent half.
+
+    Compares rates rather than naming columns, so it needs no hardcoded copy
+    of football-data.co.uk's schema to drift out of date.
+
+    Args:
+        df: The whole canonical, including the new season.
+        season_idx: The season being added.
+        reference_seasons: How many prior seasons to compare against.
+        populated: A column must be at least this filled in the reference to
+            be judged at all — enrichment (xG, injuries) is legitimately
+            sparse and must not be flagged.
+        floor: Below this fill rate in the new season, report it.
+
+    Returns:
+        (column, new_rate, reference_rate) per regression, worst first. Empty
+        when there is no prior season to compare against.
+    """
+    seasons = sorted(s for s in df["SeasonIndex"].dropna().unique()
+                     if s < season_idx)
+    if not seasons:
+        return []
+    new = df[df["SeasonIndex"] == season_idx]
+    if new.empty:
+        return []
+
+    # Compare like-for-like: the reference is each prior season's opening run,
+    # cut to the number of matches the new season actually has.
+    #
+    # A season one round old has no 10-match rolling window filled, and neither
+    # had any prior season at the same point. Judging a partial season against
+    # complete ones therefore flags every window feature: on the day EFL 2026/27
+    # was added, its 12 matches read 0% on Home_ScoringRate_10 against 87% across
+    # three complete seasons. That is a rollover artefact, not the upstream rename
+    # this check exists to catch, and the check has to survive the rollover to be
+    # worth having — that is exactly when the schema is most likely to move.
+    #
+    # Slicing preserves the power: measured on the first 12 matches of seasons
+    # 23-25, the window features read 0% and the real upstream columns
+    # (Home_Shots, Away_Corners, Home_Goals) read 100%, so a genuinely missing
+    # column is still 0% against ~100%. A complete new season takes every
+    # reference row and behaves exactly as before.
+    def _opening(season: float) -> pd.DataFrame:
+        rows = df[df["SeasonIndex"] == season]
+        # Sort when a Date is available; the canonical is assembled in date
+        # order anyway, and the synthetic frames in the tests carry no Date.
+        if "Date" in rows.columns:
+            rows = rows.sort_values("Date")
+        return rows.head(len(new))
+
+    ref = pd.concat([_opening(s) for s in seasons[-reference_seasons:]])
+    if ref.empty:
+        return []
+
+    out: list[tuple[str, float, float]] = []
+    for col in df.columns:
+        if col == "SeasonIndex" or col in exclude:
+            continue
+        ref_rate = float(ref[col].notna().mean())
+        if ref_rate < populated:
+            continue
+        new_rate = float(new[col].notna().mean())
+        if new_rate < floor:
+            out.append((col, new_rate, ref_rate))
+    return sorted(out, key=lambda r: r[1])
+
+
+class MissingSeasonError(RuntimeError):
+    """The season the config asked for is absent from the rebuilt canonical."""
+
+
+def assert_season_present(df: pd.DataFrame, season_idx: int) -> None:
+    """Raise unless *season_idx* actually arrived.
+
+    `build()` step 1 drops a season whose download returns nothing
+    (`if raw is not None and len(raw) > 0`), so a failed or empty fetch for the
+    configured season simply leaves it out. Step 9 then judged
+    `SeasonIndex.max()`, which quietly resolved to the season *before*, compared
+    it against seasons older still, passed, and printed "coverage matches prior
+    seasons" over a canonical missing the whole current season.
+
+    That is the guard's own failure mode one level up: it verified the shape of
+    whatever arrived, never that the thing asked for arrived at all. Coverage
+    cannot answer this — `coverage_regressions` returns [] for an absent season,
+    so emptiness needs its own check.
+
+    Raises:
+        MissingSeasonError: naming the season and what the canonical does hold.
+    """
+    if not df[df["SeasonIndex"] == season_idx].empty:
+        return
+    present = sorted(int(s) for s in df["SeasonIndex"].unique())
+    raise MissingSeasonError(
+        f"Season {season_idx} is configured as the current season but has no "
+        f"rows in the rebuilt canonical, which holds "
+        f"{present[0]}-{present[-1]}. The download most likely returned "
+        f"nothing; the build drops such a season silently, so nothing "
+        f"downstream would have said so."
+    )
+
+
+def assert_column_coverage(df: pd.DataFrame, season_idx: int, **kwargs) -> None:
+    """Raise unless a newly added season matches the shape of its predecessors.
+
+    Mirrors `assert_known_teams` (ADR 0008) and `assert_fresh` (ADR 0005):
+    one function asks, one insists.
+
+    Raises:
+        ColumnCoverageError: naming every regressed column and both rates.
+    """
+    bad = coverage_regressions(df, season_idx, **kwargs)
+    if not bad:
+        return
+    named = "; ".join(
+        f"{col} {new:.0%} filled vs {ref:.0%} in prior seasons"
+        for col, new, ref in bad
+    )
+    raise ColumnCoverageError(
+        f"Season {season_idx} lost {len(bad)} column(s) the prior seasons "
+        f"populate: {named}. The upstream feed most likely renamed them; "
+        f"check the raw CSV's header before rebuilding, because these land "
+        f"as silent nulls that training will not reject."
+    )
+
+
 def _serves_division(df: pd.DataFrame, div: str) -> bool:
     """True when every row of *df* belongs to the division that was asked for.
 
@@ -1204,6 +1377,18 @@ def build(
         print(f"  O/U {line}: betfair {int(src.get('betfair', 0))}, "
               f"b365 {int(src.get('b365', 0))}, "
               f"none {int(df[f'Odds_Source_{line}'].isna().sum())}")
+
+    # Step 9: the newest season must arrive in the same shape as the ones it
+    # joins. Checked before the write, so a feed that renamed a column leaves
+    # the canonical untouched rather than half-null.
+    # The season the config asked for, not the newest that happens to be
+    # present: those differ precisely when the current season failed to
+    # download, which is the case worth catching.
+    newest = int(s["last_season"])
+    assert_season_present(df, newest)
+    print(f"Checking column coverage for season {newest}...")
+    assert_column_coverage(df, newest)
+    print("  coverage matches prior seasons")
 
     # Save
     df.to_csv(s["output_path"], index=False)

@@ -96,6 +96,13 @@ _ALIASES = {
     "Tranmere Rovers FC": ["Tranmere", "Tranmere Rovers", "TRA"],
     # In the Championship from 2025/26. The odds feeds send "Wrexham AFC".
     "Wrexham AFC": ["Wrexham", "WRE"],
+    # Promoted to the Championship for 2026/27. The odds feeds send "Lincoln
+    # City"; football-data.co.uk uses "Lincoln". championship_predict and
+    # espn_scores already carry their own entries, but this table is what
+    # `assert_known_teams` consults, and that runs on the raw season file
+    # during every canonical rebuild. Without this the first rebuild after
+    # upstream publishes the 2026/27 E1 file raises and daily ingest stops.
+    "Lincoln City FC": ["Lincoln", "Lincoln City", "LIN"],
 }
 
 # FC, AFC and CF are decoration, not part of the name: "Arsenal" and

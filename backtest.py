@@ -789,7 +789,8 @@ def replay_season(cached, config=None, cumulative_bankroll=1.0, peak_bankroll=1.
 # Walk-forward runner
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def run_backtest(config=None, start_season=19, end_season=25, verbose=True):
+def run_backtest(config=None, start_season=19, end_season=25, verbose=True,
+                 data=None, dc_kwargs=None):
     """Walk-forward backtest across multiple seasons.
 
     Args:
@@ -798,20 +799,35 @@ def run_backtest(config=None, start_season=19, end_season=25, verbose=True):
         start_season: first test season (19 = 2019/20)
         end_season: last test season (25 = 2025/26)
         verbose: print per-season results
+        data: pre-loaded ``run_pipeline()`` result. Omit and it loads its
+            own, which is what every existing caller does. Supplied only to
+            let one process run several PL backtests without paying the
+            ~90s pipeline load per runner.
+        dc_kwargs: pre-tuned Dixon-Coles kwargs. Omit and it tunes its own.
+            ``tune_dc_params`` costs ~730s — the dominant cost of a run —
+            and ``btts_backtest`` derives it from the identical frame
+            (``full_df[SeasonIndex >= 14]``), so the two can share one
+            result. ``alt_lines_backtest`` tunes on the Betfair-merged
+            frame instead and must NOT be handed this value.
+
+    Passing either argument is a performance choice only: the defaults
+    reproduce the previous behaviour exactly.
     """
     if config is None:
         config = DEFAULT_CONFIG.copy()
 
-    if verbose:
-        print("Loading pipeline data...")
-    data = run_pipeline(verbose=False)
+    if data is None:
+        if verbose:
+            print("Loading pipeline data...")
+        data = run_pipeline(verbose=False)
     full_df = data["full_df"]
     features = list(data["features"])
 
-    if verbose:
-        print("Tuning Dixon-Coles hyperparameters...")
-    tune_df = full_df[full_df["SeasonIndex"] >= 14].copy()
-    dc_kwargs = tune_dc_params(tune_df)
+    if dc_kwargs is None:
+        if verbose:
+            print("Tuning Dixon-Coles hyperparameters...")
+        tune_df = full_df[full_df["SeasonIndex"] >= 14].copy()
+        dc_kwargs = tune_dc_params(tune_df)
 
     bw = config["blend_weight"]
     if verbose:

@@ -1440,6 +1440,82 @@ def add_tactical_features(df, ewm_span=8):
     return df
 
 
+# The rolling features a promoted side has no basis for, and so the ones the
+# cohort seeds. One list, because the pipeline fills these in training rows and
+# the predictor fills them in the live row — a feature seeded in one place and
+# not the other is the divergence ADR 0011 exists to prevent.
+PROMOTED_ROLLING_FEATURES = [
+    "Home_Past5Goals", "Away_Past5Goals",
+    "Home_Past5Conceded", "Away_Past5Conceded",
+    "Home_Past5Corners", "Away_Past5Corners",
+    "Home_AvgShotsOnTarget_5", "Away_AvgShotsOnTarget_5",
+    "Home_ShotRatio_5", "Away_ShotRatio_5",
+    "Home_ShotsPerGoal_5", "Away_ShotsPerGoal_5",
+    "Home_CR_5", "Away_CR_5",
+    "Home_ShotSuppression_5", "Away_ShotSuppression_5",
+    "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
+    "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
+    "Home_GoalDiff_5", "Away_GoalDiff_5",
+]
+
+
+def bottom5_cohort(df, season, features):
+    """What the division's weakest five looked like at the end of a season.
+
+    The seed a side promoted into the PL receives, and the only definition of
+    it. Two callers need this answer — the pipeline when it builds training
+    rows, the predictor when it builds a feature row for an unplayed fixture
+    — and they must not compute it separately. That is
+    [ADR 0011](docs/adr/0011-one-division-movement-seed-per-arrival.md)'s
+    contract applied to the PL: a feature cannot mean one quantity in
+    training and another at kick-off.
+
+    A promoted side's own history is never the seed. The only route into the
+    PL is promotion out of the EFL, so a returning side's most recent PL rows
+    are its relegation season — biased by construction, and stale besides.
+    The bottom-five cohort is both less biased and lower variance.
+
+    Args:
+        df: The PL Canonical Dataset.
+        season: The season to draw the cohort from — the one *before* the
+            side arrives.
+        features: Rolling feature names to average, each prefixed ``Home_``
+            or ``Away_``; the prefix selects the venue the average is taken
+            over, since a side's home and away form differ.
+
+    Returns:
+        Feature name -> cohort average, NaN where the season carries no
+        usable values for it.
+    """
+    prev_df = df[df["SeasonIndex"] == season]
+    if prev_df.empty:
+        return {feat: np.nan for feat in features}
+
+    # Position at each side's last home fixture: the final table.
+    last_match = prev_df.sort_values("Date").drop_duplicates(
+        "Home_Team", keep="last")
+    team_positions = {
+        row["Home_Team"]: row.get("Home_LeaguePosition", 20)
+        for _, row in last_match.iterrows()
+    }
+    bottom5_teams = sorted(
+        team_positions, key=lambda t: -team_positions.get(t, 20))[:5]
+
+    cohort = {}
+    for feat in features:
+        prefix = "Home" if feat.startswith("Home") else "Away"
+        team_col = f"{prefix}_Team"
+        vals = []
+        for team in bottom5_teams:
+            team_rows = prev_df[prev_df[team_col] == team]
+            if not team_rows.empty and feat in team_rows.columns:
+                last_val = team_rows.sort_values("Date").iloc[-1][feat]
+                if pd.notna(last_val):
+                    vals.append(last_val)
+        cohort[feat] = np.mean(vals) if vals else np.nan
+    return cohort
+
+
 def initialize_promoted_features(df):
     """
     Replace NaN/unreliable rolling features for promoted teams with
@@ -1455,20 +1531,7 @@ def initialize_promoted_features(df):
     """
     df = df.copy()
 
-    # Rolling features to initialize
-    rolling_features = [
-        "Home_Past5Goals", "Away_Past5Goals",
-        "Home_Past5Conceded", "Away_Past5Conceded",
-        "Home_Past5Corners", "Away_Past5Corners",
-        "Home_AvgShotsOnTarget_5", "Away_AvgShotsOnTarget_5",
-        "Home_ShotRatio_5", "Away_ShotRatio_5",
-        "Home_ShotsPerGoal_5", "Away_ShotsPerGoal_5",
-        "Home_CR_5", "Away_CR_5",
-        "Home_ShotSuppression_5", "Away_ShotSuppression_5",
-        "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
-        "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
-        "Home_GoalDiff_5", "Away_GoalDiff_5",
-    ]
+    rolling_features = PROMOTED_ROLLING_FEATURES
 
     blend_weights = {1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4, 5: 0.2}
     filled = 0
@@ -1488,35 +1551,9 @@ def initialize_promoted_features(df):
             continue
 
         # Compute bottom-5 averages from end of prior season
-        prev_mask = df["SeasonIndex"] == (season_idx - 1)
-        prev_df = df[prev_mask]
-        if prev_df.empty:
+        if df[df["SeasonIndex"] == (season_idx - 1)].empty:
             continue
-
-        # Get bottom-5 teams by league position (last match of prior season)
-        last_match = prev_df.sort_values("Date").drop_duplicates("Home_Team", keep="last")
-        # Combine home and away league positions
-        team_positions = {}
-        for _, row in last_match.iterrows():
-            team_positions[row["Home_Team"]] = row.get("Home_LeaguePosition", 20)
-        bottom5_teams = sorted(team_positions.keys(), key=lambda t: -team_positions.get(t, 20))[:5]
-
-        # Compute averages for bottom-5 teams at season end
-        bottom5_avgs = {}
-        for feat in rolling_features:
-            prefix = "Home" if feat.startswith("Home") else "Away"
-            # Get the feature values for bottom-5 teams in their last matches
-            vals = []
-            for team in bottom5_teams:
-                if prefix == "Home":
-                    team_rows = prev_df[prev_df["Home_Team"] == team]
-                else:
-                    team_rows = prev_df[prev_df["Away_Team"] == team]
-                if not team_rows.empty and feat in team_rows.columns:
-                    last_val = team_rows.sort_values("Date").iloc[-1][feat]
-                    if pd.notna(last_val):
-                        vals.append(last_val)
-            bottom5_avgs[feat] = np.mean(vals) if vals else np.nan
+        bottom5_avgs = bottom5_cohort(df, season_idx - 1, rolling_features)
 
         # Apply blended features to promoted teams' early matches
         for team in promoted_teams:

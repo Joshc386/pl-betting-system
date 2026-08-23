@@ -275,10 +275,20 @@ class DixonColesPredictor:
             return self._shrink_to_league(pooled_val, n_pool)
         return prior
 
-    def fit(self, df):
+    def fit(self, df, arrivals=None, route_priors=None):
         """Estimate venue-specific attack/defence ratings from historical match data.
         Maintains separate home/away ratings per team. Falls back to pooled estimate
         when a team has fewer than MIN_VENUE_MATCHES at a given venue.
+
+        Args:
+            df: Match history to estimate from.
+            arrivals: Sides new to the division, mapped to their route
+                ("relegated" / "promoted"). Their estimated rating is
+                replaced by their route's prior — see ADR 0011. Callers must
+                supply this; it cannot be derived from *df*, because a side
+                arriving next season has no rows in it yet.
+            route_priors: Route -> venue-aware prior. Falls back to the
+                single ``PRIORS`` bucket when absent.
         """
         # Choose scoring metric: xG if available, else goals
         if self.use_xg and "home_xg" in df.columns:
@@ -396,10 +406,47 @@ class DixonColesPredictor:
                 else:
                     self.defence_away[team] = self.PRIORS["defence_away"]
 
+        self.seed_arrivals(arrivals, route_priors)
+
         # Optionally refine with MLE
         if self.use_mle:
             self.fit_mle(df, alpha=self.mle_alpha)
 
+        return self
+
+    def seed_arrivals(self, arrivals, route_priors=None):
+        """Rate sides new to the division from their route (ADR 0011).
+
+        A returning side's history here is always its *exit* season, and
+        exit direction is the opposite of return direction — so Wolves carry
+        a title-winning rating and Bolton a relegation one. Decay is by
+        position in a team's own match sequence rather than by date, so the
+        gap is invisible to the weighting, and shrinkage keys on match count,
+        so a long-absent side is rated with near-total confidence.
+
+        Applied by overwriting after estimation rather than by skipping the
+        estimation loop, so the rating maths is untouched and every predict
+        path still finds a rating exactly where it expects one.
+
+        Callable at fit time or later: which sides are arriving is often not
+        knowable when the models are fitted — before a season's first results
+        land, the canonical holds no rows for it — but it is always knowable
+        once there is a fixture list.
+
+        Args:
+            arrivals: Team -> route ("relegated" / "promoted").
+            route_priors: Route -> venue-aware prior. Falls back to the
+                single ``PRIORS`` bucket when a route is absent.
+
+        Returns:
+            self, so it can be chained onto a fit.
+        """
+        for team, route in (arrivals or {}).items():
+            prior = (route_priors or {}).get(route, self.PRIORS)
+            self.attack_home[team] = prior["attack_home"]
+            self.attack_away[team] = prior["attack_away"]
+            self.defence_home[team] = prior["defence_home"]
+            self.defence_away[team] = prior["defence_away"]
         return self
 
     def fit_mle(self, df, alpha=0.01):

@@ -153,7 +153,12 @@ LEAGUES: dict[str, dict[str, Any]] = {
 
         # Historical seasons available
         "first_season_idx": 0,       # 2000/01 (football-data.co.uk)
-        "current_season_idx": 25,    # 2025/26
+        # Bumped 2026-08-21, the day upstream published E1 2026/27. This is
+        # the half of a season rollover that does not self-heal: while
+        # upstream had not published, a rebuild failed identically whether
+        # this said 25 or 26, so the Freshness Gate's "missing 11 fixtures"
+        # pointed only at upstream and hid the local half.
+        "current_season_idx": 26,    # 2026/27
     },
 }
 

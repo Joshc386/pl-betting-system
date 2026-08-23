@@ -27,6 +27,7 @@ import pandas as pd
 from typing import Optional
 
 from championship_pipeline import (
+    SEEDED_ROLLING_FEATURES,
     run_pipeline,
     CHAMP_ALL_FEATURES,
     CHAMP_OU15_FEATURES,
@@ -70,6 +71,15 @@ from api.oddspapi import (
     map_team as oddspapi_map_team,
 )
 from api.team_resolver import resolve_feed_team
+from division_movement import (
+    SeedParams,
+    arrivals_for,
+    fit_seed_params,
+    season_in_play,
+    recompute_two_sided,
+    seed_features,
+    seed_weight,
+)
 import api.odds_api as odds_api_module
 import api.oddspapi as oddspapi_module
 
@@ -350,6 +360,10 @@ class ChampionshipPredictor:
         self._val_mean_logits: dict[str, float] = {}
         # Phase C: two-phase early-season flag (set by generate_recommendations)
         self._is_early_season: bool = False
+        # Division Movement Seed constants (ADR 0011) — measured at train
+        # time, carried in the trained state, never refitted here.
+        self._seed_params_cache: SeedParams | None = None
+        self._pl_df: pd.DataFrame | None = None
 
         # Match analysis (all fixture-market-side rows for dashboard)
         self._match_analysis: list[dict] = []
@@ -388,6 +402,10 @@ class ChampionshipPredictor:
             "our_teams": self._our_teams,
             "cal_shifts": self._cal_shifts,
             "val_mean_logits": self._val_mean_logits,
+            # Measured at train time and carried, never refitted at predict
+            # time — two callers measuring their own constants is the same
+            # divergence ADR 0011 removes, one level further down.
+            "seed_params": self._seed_params_cache,
         }
         save_pickle(state, path, self._STATE_PATH, self._log,
                      label="Trained state")
@@ -422,6 +440,13 @@ class ChampionshipPredictor:
         self._our_teams = state["our_teams"]
         self._cal_shifts = state.get("cal_shifts", {})
         self._val_mean_logits = state.get("val_mean_logits", {})
+        # A pickle written before ADR 0011 has no seed params. Falling back
+        # to empty priors sends Dixon-Coles to its hand-picked bucket — the
+        # pre-ADR behaviour — rather than crashing on an older state file.
+        self._seed_params_cache = state.get("seed_params")
+        if self._seed_params_cache is None:
+            self._log("  No seed params (pre-ADR-0011 pickle) — "
+                      "arrivals fall back to the single prior bucket")
         if self._cal_shifts:
             self._log(f"  Calibration shifts: {self._cal_shifts}")
         else:
@@ -540,6 +565,16 @@ class ChampionshipPredictor:
 
         df = self._full_df
         train_df = df[df["SeasonIndex"] >= MIN_TRAIN_SEASON].copy()
+
+        # Division Movement Seed constants (ADR 0011), measured here so the
+        # predictor never refits them. Walk-forward by construction: only
+        # seasons below the one being seeded are read.
+        self._seed_params_cache = fit_seed_params(
+            df, self._pl_canonical(),
+            through_season=int(df["SeasonIndex"].max()) + 1)
+        self._log(
+            f"Seed params measured from {self._seed_params_cache.n_events} "
+            f"arrival events")
 
         # ── Per-market Dixon-Coles tuning (Option 2 Step 1) ──
         # Tune DC separately for each EFL market. The tune_dc_params_champ
@@ -939,12 +974,80 @@ class ChampionshipPredictor:
             early_season=getattr(self, "_is_early_season", False),
         )
 
+    def _fixture_feature_row(
+        self,
+        home: str,
+        away: str,
+        df: pd.DataFrame,
+        *,
+        season: int,
+        arrivals: dict[str, str],
+    ) -> pd.Series | None:
+        """The feature row a model scores for an unplayed fixture.
+
+        Searches the season being played *and* the one before it. The narrower
+        window — the latest season alone — was correct only while that season
+        was the completed prior one. From matchday 1 it makes a side that has
+        not yet played at a venue indistinguishable from a side that has never
+        played in the division, and the two want opposite answers: real
+        history for the first, a Division Movement Seed for the second.
+
+        Arrival is decided by *arrivals*, never by whether rows happen to
+        exist — CONTEXT.md defines it as present in season N and absent in
+        N-1, which is a fact about the side, not about the calendar.
+
+        Args:
+            home: Home team name.
+            away: Away team name.
+            df: The full canonical.
+            season: The season being played.
+            arrivals: Sides new to the division, mapped to their route.
+
+        Returns:
+            The feature row, or None when a side is neither an arrival nor
+            has any history in the window to build from.
+        """
+        window = df[df["SeasonIndex"].isin((season, season - 1))]
+        if window.empty:
+            return None
+
+        exact = window[(window["Home_Team"] == home)
+                       & (window["Away_Team"] == away)]
+        if not exact.empty:
+            return exact.sort_values("Date").iloc[-1]
+
+        home_rows = window[window["Home_Team"] == home].sort_values("Date")
+        away_rows = window[window["Away_Team"] == away].sort_values("Date")
+        home_arriving = home in arrivals
+        away_arriving = away in arrivals
+
+        # Neither an arrival nor a side with history here: nothing honest to
+        # build from, so the fixture is skipped rather than guessed at.
+        if (not home_arriving and home_rows.empty) or (
+                not away_arriving and away_rows.empty):
+            return None
+
+        if home_arriving or away_arriving:
+            return self._synthesize_promoted_fixture(
+                home, away, window, season=season,
+                home_missing=home_arriving, away_missing=away_arriving,
+                home_rows=home_rows, away_rows=away_rows,
+            )
+
+        row = home_rows.iloc[-1].copy()
+        away_row = away_rows.iloc[-1]
+        for col in row.index:
+            if col.startswith("Away_"):
+                row[col] = away_row[col]
+        return row
+
     def _synthesize_promoted_fixture(
         self,
         home: str,
         away: str,
         latest_df: pd.DataFrame,
         *,
+        season: int,
         home_missing: bool,
         away_missing: bool,
         home_rows: pd.DataFrame,
@@ -973,44 +1076,147 @@ class ChampionshipPredictor:
         if latest_df.empty:
             return None
 
-        # Compute league-average features from the current season
-        # Use median to be robust against outliers
-        league_medians = latest_df.median(numeric_only=True)
-
-        # Start from a template row (any existing row as structure)
-        template = latest_df.iloc[-1].copy()
-
+        # Division Movement Seed (ADR 0011). This used to fill the arriving
+        # side's half of the row with the *league median* — a median team is
+        # not what arrives, and measured against the cohort the pipeline has
+        # always trained on, the median overstated Over25_5 by 16 points.
+        # The seed is the same one the pipeline uses, so the row a model
+        # scores at kick-off matches the rows it learned from.
+        #
+        # `season` is supplied rather than derived. Deriving it as
+        # ``latest + 1`` read a season already under way as the one after it,
+        # so from matchday 1 the seed was drawn for the wrong season.
         if home_missing and away_missing:
-            # Both promoted — use league medians for everything
-            for col in template.index:
-                if col in league_medians.index:
-                    template[col] = league_medians[col]
-            template["Home_Team"] = home
-            template["Away_Team"] = away
-            template["Home_Promoted"] = 1
-            template["Away_Promoted"] = 1
+            template = latest_df.iloc[-1].copy()
         elif home_missing:
-            # Only home team is promoted — use away team's actual data
-            fixture_row = away_rows.iloc[-1].copy()
-            # Fill Home_ features with league medians
-            for col in fixture_row.index:
-                if col.startswith("Home_") and col in league_medians.index:
-                    fixture_row[col] = league_medians[col]
-            fixture_row["Home_Team"] = home
-            fixture_row["Home_Promoted"] = 1
-            template = fixture_row
+            template = away_rows.iloc[-1].copy()
         else:
-            # Only away team is promoted — use home team's actual data
-            fixture_row = home_rows.iloc[-1].copy()
-            # Fill Away_ features with league medians
-            for col in fixture_row.index:
-                if col.startswith("Away_") and col in league_medians.index:
-                    fixture_row[col] = league_medians[col]
-            fixture_row["Away_Team"] = away
-            fixture_row["Away_Promoted"] = 1
-            template = fixture_row
+            template = home_rows.iloc[-1].copy()
 
+        for side, arriving, missing, rows in (
+            ("Home", home, home_missing, home_rows),
+            ("Away", away, away_missing, away_rows),
+        ):
+            if not missing:
+                continue
+
+            # An arrival with matches behind it is a side with real form, and
+            # the template carries some *other* club's values for this half —
+            # it was built from the opposite side's last fixture. Take the
+            # side's own latest row at this venue first, exactly as a side
+            # with history gets, then blend the seed on top.
+            own = rows[rows["SeasonIndex"] == season] if not rows.empty                 else rows
+            if not own.empty:
+                latest = own.iloc[-1]
+                for column in template.index:
+                    if column.startswith(f"{side}_"):
+                        template[column] = latest[column]
+
+            wanted = [c for c in template.index if c.startswith(f"{side}_")]
+            seeded = seed_features(
+                self._full_df, self._pl_canonical(), arriving, season,
+                wanted, self._seed_params(),
+            )
+
+            # Match number is counted per venue and within this season, the
+            # way `championship_pipeline.initialize_promoted_features` counts
+            # it. Arrival picks the route; how much of the seed survives is a
+            # question about matches played, and gating on arrival alone left
+            # the seed in place for the whole season.
+            weight = seed_weight(len(own))
+            blend_set = set(SEEDED_ROLLING_FEATURES)
+            for column, value in seeded.items():
+                if pd.isna(value):
+                    continue
+                actual = template.get(column, np.nan)
+                if own.empty or pd.isna(actual):
+                    template[column] = value
+                elif column in blend_set and weight:
+                    template[column] = weight * value + (1 - weight) * actual
+                # Otherwise the side's own value stands: past the window, or
+                # a feature training never blended.
+
+            template[f"{side}_Team"] = arriving
+            template[f"{side}_Promoted"] = 1
+
+        recompute_two_sided(template)
         return template
+
+    def _seed_dixon_coles(self, current_teams: set[str]) -> dict[str, str]:
+        """Rate this season's arrivals from their route, in every market.
+
+        Deliberately driven by the fixture list rather than the canonical.
+        Before a season's first results land the canonical holds no rows for
+        it, so ``arrivals()`` sees nothing — yet that pre-season window is
+        exactly when a returning side is most dangerous, because Dixon-Coles
+        still carries the rating from its *exit* season. The odds feed knows
+        who is playing; the canonical does not know yet.
+
+        Args:
+            current_teams: Sides in this season's fixture list.
+
+        Returns:
+            The arrivals seeded, mapped to their route.
+        """
+        if self._full_df is None or self._full_df.empty:
+            return {}
+
+        season = season_in_play(self._full_df)
+        incoming = arrivals_for(
+            self._full_df, self._pl_canonical(), season,
+            fixture_teams=current_teams,
+        )
+        if not incoming:
+            return {}
+
+        # The seed is for the window before a side has a record worth rating.
+        # Past it, Dixon-Coles has fitted the side on its actual results and
+        # the route prior would discard every one of them — including the
+        # estimate the weekly retrain had just produced, on the very next
+        # scan. Gated on `seed_weight` rather than a second threshold, so the
+        # rating and the feature row can never disagree about when the seed
+        # stops applying.
+        season_rows = self._full_df[self._full_df["SeasonIndex"] == season]
+        played = pd.concat(
+            [season_rows["Home_Team"], season_rows["Away_Team"]]
+        ).value_counts()
+        incoming = {
+            team: route for team, route in incoming.items()
+            if seed_weight(int(played.get(team, 0))) > 0
+        }
+        if not incoming:
+            return {}
+
+        priors = self._seed_params().priors
+        for models in (self._ou_models, self._ou15_models, self._btts_models):
+            dc = (models or {}).get("dc")
+            if dc is not None:
+                dc.seed_arrivals(incoming, priors)
+
+        self._log(
+            f"Division Movement Seed applied to {len(incoming)} arrival(s): "
+            + ", ".join(f"{t} ({r})" for t, r in sorted(incoming.items())))
+        return incoming
+
+    def _pl_canonical(self) -> pd.DataFrame:
+        """The PL canonical, cached — it is what tells the two routes apart."""
+        if getattr(self, "_pl_df", None) is None:
+            path = get_league_config("PL")["csv_path"]
+            self._pl_df = (
+                pd.read_csv(path, low_memory=False)
+                if os.path.exists(path) else pd.DataFrame())
+        return self._pl_df
+
+    def _seed_params(self) -> SeedParams:
+        """Seed constants, measured at train time and carried in the state.
+
+        Refitting here would let the two callers land on different numbers,
+        which is the divergence ADR 0011 exists to remove — one definition
+        is not enough if each caller measures its own constants.
+        """
+        if getattr(self, "_seed_params_cache", None) is None:
+            self._seed_params_cache = SeedParams(priors={}, n_events=0)
+        return self._seed_params_cache
 
     def generate_recommendations(
         self,
@@ -1131,8 +1337,18 @@ class ChampionshipPredictor:
 
         # Build fixture features
         df = self._full_df
-        latest_season = df["SeasonIndex"].max()
-        latest_df = df[df["SeasonIndex"] == latest_season].copy()
+        season = season_in_play(df)
+
+        # Division Movement Seed (ADR 0011). Driven by the fixture list, not
+        # the canonical: a side arriving this season has no rows here yet,
+        # and pre-season is precisely when Dixon-Coles would otherwise price
+        # it on its exit season — Wolves on a 2017/18 title win.
+        resolved = set()
+        for match in matches:
+            home, away = _match_champ_teams(match, self._our_teams)
+            if home is not None and away is not None:
+                resolved.update((home, away))
+        incoming = self._seed_dixon_coles(resolved)
 
         for match in matches:
             home, away = _match_champ_teams(match, self._our_teams)
@@ -1142,41 +1358,16 @@ class ChampionshipPredictor:
                     f"{match['away_team']} (team mapping failed)")
                 continue
 
-            # Find feature row for this fixture
-            fixture_mask = (
-                (latest_df["Home_Team"] == home)
-                & (latest_df["Away_Team"] == away)
-            )
-            if fixture_mask.sum() == 0:
-                # Synthesise from most recent home/away rows
-                home_rows = latest_df[latest_df["Home_Team"] == home]
-                away_rows = latest_df[latest_df["Away_Team"] == away]
-                home_missing = len(home_rows) == 0
-                away_missing = len(away_rows) == 0
-                if home_missing or away_missing:
-                    # Newly promoted team(s) — synthesise from league averages
-                    fixture_row = self._synthesize_promoted_fixture(
-                        home, away, latest_df,
-                        home_missing=home_missing,
-                        away_missing=away_missing,
-                        home_rows=home_rows,
-                        away_rows=away_rows,
-                    )
-                    if fixture_row is None:
-                        self._log(f"Skipping {home} vs {away} (no data)")
-                        continue
-                    self._log(
-                        f"Synthesised features for {home} vs {away} "
-                        f"(promoted team{'s' if home_missing and away_missing else ''})"
-                    )
-                else:
-                    fixture_row = home_rows.iloc[-1].copy()
-                    away_row = away_rows.iloc[-1]
-                    for col in fixture_row.index:
-                        if col.startswith("Away_"):
-                            fixture_row[col] = away_row[col]
-            else:
-                fixture_row = latest_df[fixture_mask].iloc[-1]
+            fixture_row = self._fixture_feature_row(
+                home, away, df, season=season, arrivals=incoming)
+            if fixture_row is None:
+                self._log(f"Skipping {home} vs {away} (no data)")
+                continue
+            seeded = [t for t in (home, away) if t in incoming]
+            if seeded:
+                self._log(
+                    f"Seeded {home} vs {away} "
+                    f"(new to the division: {', '.join(seeded)})")
 
             kickoff = match.get("commence_time", "")
             op_data = oddspapi_data.get((home, away))

@@ -17,6 +17,7 @@ from scipy.stats import poisson as poisson_dist
 
 import os
 
+from division_movement import SeedParams, seed_features
 from features.common import (
     add_congestion_features,
     add_defensive_components,
@@ -863,6 +864,19 @@ def _get_pl_teams_by_season() -> dict[int, set[str]]:
     return result
 
 
+def _load_pl_canonical() -> pd.DataFrame:
+    """The PL canonical, or an empty frame when it is not on disk.
+
+    The Division Movement Seed needs it to tell a side dropping in from
+    above from one coming up from below. Absent, every arrival reads as
+    promoted — the same fallback ``_get_pl_teams_by_season`` already takes.
+    """
+    path = get_league_config("PL")["csv_path"]
+    if not os.path.exists(path):
+        return pd.DataFrame()
+    return pd.read_csv(path, low_memory=False)
+
+
 def _detect_new_teams(
     df: pd.DataFrame,
 ) -> dict[int, set[str]]:
@@ -887,6 +901,61 @@ def _detect_new_teams(
         if entered:
             new_teams[int(season_idx)] = entered
     return new_teams
+
+
+# The features the seed blends into an arriving side's first five
+# matches at a venue. Named at module level so the predictor can blend
+# exactly this set and no other — a live row that blends a wider set
+# than training did is the same divergence ADR 0011 exists to close,
+# arriving from the opposite direction.
+SEEDED_ROLLING_FEATURES = [
+    # CSV-sourced rolling (5-game)
+    "Home_Past5Goals", "Away_Past5Goals",
+    "Home_Past5Conceded", "Away_Past5Conceded",
+    "Home_Past5Corners", "Away_Past5Corners",
+    "Home_Past5CornersConceded", "Away_Past5CornersConceded",
+    "Home_AvgShotsOnTarget_5", "Away_AvgShotsOnTarget_5",
+    "Home_ShotRatio_5", "Away_ShotRatio_5",
+    "Home_ShotsPerGoal_5", "Away_ShotsPerGoal_5",
+    "Home_CR_5", "Away_CR_5",
+    "Home_CR_20", "Away_CR_20",
+    "Home_SOT_CR_5", "Away_SOT_CR_5",
+    "Home_SOT_CR_20", "Away_SOT_CR_20",
+    "Home_ShotSuppression_5", "Away_ShotSuppression_5",
+    "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
+    "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
+    # Derived rolling
+    "Home_GoalDiff_5", "Away_GoalDiff_5",
+    # Advanced rolling
+    "Home_Over25_5", "Away_Over25_5",
+    "Home_BTTS_5", "Away_BTTS_5",
+    "Home_CS_5", "Away_CS_5",
+    "Home_TGAvg_5", "Away_TGAvg_5",
+    "Home_GPG_20", "Away_GPG_20",
+    "Home_GAPG_20", "Away_GAPG_20",
+    # EWM
+    "Home_Over25_EWM10", "Away_Over25_EWM10",
+    "Home_TGAvg_EWM10", "Away_TGAvg_EWM10",
+    "Home_BTTS_EWM10", "Away_BTTS_EWM10",
+    "Home_GPG_EWM10", "Away_GPG_EWM10",
+    # Corners rolling
+    "Home_CornersAvg_5", "Away_CornersAvg_5",
+    "Home_CornersConcAvg_5", "Away_CornersConcAvg_5",
+    # Half-time
+    "Home_HT_Scored_5", "Away_HT_Scored_5",
+    "Home_HT_Conceded_5", "Away_HT_Conceded_5",
+    "Home_HT_TG_5", "Away_HT_TG_5",
+    "Home_HT_Over05_5", "Away_HT_Over05_5",
+    "Home_HT_Over15_5", "Away_HT_Over15_5",
+    # Discipline
+    "Home_YellowCards_5", "Away_YellowCards_5",
+    "Home_Fouls_5", "Away_Fouls_5",
+    # BTTS-specific
+    "Home_FTS_5", "Away_FTS_5",
+    "Home_FTS_10", "Away_FTS_10",
+    "Home_BTTS_10", "Away_BTTS_10",
+    "Home_GoalStd_10", "Away_GoalStd_10",
+]
 
 
 def initialize_promoted_features(
@@ -924,54 +993,7 @@ def initialize_promoted_features(
 
     # Rolling features to initialise (all window-based features that are
     # unreliable or NaN for teams with no Championship history)
-    rolling_features = [
-        # CSV-sourced rolling (5-game)
-        "Home_Past5Goals", "Away_Past5Goals",
-        "Home_Past5Conceded", "Away_Past5Conceded",
-        "Home_Past5Corners", "Away_Past5Corners",
-        "Home_Past5CornersConceded", "Away_Past5CornersConceded",
-        "Home_AvgShotsOnTarget_5", "Away_AvgShotsOnTarget_5",
-        "Home_ShotRatio_5", "Away_ShotRatio_5",
-        "Home_ShotsPerGoal_5", "Away_ShotsPerGoal_5",
-        "Home_CR_5", "Away_CR_5",
-        "Home_CR_20", "Away_CR_20",
-        "Home_SOT_CR_5", "Away_SOT_CR_5",
-        "Home_SOT_CR_20", "Away_SOT_CR_20",
-        "Home_ShotSuppression_5", "Away_ShotSuppression_5",
-        "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
-        "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
-        # Derived rolling
-        "Home_GoalDiff_5", "Away_GoalDiff_5",
-        # Advanced rolling
-        "Home_Over25_5", "Away_Over25_5",
-        "Home_BTTS_5", "Away_BTTS_5",
-        "Home_CS_5", "Away_CS_5",
-        "Home_TGAvg_5", "Away_TGAvg_5",
-        "Home_GPG_20", "Away_GPG_20",
-        "Home_GAPG_20", "Away_GAPG_20",
-        # EWM
-        "Home_Over25_EWM10", "Away_Over25_EWM10",
-        "Home_TGAvg_EWM10", "Away_TGAvg_EWM10",
-        "Home_BTTS_EWM10", "Away_BTTS_EWM10",
-        "Home_GPG_EWM10", "Away_GPG_EWM10",
-        # Corners rolling
-        "Home_CornersAvg_5", "Away_CornersAvg_5",
-        "Home_CornersConcAvg_5", "Away_CornersConcAvg_5",
-        # Half-time
-        "Home_HT_Scored_5", "Away_HT_Scored_5",
-        "Home_HT_Conceded_5", "Away_HT_Conceded_5",
-        "Home_HT_TG_5", "Away_HT_TG_5",
-        "Home_HT_Over05_5", "Away_HT_Over05_5",
-        "Home_HT_Over15_5", "Away_HT_Over15_5",
-        # Discipline
-        "Home_YellowCards_5", "Away_YellowCards_5",
-        "Home_Fouls_5", "Away_Fouls_5",
-        # BTTS-specific
-        "Home_FTS_5", "Away_FTS_5",
-        "Home_FTS_10", "Away_FTS_10",
-        "Home_BTTS_10", "Away_BTTS_10",
-        "Home_GoalStd_10", "Away_GoalStd_10",
-    ]
+    rolling_features = SEEDED_ROLLING_FEATURES
     # Only keep features actually present in the DataFrame
     rolling_features = [f for f in rolling_features if f in df.columns]
 
@@ -981,6 +1003,7 @@ def initialize_promoted_features(
     # Cross-reference PL data to classify new teams
     pl_teams_by_season = _get_pl_teams_by_season()
     new_teams_by_season = _detect_new_teams(df)
+    pl_df = _load_pl_canonical()
 
     for season_idx in sorted(df["SeasonIndex"].unique()):
         if season_idx == 0:
@@ -996,73 +1019,23 @@ def initialize_promoted_features(
         pl_relegated = new_teams & pl_prior
         l1_promoted = new_teams - pl_relegated
 
-        # Compute reference averages from prior Championship season
-        prev_mask = df["SeasonIndex"] == (season_idx - 1)
-        prev_df = df[prev_mask]
-        if prev_df.empty:
+        if df[df["SeasonIndex"] == (season_idx - 1)].empty:
             continue
-
-        # Get league positions from last match of prior season
-        last_matches = prev_df.sort_values("Date").drop_duplicates(
-            "Home_Team", keep="last"
-        )
-        team_positions: dict[str, float] = {}
-        for _, row in last_matches.iterrows():
-            team_positions[row["Home_Team"]] = row.get(
-                "Home_LeaguePosition", 20
-            )
-
-        # Bottom-5 teams (worst league positions) for L1-promoted reference
-        bottom5_teams = sorted(
-            team_positions.keys(),
-            key=lambda t: -team_positions.get(t, 20),
-        )[:5]
-
-        # Mid-table teams (positions 8-16) for PL-relegated reference
-        sorted_teams = sorted(
-            team_positions.keys(),
-            key=lambda t: team_positions.get(t, 12),
-        )
-        midtable_teams = [
-            t for t in sorted_teams
-            if 8 <= team_positions.get(t, 99) <= 16
-        ]
-        # Fallback: if not enough mid-table teams, use positions 6-18
-        if len(midtable_teams) < 3:
-            midtable_teams = [
-                t for t in sorted_teams
-                if 6 <= team_positions.get(t, 99) <= 18
-            ]
-
-        def _compute_reference_avgs(
-            reference_teams: list[str],
-        ) -> dict[str, float]:
-            """Average the last-match feature values for a set of reference teams."""
-            avgs: dict[str, float] = {}
-            for feat in rolling_features:
-                prefix = "Home" if feat.startswith("Home") else "Away"
-                vals: list[float] = []
-                for team in reference_teams:
-                    if prefix == "Home":
-                        team_rows = prev_df[prev_df["Home_Team"] == team]
-                    else:
-                        team_rows = prev_df[prev_df["Away_Team"] == team]
-                    if not team_rows.empty and feat in team_rows.columns:
-                        last_val = team_rows.sort_values("Date").iloc[-1][feat]
-                        if pd.notna(last_val):
-                            vals.append(last_val)
-                avgs[feat] = float(np.mean(vals)) if vals else np.nan
-            return avgs
-
-        bottom5_avgs = _compute_reference_avgs(bottom5_teams)
-        midtable_avgs = _compute_reference_avgs(midtable_teams)
 
         # Apply blended features
         season_mask = df["SeasonIndex"] == season_idx
 
         for team in new_teams:
-            # Select the right reference group
-            ref_avgs = midtable_avgs if team in pl_relegated else bottom5_avgs
+            # Division Movement Seed (ADR 0011). The cohort logic that used
+            # to live here now lives in one place, so the row the predictor
+            # scores at kick-off is built from the same definition as the
+            # rows trained on. Route is derived inside the seed and agrees
+            # with the pl_relegated split above on all 150 historical
+            # arrivals — see tests/test_division_movement.py.
+            ref_avgs = seed_features(
+                df, pl_df, team, int(season_idx), rolling_features,
+                SeedParams(priors={}, n_events=0),
+            )
 
             for prefix in ["Home", "Away"]:
                 team_col = f"{prefix}_Team"

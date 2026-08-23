@@ -16,6 +16,7 @@ import os
 import sys
 import subprocess
 import logging
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -29,6 +30,59 @@ UK_TZ = ZoneInfo("Europe/London")
 
 # Reference to the global scheduler instance (set in create_scheduler)
 _scheduler: BackgroundScheduler | None = None
+
+# Windows power-request flags. Modern Standby (S0 low-power idle) suspends
+# long-running console processes and the console session can tear down across
+# the resume — on 2026-08-17 the weekly retrain slept 18 minutes in and died
+# with 0xC000013A ninety seconds after the machine woke. Task Scheduler logged
+# that run as "successfully completed", so neither the exit code nor
+# RestartCount caught it. See docs/adr/0006-task-scheduler-for-data-critical-jobs.md.
+_ES_CONTINUOUS = 0x80000000
+_ES_SYSTEM_REQUIRED = 0x00000001
+
+
+@contextmanager
+def keep_system_awake(label: str):
+    """Hold a power request so Windows will not sleep during a long job.
+
+    Deliberately a *request*, not a settings change: it keeps the system
+    awake without keeping the display on, applies only for the duration of
+    the block, and is released by Windows automatically if the process dies.
+    Nothing about the machine's power plan is modified, so this cannot
+    outlive the job it protects.
+
+    Failure to acquire is logged and ignored — a retrain that cannot hold a
+    power request should still retrain.
+
+    Args:
+        label: Job name, for the log line.
+    """
+    held = False
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            held = bool(ctypes.windll.kernel32.SetThreadExecutionState(
+                _ES_CONTINUOUS | _ES_SYSTEM_REQUIRED))
+        except Exception as exc:  # noqa: BLE001 - never block the job
+            logger.warning("Could not hold a power request for %s: %s",
+                           label, exc)
+        if held:
+            logger.info("Holding sleep off for %s", label)
+        else:
+            logger.warning("Power request refused for %s - the machine may "
+                           "sleep mid-job", label)
+    try:
+        yield held
+    finally:
+        if held:
+            try:
+                import ctypes
+                ctypes.windll.kernel32.SetThreadExecutionState(_ES_CONTINUOUS)
+                logger.info("Released the sleep hold for %s", label)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not release the power request for %s: "
+                               "%s", label, exc)
+
 
 # Cross-process lock so the three settle paths — the evening/morning scheduler
 # jobs and daily_settle.bat (-> run.py settle) — never settle concurrently.
@@ -171,6 +225,16 @@ def job_weekly_retrain() -> None:
     from Task Scheduler at 06:00 and has already rebuilt each league's
     Canonical Dataset by the time this job fires (ADR 0006).
     """
+    # Held for the whole job: this is the one scheduled task long enough
+    # for Modern Standby to suspend it mid-run, which is how the
+    # 2026-08-17 run died 18 minutes in while reporting success.
+    with keep_system_awake("weekly retrain"):
+        _weekly_retrain()
+
+
+def _weekly_retrain() -> None:
+    """The retrain itself. Wrapped by :func:`job_weekly_retrain`."""
+
     logger.info("Starting weekly retrain...")
     print(f"[{datetime.now():%H:%M:%S}] Weekly retrain starting...")
 
@@ -534,7 +598,18 @@ def job_plan_today() -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def job_generate_predictions() -> None:
-    """Full PL prediction (retrain + odds + save). Used by CLI run-predict."""
+    """Full PL prediction (retrain + odds + save). Used by CLI run-predict.
+
+    Held awake for the same reason as the weekly retrain: this job retrains
+    Dixon-Coles, so it runs well past the idle timeout Modern Standby uses.
+    A run on 2026-08-21 died at 18:03 with standby having entered at 17:54.
+    """
+    with keep_system_awake("PL predictions"):
+        _generate_predictions()
+
+
+def _generate_predictions() -> None:
+    """The PL prediction itself. Wrapped by :func:`job_generate_predictions`."""
     logger.info("Starting PL prediction generation...")
     try:
         from predict import LivePredictor
@@ -566,7 +641,20 @@ def job_generate_predictions() -> None:
 
 
 def job_generate_champ_predictions() -> None:
-    """Full Championship prediction. Used by CLI run-champ."""
+    """Full Championship prediction. Used by CLI run-champ.
+
+    Held awake for the same reason as the PL job above — it retrains
+    Dixon-Coles and runs long past Modern Standby's idle timeout.
+    """
+    with keep_system_awake("Championship predictions"):
+        _generate_champ_predictions()
+
+
+def _generate_champ_predictions() -> None:
+    """The Championship prediction itself.
+
+    Wrapped by :func:`job_generate_champ_predictions`.
+    """
     logger.info("Starting Championship prediction generation...")
     try:
         from championship_predict import ChampionshipPredictor
