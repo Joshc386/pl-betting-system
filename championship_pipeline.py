@@ -903,6 +903,61 @@ def _detect_new_teams(
     return new_teams
 
 
+# The features the seed blends into an arriving side's first five
+# matches at a venue. Named at module level so the predictor can blend
+# exactly this set and no other — a live row that blends a wider set
+# than training did is the same divergence ADR 0011 exists to close,
+# arriving from the opposite direction.
+SEEDED_ROLLING_FEATURES = [
+    # CSV-sourced rolling (5-game)
+    "Home_Past5Goals", "Away_Past5Goals",
+    "Home_Past5Conceded", "Away_Past5Conceded",
+    "Home_Past5Corners", "Away_Past5Corners",
+    "Home_Past5CornersConceded", "Away_Past5CornersConceded",
+    "Home_AvgShotsOnTarget_5", "Away_AvgShotsOnTarget_5",
+    "Home_ShotRatio_5", "Away_ShotRatio_5",
+    "Home_ShotsPerGoal_5", "Away_ShotsPerGoal_5",
+    "Home_CR_5", "Away_CR_5",
+    "Home_CR_20", "Away_CR_20",
+    "Home_SOT_CR_5", "Away_SOT_CR_5",
+    "Home_SOT_CR_20", "Away_SOT_CR_20",
+    "Home_ShotSuppression_5", "Away_ShotSuppression_5",
+    "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
+    "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
+    # Derived rolling
+    "Home_GoalDiff_5", "Away_GoalDiff_5",
+    # Advanced rolling
+    "Home_Over25_5", "Away_Over25_5",
+    "Home_BTTS_5", "Away_BTTS_5",
+    "Home_CS_5", "Away_CS_5",
+    "Home_TGAvg_5", "Away_TGAvg_5",
+    "Home_GPG_20", "Away_GPG_20",
+    "Home_GAPG_20", "Away_GAPG_20",
+    # EWM
+    "Home_Over25_EWM10", "Away_Over25_EWM10",
+    "Home_TGAvg_EWM10", "Away_TGAvg_EWM10",
+    "Home_BTTS_EWM10", "Away_BTTS_EWM10",
+    "Home_GPG_EWM10", "Away_GPG_EWM10",
+    # Corners rolling
+    "Home_CornersAvg_5", "Away_CornersAvg_5",
+    "Home_CornersConcAvg_5", "Away_CornersConcAvg_5",
+    # Half-time
+    "Home_HT_Scored_5", "Away_HT_Scored_5",
+    "Home_HT_Conceded_5", "Away_HT_Conceded_5",
+    "Home_HT_TG_5", "Away_HT_TG_5",
+    "Home_HT_Over05_5", "Away_HT_Over05_5",
+    "Home_HT_Over15_5", "Away_HT_Over15_5",
+    # Discipline
+    "Home_YellowCards_5", "Away_YellowCards_5",
+    "Home_Fouls_5", "Away_Fouls_5",
+    # BTTS-specific
+    "Home_FTS_5", "Away_FTS_5",
+    "Home_FTS_10", "Away_FTS_10",
+    "Home_BTTS_10", "Away_BTTS_10",
+    "Home_GoalStd_10", "Away_GoalStd_10",
+]
+
+
 def initialize_promoted_features(
     df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, int]:
@@ -938,54 +993,7 @@ def initialize_promoted_features(
 
     # Rolling features to initialise (all window-based features that are
     # unreliable or NaN for teams with no Championship history)
-    rolling_features = [
-        # CSV-sourced rolling (5-game)
-        "Home_Past5Goals", "Away_Past5Goals",
-        "Home_Past5Conceded", "Away_Past5Conceded",
-        "Home_Past5Corners", "Away_Past5Corners",
-        "Home_Past5CornersConceded", "Away_Past5CornersConceded",
-        "Home_AvgShotsOnTarget_5", "Away_AvgShotsOnTarget_5",
-        "Home_ShotRatio_5", "Away_ShotRatio_5",
-        "Home_ShotsPerGoal_5", "Away_ShotsPerGoal_5",
-        "Home_CR_5", "Away_CR_5",
-        "Home_CR_20", "Away_CR_20",
-        "Home_SOT_CR_5", "Away_SOT_CR_5",
-        "Home_SOT_CR_20", "Away_SOT_CR_20",
-        "Home_ShotSuppression_5", "Away_ShotSuppression_5",
-        "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
-        "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
-        # Derived rolling
-        "Home_GoalDiff_5", "Away_GoalDiff_5",
-        # Advanced rolling
-        "Home_Over25_5", "Away_Over25_5",
-        "Home_BTTS_5", "Away_BTTS_5",
-        "Home_CS_5", "Away_CS_5",
-        "Home_TGAvg_5", "Away_TGAvg_5",
-        "Home_GPG_20", "Away_GPG_20",
-        "Home_GAPG_20", "Away_GAPG_20",
-        # EWM
-        "Home_Over25_EWM10", "Away_Over25_EWM10",
-        "Home_TGAvg_EWM10", "Away_TGAvg_EWM10",
-        "Home_BTTS_EWM10", "Away_BTTS_EWM10",
-        "Home_GPG_EWM10", "Away_GPG_EWM10",
-        # Corners rolling
-        "Home_CornersAvg_5", "Away_CornersAvg_5",
-        "Home_CornersConcAvg_5", "Away_CornersConcAvg_5",
-        # Half-time
-        "Home_HT_Scored_5", "Away_HT_Scored_5",
-        "Home_HT_Conceded_5", "Away_HT_Conceded_5",
-        "Home_HT_TG_5", "Away_HT_TG_5",
-        "Home_HT_Over05_5", "Away_HT_Over05_5",
-        "Home_HT_Over15_5", "Away_HT_Over15_5",
-        # Discipline
-        "Home_YellowCards_5", "Away_YellowCards_5",
-        "Home_Fouls_5", "Away_Fouls_5",
-        # BTTS-specific
-        "Home_FTS_5", "Away_FTS_5",
-        "Home_FTS_10", "Away_FTS_10",
-        "Home_BTTS_10", "Away_BTTS_10",
-        "Home_GoalStd_10", "Away_GoalStd_10",
-    ]
+    rolling_features = SEEDED_ROLLING_FEATURES
     # Only keep features actually present in the DataFrame
     rolling_features = [f for f in rolling_features if f in df.columns]
 

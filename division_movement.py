@@ -83,6 +83,28 @@ class SeedParams:
     n_events: int
 
 
+def recompute_two_sided(row: pd.Series) -> None:
+    """Repair derived features that are a pure function of seeded inputs.
+
+    A derivation computed from both clubs cannot be seeded from one side's
+    cohort, so most of them stay approximate for an arriving side. These two
+    are plain differences of columns the seed has already corrected, so
+    leaving them describing a fixture that is not being played would be a
+    choice rather than a limitation.
+
+    Mutates *row* in place. Silent when a column is absent: the two leagues
+    carry different feature sets.
+    """
+    for target, home, away in (
+        ("Elo_Diff", "Home_Elo", "Away_Elo"),
+        ("LeaguePosition_Diff", "Home_LeaguePosition", "Away_LeaguePosition"),
+    ):
+        if not {target, home, away} <= set(row.index):
+            continue
+        if pd.notna(row[home]) and pd.notna(row[away]):
+            row[target] = row[home] - row[away]
+
+
 def arrivals(
     ef_df: pd.DataFrame,
     pl_df: pd.DataFrame,

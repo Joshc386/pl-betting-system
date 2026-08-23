@@ -27,6 +27,7 @@ import pandas as pd
 from typing import Optional
 
 from championship_pipeline import (
+    SEEDED_ROLLING_FEATURES,
     run_pipeline,
     CHAMP_ALL_FEATURES,
     CHAMP_OU15_FEATURES,
@@ -75,6 +76,7 @@ from division_movement import (
     arrivals_for,
     fit_seed_params,
     season_in_play,
+    recompute_two_sided,
     seed_features,
     seed_weight,
 )
@@ -1122,19 +1124,22 @@ class ChampionshipPredictor:
             # question about matches played, and gating on arrival alone left
             # the seed in place for the whole season.
             weight = seed_weight(len(own))
+            blend_set = set(SEEDED_ROLLING_FEATURES)
             for column, value in seeded.items():
                 if pd.isna(value):
                     continue
                 actual = template.get(column, np.nan)
-                if pd.isna(actual):
+                if own.empty or pd.isna(actual):
                     template[column] = value
-                elif weight:
+                elif column in blend_set and weight:
                     template[column] = weight * value + (1 - weight) * actual
-                # weight == 0: past the window, the side's own value stands.
+                # Otherwise the side's own value stands: past the window, or
+                # a feature training never blended.
 
             template[f"{side}_Team"] = arriving
             template[f"{side}_Promoted"] = 1
 
+        recompute_two_sided(template)
         return template
 
     def _seed_dixon_coles(self, current_teams: set[str]) -> dict[str, str]:

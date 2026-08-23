@@ -16,7 +16,9 @@ import pandas as pd
 from typing import Optional
 
 from pipeline import PROMOTED_ROLLING_FEATURES, bottom5_cohort, run_pipeline
-from division_movement import season_in_play, seed_weight
+from division_movement import (
+    recompute_two_sided, season_in_play, seed_weight,
+)
 from config import (
     ALL_FEATURES, BTTS_ALL_FEATURES,
     ALLOWED_ALT_LINES, ALT_LINES_OVER_ONLY,
@@ -868,7 +870,22 @@ class LivePredictor:
                 if col.startswith("Away_"):
                     template[col] = row[col]
 
-        cohort = bottom5_cohort(df, season - 1, PROMOTED_ROLLING_FEATURES)
+        # Two different questions, two different sets.
+        #
+        # Fill: every numeric feature of the arriving side. A side with no
+        # rows has nothing of its own, and the template is the *opposing*
+        # side's last fixture — so an unfilled column carries whichever club
+        # last played them. 99 of 110 Home_ features were doing exactly that,
+        # Home_Elo among them.
+        #
+        # Blend: only what training blends. Blending a wider set than the
+        # pipeline did would be the same train/serve divergence arriving from
+        # the other direction.
+        numeric = set(df.select_dtypes("number").columns)
+        fillable = [c for c in template.index
+                    if c.startswith(("Home_", "Away_")) and c in numeric]
+        cohort = bottom5_cohort(df, season - 1, fillable)
+        blend_set = set(PROMOTED_ROLLING_FEATURES)
         for side, team, arriving, rows in (
             ("Home", home, home_arriving, home_rows),
             ("Away", away, away_arriving, away_rows),
@@ -895,17 +912,20 @@ class LivePredictor:
             for feat, value in cohort.items():
                 if not feat.startswith(f"{side}_") or feat not in template.index:
                     continue
-                actual = template[feat]
                 if pd.isna(value):
                     continue
-                if pd.isna(actual):
+                actual = template[feat]
+                if own.empty or pd.isna(actual):
                     template[feat] = value
-                elif weight:
+                elif feat in blend_set and weight:
                     template[feat] = weight * value + (1 - weight) * actual
-                # weight == 0: past the window, the side's own value stands.
+                # Otherwise the side's own value stands: past the window, or
+                # a feature training never blended.
 
             template[f"{side}_Team"] = team
             template[f"{side}_Promoted"] = 1
+
+        recompute_two_sided(template)
         return template
 
     def generate_recommendations(
