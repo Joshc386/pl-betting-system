@@ -1059,3 +1059,54 @@ def test_complete_new_season_compares_against_whole_reference_seasons():
     flagged = coverage_regressions(df, season_idx=26)
 
     assert [c for c, _, _ in flagged] == ["Home_Shots"]
+
+
+class TestColumnsTheBuilderNullsItself:
+    """The guard flagged the builder's own deliberate nulling as a regression.
+
+    `_add_promotion_flags` sets Home_/Away_Promoted and Home_/Away_Relegated
+    to NaN for a season whose roster is not yet complete — "a part-loaded
+    season cannot say who is new, and guessing would assert something false".
+    The reference seasons have all four at 100%, so the new season reads 0%
+    against 100%, below the floor, and the rebuild aborts.
+
+    It fires between a season's opening fixture and the completion of round 1
+    (EFL round 1 routinely opens on a Friday night), and for as long as a
+    postponement leaves one side unplayed. These columns have a known owner
+    inside the builder, which is the same reason `_LAGGING_COLUMNS` exists.
+    """
+
+    @staticmethod
+    def _frame(flags_null):
+        import numpy as np
+        rows = []
+        for idx, n in ((23, 132), (24, 132), (25, 132), (26, 12)):
+            for i in range(n):
+                null = flags_null and idx == 26
+                rows.append({
+                    "SeasonIndex": idx,
+                    "Date": f"20{20 + idx}-01-{i % 28 + 1:02d}",
+                    "Home_Team": f"T{i % 12:02d}",
+                    "Away_Team": f"T{(i + 1) % 12:02d}",
+                    "HS": 10, "AS": 9,
+                    "Home_Promoted": np.nan if null else 0,
+                    "Away_Promoted": np.nan if null else 0,
+                    "Home_Relegated": np.nan if null else 0,
+                    "Away_Relegated": np.nan if null else 0,
+                })
+        return pd.DataFrame(rows)
+
+    def test_a_part_loaded_season_does_not_abort_the_rebuild(self):
+        assert_column_coverage(self._frame(flags_null=True), 26)
+
+    def test_a_real_column_loss_is_still_caught(self):
+        """Guards the test above: the exclusion must be narrow."""
+        import numpy as np
+
+        df = self._frame(flags_null=True)
+        df.loc[df["SeasonIndex"] == 26, "HS"] = np.nan
+
+        with pytest.raises(ColumnCoverageError) as excinfo:
+            assert_column_coverage(df, 26)
+
+        assert "HS" in str(excinfo.value)

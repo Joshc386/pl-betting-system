@@ -122,6 +122,22 @@ _LAGGING_COLUMNS: tuple[str, ...] = (
     "Odds_Over_2.5", "Odds_Under_2.5", "Odds_Source_2.5",
 )
 
+# Columns this builder nulls on purpose, for the same "known other owner"
+# reason as the tuple above — except the owner is `_add_promotion_flags`, a
+# few hundred lines down. It blanks all four for a season whose roster is not
+# yet complete, because "a part-loaded season cannot say who is new, and
+# guessing would assert something false".
+#
+# The reference seasons carry them at 100%, so without this the new season
+# reads 0% against 100%, falls under the floor, and the rebuild aborts on the
+# builder's own deliberate act. That fires between a season's opening fixture
+# and the completion of round 1 — the EFL routinely opens on a Friday night —
+# and for as long as a postponement leaves one side unplayed. Precisely the
+# rollover window the guard was written to survive.
+_BUILDER_OWNED_COLUMNS: tuple[str, ...] = (
+    "Home_Promoted", "Away_Promoted", "Home_Relegated", "Away_Relegated",
+)
+
 
 def coverage_regressions(
     df: pd.DataFrame,
@@ -130,7 +146,7 @@ def coverage_regressions(
     reference_seasons: int = 3,
     populated: float = 0.8,
     floor: float = 0.2,
-    exclude: tuple[str, ...] = _LAGGING_COLUMNS,
+    exclude: tuple[str, ...] = _LAGGING_COLUMNS + _BUILDER_OWNED_COLUMNS,
 ) -> list[tuple[str, float, float]]:
     """Columns the reference seasons populate that *season_idx* does not.
 
