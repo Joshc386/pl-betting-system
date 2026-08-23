@@ -223,6 +223,40 @@ def coverage_regressions(
     return sorted(out, key=lambda r: r[1])
 
 
+class MissingSeasonError(RuntimeError):
+    """The season the config asked for is absent from the rebuilt canonical."""
+
+
+def assert_season_present(df: pd.DataFrame, season_idx: int) -> None:
+    """Raise unless *season_idx* actually arrived.
+
+    `build()` step 1 drops a season whose download returns nothing
+    (`if raw is not None and len(raw) > 0`), so a failed or empty fetch for the
+    configured season simply leaves it out. Step 9 then judged
+    `SeasonIndex.max()`, which quietly resolved to the season *before*, compared
+    it against seasons older still, passed, and printed "coverage matches prior
+    seasons" over a canonical missing the whole current season.
+
+    That is the guard's own failure mode one level up: it verified the shape of
+    whatever arrived, never that the thing asked for arrived at all. Coverage
+    cannot answer this — `coverage_regressions` returns [] for an absent season,
+    so emptiness needs its own check.
+
+    Raises:
+        MissingSeasonError: naming the season and what the canonical does hold.
+    """
+    if not df[df["SeasonIndex"] == season_idx].empty:
+        return
+    present = sorted(int(s) for s in df["SeasonIndex"].unique())
+    raise MissingSeasonError(
+        f"Season {season_idx} is configured as the current season but has no "
+        f"rows in the rebuilt canonical, which holds "
+        f"{present[0]}-{present[-1]}. The download most likely returned "
+        f"nothing; the build drops such a season silently, so nothing "
+        f"downstream would have said so."
+    )
+
+
 def assert_column_coverage(df: pd.DataFrame, season_idx: int, **kwargs) -> None:
     """Raise unless a newly added season matches the shape of its predecessors.
 
@@ -1347,7 +1381,11 @@ def build(
     # Step 9: the newest season must arrive in the same shape as the ones it
     # joins. Checked before the write, so a feed that renamed a column leaves
     # the canonical untouched rather than half-null.
-    newest = int(df["SeasonIndex"].max())
+    # The season the config asked for, not the newest that happens to be
+    # present: those differ precisely when the current season failed to
+    # download, which is the case worth catching.
+    newest = int(s["last_season"])
+    assert_season_present(df, newest)
     print(f"Checking column coverage for season {newest}...")
     assert_column_coverage(df, newest)
     print("  coverage matches prior seasons")

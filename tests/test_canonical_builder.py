@@ -1061,6 +1061,67 @@ def test_complete_new_season_compares_against_whole_reference_seasons():
     assert [c for c, _, _ in flagged] == ["Home_Shots"]
 
 
+class TestTheGuardJudgesTheSeasonThatWasAskedFor:
+    """Step 9 checked `SeasonIndex.max()`, not the season the config wants.
+
+    `build()` step 1 drops a season whose download returns nothing
+    (`if raw is not None and len(raw) > 0`). So an empty or failed download
+    for the configured season produced a canonical ending at the season
+    before, `newest` resolved to that, the guard compared it against seasons
+    older still, passed, and the build printed "coverage matches prior
+    seasons" over a canonical missing the entire current season.
+
+    That is the same silent-success shape the guard exists to catch, one
+    level up: it verified the shape of whatever arrived, never that the thing
+    asked for arrived at all.
+    """
+
+    @staticmethod
+    def _canonical(seasons):
+        rows = []
+        for idx, n in seasons:
+            for i in range(n):
+                rows.append({
+                    "SeasonIndex": idx,
+                    "Date": f"20{20 + idx}-01-{i % 28 + 1:02d}",
+                    "Home_Team": f"T{i % 12:02d}",
+                    "Away_Team": f"T{(i + 1) % 12:02d}",
+                    "HS": 10, "AS": 9,
+                })
+        return pd.DataFrame(rows)
+
+    def test_a_season_that_never_arrived_is_reported(self):
+        from data.build_canonical_dataset import (
+            MissingSeasonError, assert_season_present,
+        )
+
+        df = self._canonical([(23, 132), (24, 132), (25, 132)])
+
+        with pytest.raises(MissingSeasonError) as excinfo:
+            assert_season_present(df, 26)
+
+        assert "26" in str(excinfo.value)
+
+    def test_a_season_that_did_arrive_passes(self):
+        from data.build_canonical_dataset import assert_season_present
+
+        df = self._canonical([(24, 132), (25, 132), (26, 12)])
+
+        assert_season_present(df, 26)  # one round is still arrival
+
+    def test_the_guard_does_not_fall_back_to_an_older_season(self):
+        """The vacuous pass: 25 vs 22-24 says nothing about 26."""
+        from data.build_canonical_dataset import (
+            MissingSeasonError, assert_season_present,
+        )
+
+        df = self._canonical([(23, 132), (24, 132), (25, 132)])
+        assert int(df["SeasonIndex"].max()) == 25
+
+        with pytest.raises(MissingSeasonError):
+            assert_season_present(df, 26)
+
+
 class TestColumnsTheBuilderNullsItself:
     """The guard flagged the builder's own deliberate nulling as a regression.
 
