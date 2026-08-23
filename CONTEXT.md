@@ -321,8 +321,12 @@ A side is therefore treated as **unrated** whenever Division Movement says it is
 
 **One concept, one implementation, two callers.** The seed is consumed at two moments — when the pipeline builds training rows, and when the predictor builds a feature row for an unplayed fixture — and those must be the *same* seed. They are two callers of one definition, never two definitions. This is the Promotion Route principle applied one layer down, and ADR 0007's contract applied to a feature's *value* rather than its formula: `Home_Past5Goals` cannot mean one quantity in training and another at predict time.
 
-See [ADR 0011](docs/adr/0011-one-division-movement-seed-per-arrival.md).
-_Avoid_: Synthesis, synthesised row (describes the mechanism at one call site, not the concept — and the name hid that two call sites disagreed), promoted-team defaults
+**The seed is per league, and the two leagues split on different axes.** The EFL splits arrivals by **Arrival Direction** — relegated or promoted — because both directions exist there and carry opposite strength signals. Nobody is relegated into the PL, so that axis collapses to a single bucket. The finer **Promotion Route** axis (champion / runner-up / play-off winner) *is* available for the PL and not for the EFL, the exact inverse: PL route is read off the sibling EFL final table, while EFL arrivals come from a League One table this system does not hold. **Availability is inverted, so the seed's shape is not symmetric between the leagues** — and the PL still takes one bucket, because 75 events split three ways is 19 / 30 / 26 against a 30-event guard, and walk-forward leaves early folds in single digits. Recorded rather than assumed, so it is re-decidable as events accrue.
+
+**"Route" now names two different axes** — Arrival Direction (ADR 0011) and Promotion Route (ADR 0002). They are not interchangeable, and the collision is live in the code, where `division_movement.arrival_route` means the former. Disambiguation is deferred, not resolved: renaming would touch shipped EFL code.
+
+See [ADR 0011](docs/adr/0011-one-division-movement-seed-per-arrival.md) for the EFL and [ADR 0012](docs/adr/0012-division-movement-seed-for-the-premier-league.md) for the PL.
+_Avoid_: Synthesis, synthesised row (describes the mechanism at one call site, not the concept — and the name hid that two call sites disagreed), promoted-team defaults; "route" unqualified, now that it names two axes
 
 ### Calibration
 
