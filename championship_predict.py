@@ -76,6 +76,7 @@ from division_movement import (
     fit_seed_params,
     season_in_play,
     seed_features,
+    seed_weight,
 )
 import api.odds_api as odds_api_module
 import api.oddspapi as oddspapi_module
@@ -1090,18 +1091,47 @@ class ChampionshipPredictor:
         else:
             template = home_rows.iloc[-1].copy()
 
-        for side, arriving, missing in (
-            ("Home", home, home_missing), ("Away", away, away_missing),
+        for side, arriving, missing, rows in (
+            ("Home", home, home_missing, home_rows),
+            ("Away", away, away_missing, away_rows),
         ):
             if not missing:
                 continue
+
+            # An arrival with matches behind it is a side with real form, and
+            # the template carries some *other* club's values for this half —
+            # it was built from the opposite side's last fixture. Take the
+            # side's own latest row at this venue first, exactly as a side
+            # with history gets, then blend the seed on top.
+            own = rows[rows["SeasonIndex"] == season] if not rows.empty                 else rows
+            if not own.empty:
+                latest = own.iloc[-1]
+                for column in template.index:
+                    if column.startswith(f"{side}_"):
+                        template[column] = latest[column]
+
             wanted = [c for c in template.index if c.startswith(f"{side}_")]
             seeded = seed_features(
                 self._full_df, self._pl_canonical(), arriving, season,
                 wanted, self._seed_params(),
             )
+
+            # Match number is counted per venue and within this season, the
+            # way `championship_pipeline.initialize_promoted_features` counts
+            # it. Arrival picks the route; how much of the seed survives is a
+            # question about matches played, and gating on arrival alone left
+            # the seed in place for the whole season.
+            weight = seed_weight(len(own))
             for column, value in seeded.items():
-                template[column] = value
+                if pd.isna(value):
+                    continue
+                actual = template.get(column, np.nan)
+                if pd.isna(actual):
+                    template[column] = value
+                elif weight:
+                    template[column] = weight * value + (1 - weight) * actual
+                # weight == 0: past the window, the side's own value stands.
+
             template[f"{side}_Team"] = arriving
             template[f"{side}_Promoted"] = 1
 

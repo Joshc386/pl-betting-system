@@ -16,7 +16,7 @@ import pandas as pd
 from typing import Optional
 
 from pipeline import PROMOTED_ROLLING_FEATURES, bottom5_cohort, run_pipeline
-from division_movement import season_in_play
+from division_movement import season_in_play, seed_weight
 from config import (
     ALL_FEATURES, BTTS_ALL_FEATURES,
     ALLOWED_ALT_LINES, ALT_LINES_OVER_ONLY,
@@ -862,11 +862,6 @@ class LivePredictor:
         else:
             template = home_rows.iloc[-1].copy()
 
-        if not home_arriving:
-            row = home_rows.iloc[-1].copy()
-            for col in template.index:
-                if col.startswith("Home_"):
-                    template[col] = row[col]
         if not away_arriving:
             row = away_rows.iloc[-1]
             for col in template.index:
@@ -874,14 +869,41 @@ class LivePredictor:
                     template[col] = row[col]
 
         cohort = bottom5_cohort(df, season - 1, PROMOTED_ROLLING_FEATURES)
-        for side, team, arriving in (
-            ("Home", home, home_arriving), ("Away", away, away_arriving),
+        for side, team, arriving, rows in (
+            ("Home", home, home_arriving, home_rows),
+            ("Away", away, away_arriving, away_rows),
         ):
             if not arriving:
                 continue
+
+            # An arrival with matches behind it is a side with real form, and
+            # the template carries some *other* club's values for this half —
+            # it was built from the opposite side's last fixture. Take the
+            # side's own latest row at this venue first, exactly as a
+            # non-arriving side does, then blend the seed on top.
+            own = rows[rows["SeasonIndex"] == season]
+            if not own.empty:
+                latest = own.iloc[-1]
+                for col in template.index:
+                    if col.startswith(f"{side}_"):
+                        template[col] = latest[col]
+
+            # Match number is counted per venue and within this season, the
+            # way both pipelines count it. Arrival picks the route; how much
+            # of the seed survives is a question about matches played.
+            weight = seed_weight(len(own))
             for feat, value in cohort.items():
-                if feat.startswith(f"{side}_") and feat in template.index:
+                if not feat.startswith(f"{side}_") or feat not in template.index:
+                    continue
+                actual = template[feat]
+                if pd.isna(value):
+                    continue
+                if pd.isna(actual):
                     template[feat] = value
+                elif weight:
+                    template[feat] = weight * value + (1 - weight) * actual
+                # weight == 0: past the window, the side's own value stands.
+
             template[f"{side}_Team"] = team
             template[f"{side}_Promoted"] = 1
         return template

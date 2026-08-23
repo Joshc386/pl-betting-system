@@ -40,6 +40,28 @@ _MIN_EVENTS = 30
 # and the window the rolling features it fills are computed over.
 _SEED_WINDOW = 5
 
+# How much of the seed survives at each match, counted per venue. Both
+# pipelines blend on exactly these weights and stop after the fifth
+# (``pipeline.initialize_promoted_features``,
+# ``championship_pipeline.initialize_promoted_features``), so a live row must
+# use them too or a feature means one quantity in training and another at
+# kick-off.
+#
+# Arrival selects the *route* a side is seeded from. It never selects the
+# *duration*: ``arrivals_for`` is season-long membership by design, so gating
+# the substitution on it alone left the seed in place all season. That is the
+# defect these weights exist to close — see tests/test_seed_blend_parity.py.
+SEED_BLEND_WEIGHTS: dict[int, float] = {1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4, 5: 0.2}
+
+
+def seed_weight(played: int) -> float:
+    """Seed weight for a side that has played ``played`` matches at a venue.
+
+    The fixture being priced is its ``played + 1``-th, so a side with five
+    behind it is on match six and carries none of the seed.
+    """
+    return SEED_BLEND_WEIGHTS.get(played + 1, 0.0)
+
 
 @dataclass(frozen=True)
 class SeedParams:
