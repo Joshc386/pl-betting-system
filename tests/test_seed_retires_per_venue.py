@@ -150,7 +150,8 @@ def _efl_predictor():
     return p, dc
 
 
-@pytest.mark.parametrize("build", [_pl_predictor], ids=["PL"])
+@pytest.mark.parametrize("build", [_pl_predictor, _efl_predictor],
+                         ids=["PL", "EFL"])
 def test_the_away_seed_survives_a_side_that_has_only_played_at_home(build):
     """Five home matches retire the home seed and nothing else.
 

@@ -90,20 +90,34 @@ def _prior_season(season: int, teams: list[str]) -> list[dict]:
 
 
 def _arrival_season(season: int, arrival: str, others: list[str],
-                    home_matches: int) -> list[dict]:
-    """``home_matches`` played home fixtures for ``arrival``, all real form.
+                    home_matches: int,
+                    away_matches: int | None = None) -> list[dict]:
+    """Played fixtures for ``arrival``, at each venue, all real form.
 
     ``OPP`` is deliberately never hosted by, and never hosts, the arrival:
     the fixture under test has to be one that has not been played, or
     ``_fixture_feature_row`` returns the played row from its exact-fixture
     shortcut and no seeding code runs at all. Two of these tests passed that
     way on the first draft, against the very defect they were written for.
+
+    ``away_matches`` defaults to none played, which is what the per-venue
+    tests below need in order to show an away seed surviving a home record.
+    The *duration* tests pass it explicitly instead: a real fixture list
+    alternates venues, so a side fourteen matches into a season has played
+    roughly seven at each, never fourteen at one and none at the other. A
+    fixture that only ever plays at home cannot tell "past the window" from
+    "has not travelled yet".
     """
+    away_matches = 0 if away_matches is None else away_matches
     rows = []
     for n in range(home_matches):
         rows.append(_row(season, f"20{20 + season}-02-{n + 1:02d}",
                          arrival, others[n % len(others)],
                          home_promoted=1, value=_ACTUAL_VALUE))
+    for n in range(away_matches):
+        rows.append(_row(season, f"20{20 + season}-03-{n + 1:02d}",
+                         others[n % len(others)], arrival,
+                         away_promoted=1, value=_ACTUAL_VALUE))
     # Established fixtures, so the season is not just the arrival and both
     # OPP and others[0] carry rows at each venue.
     rows.append(_row(season, f"20{20 + season}-02-20", others[0], "OPP"))
@@ -395,8 +409,9 @@ class TestTheDixonColesSeedRetires:
         def __init__(self):
             self.seeded: dict[str, str] = {}
 
-        def seed_arrivals(self, incoming, priors):
+        def seed_arrivals(self, incoming, priors, *, venues=None):
             self.seeded.update(incoming)
+            self.venues = venues
 
     @staticmethod
     def _predictor(matches_played: int):
@@ -404,9 +419,14 @@ class TestTheDixonColesSeedRetires:
         from division_movement import SeedParams
 
         others = ["T01", "T02", "T03", "T04", "T05"]
+        # Played at *both* venues. The seed window is per venue, so a side
+        # that had only ever played at home would keep its away seed however
+        # long the season ran — correctly, but that is the other tests' case,
+        # not this one. Duration is what these tests are about.
         df = pd.DataFrame(
             _prior_season(24, others + ["T06"])
-            + _arrival_season(25, "NEWCO", others, matches_played)
+            + _arrival_season(25, "NEWCO", others, matches_played,
+                              away_matches=matches_played)
         )
         predictor = ChampionshipPredictor.__new__(ChampionshipPredictor)
         predictor.verbose = False
