@@ -139,7 +139,7 @@ def load_betfair_efl_goal_odds(path: str | None = None) -> pd.DataFrame:
 def _build_betfair_to_pipeline_map(
     pipeline_df: pd.DataFrame,
 ) -> dict[str, str]:
-    """Build a mapping from Betfair normalized names to pipeline short names.
+    """Build a mapping from Betfair normalised names to pipeline short names.
 
     The championship pipeline uses short names from Football-Data.org CSVs
     (e.g. "Blackburn", "Cardiff") while Betfair event names normalize to
@@ -182,7 +182,7 @@ def load_and_merge(
     """
     odds_df = load_betfair_efl_goal_odds(path)
 
-    # Convert Betfair normalized names → pipeline short names
+    # Convert Betfair normalised names → pipeline short names
     name_map = _build_betfair_to_pipeline_map(pipeline_df)
     odds_df["Home_Team"] = odds_df["Home_Team"].map(name_map)
     odds_df["Away_Team"] = odds_df["Away_Team"].map(name_map)
