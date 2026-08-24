@@ -414,7 +414,7 @@ class DixonColesPredictor:
 
         return self
 
-    def seed_arrivals(self, arrivals, route_priors=None):
+    def seed_arrivals(self, arrivals, route_priors=None, *, venues=None):
         """Rate sides new to the division from their route (ADR 0011).
 
         A returning side's history here is always its *exit* season, and
@@ -437,16 +437,28 @@ class DixonColesPredictor:
             arrivals: Team -> route ("relegated" / "promoted").
             route_priors: Route -> venue-aware prior. Falls back to the
                 single ``PRIORS`` bucket when a route is absent.
+            venues: Team -> the venues still within the seed window, drawn
+                from ``{"home", "away"}``. Omit, or omit a team, to seed both.
+
+                The window is per venue, not per side. ADR 0011 fixes it that
+                way because ``Home_Past5Goals`` and ``Away_Past5Goals`` are
+                different quantities, and the four ratings here split on
+                exactly the same line. A side five home matches into its
+                first season has a home record worth rating and no away
+                record at all; seeding both, or neither, is wrong in one half.
 
         Returns:
             self, so it can be chained onto a fit.
         """
         for team, route in (arrivals or {}).items():
             prior = (route_priors or {}).get(route, self.PRIORS)
-            self.attack_home[team] = prior["attack_home"]
-            self.attack_away[team] = prior["attack_away"]
-            self.defence_home[team] = prior["defence_home"]
-            self.defence_away[team] = prior["defence_away"]
+            within = (venues or {}).get(team, {"home", "away"})
+            if "home" in within:
+                self.attack_home[team] = prior["attack_home"]
+                self.defence_home[team] = prior["defence_home"]
+            if "away" in within:
+                self.attack_away[team] = prior["attack_away"]
+                self.defence_away[team] = prior["defence_away"]
         return self
 
     def fit_mle(self, df, alpha=0.01):

@@ -17,7 +17,8 @@ from typing import Optional
 
 from pipeline import PROMOTED_ROLLING_FEATURES, bottom5_cohort, run_pipeline
 from division_movement import (
-    recompute_two_sided, season_in_play, seed_weight,
+    SeedParams, arrivals_for, fit_seed_params,
+    recompute_two_sided, season_in_play, seed_venues, seed_weight,
 )
 from config import (
     ALL_FEATURES, BTTS_ALL_FEATURES,
@@ -927,6 +928,80 @@ class LivePredictor:
 
         recompute_two_sided(template)
         return template
+
+    def _seed_dixon_coles(self, current_teams: set[str]) -> dict[str, str]:
+        """Rate this season's arrivals from their route, in every market.
+
+        [ADR 0012](docs/adr/0012-division-movement-seed-for-the-premier-league.md)
+        — the half ADR 0011 scoped out. XGB, LightGBM and the stacker read a
+        seeded feature row; Dixon-Coles reads *team identity*, so the row
+        never reaches it and an arrival keeps whatever its exit season earned.
+        Measured on 2026-08-23, that was 2000/01 for Coventry and 2016/17 for
+        Hull.
+
+        Deliberately driven by the fixture list rather than the canonical.
+        Before a season's first results land the canonical holds no rows for
+        it, so ``arrivals()`` sees nothing — yet that pre-season window is
+        exactly when a returning side is most mispriced. The odds feed knows
+        who is playing; the canonical does not know yet.
+
+        Args:
+            current_teams: Sides in this season's fixture list.
+
+        Returns:
+            The arrivals seeded, mapped to their route.
+        """
+        if self._full_df is None or self._full_df.empty:
+            return {}
+
+        season = season_in_play(self._full_df)
+        # No division above the Premier League, so every arrival came up.
+        # One bucket, and not because anything here says so.
+        incoming = arrivals_for(
+            self._full_df, None, season, fixture_teams=current_teams)
+        if not incoming:
+            return {}
+
+        # The seed is for the window before a side has a record worth rating.
+        # Past it, Dixon-Coles has fitted the side on its actual results and
+        # the route prior would discard every one of them — including the
+        # estimate the weekly retrain had just produced, on the very next
+        # scan. Arrival selects the route; it never selects the duration.
+        #
+        # Counted per venue, because that is what the window is: the four
+        # ratings split home from away exactly as `Home_Past5Goals` splits
+        # from `Away_Past5Goals`, and a side five home matches into its first
+        # season has a home record worth rating and no away record at all.
+        # Counting total appearances retired both halves at five and left a
+        # side that had never played away rated on its exit season.
+        season_rows = self._full_df[self._full_df["SeasonIndex"] == season]
+        venues = seed_venues(season_rows, incoming)
+        incoming = {t: r for t, r in incoming.items() if t in venues}
+        if not incoming:
+            return {}
+
+        priors = self._seed_params().priors
+        # Two markets here, not the EFL's three — the PL has no O/U 1.5 model.
+        for models in (self._ou_models, self._btts_models):
+            dc = (models or {}).get("dc")
+            if dc is not None:
+                dc.seed_arrivals(incoming, priors, venues=venues)
+
+        self._log(
+            f"Division Movement Seed applied to {len(incoming)} arrival(s): "
+            + ", ".join(f"{t} ({r})" for t, r in sorted(incoming.items())))
+        return incoming
+
+    def _seed_params(self) -> SeedParams:
+        """Seed constants, measured at train time and carried in the state.
+
+        Refitting here would let the two callers land on different numbers,
+        which is the divergence ADR 0011 exists to remove — one definition
+        is not enough if each caller measures its own constants.
+        """
+        if getattr(self, "_seed_params_cache", None) is None:
+            self._seed_params_cache = SeedParams(priors={}, n_events=0)
+        return self._seed_params_cache
 
     def generate_recommendations(
         self,
