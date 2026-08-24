@@ -185,7 +185,7 @@ Verified implementation details (`fit_mle()`), each with its reason:
 - **Objective**: the time-decay-weighted Poisson log-likelihood of every
   historical scoreline, *including the τ low-score correction* (so ρ is
   estimated jointly, not bolted on).
-- **Log-space parameters**: the optimizer works on log(ratings), so ratings
+- **Log-space parameters**: the optimiser works on log(ratings), so ratings
   are guaranteed positive without awkward constraints, and multiplicative
   structure becomes additive: λ_home = exp(log_att_H + log_def_A + log_μ +
   log_γ/2) — the same formula as §1.2, in logs.
@@ -198,11 +198,11 @@ Verified implementation details (`fit_mle()`), each with its reason:
   The MLE analogue of Step-3 shrinkage: keeps small-sample teams from getting
   extreme ratings. (Shrinkage is *disabled* on this path to avoid
   double-regularising.)
-- **Warm start**: the optimizer starts from Path-1's estimates rather than
+- **Warm start**: the optimiser starts from Path-1's estimates rather than
   from scratch — faster convergence to a sensible optimum.
 - **Bounds**: log-ratings ∈ [−2, 2] (ratings 0.14–7.4), μ ∈ [0.5, 3.0],
   γ ∈ [0.8, 2.0], ρ ∈ [−0.30, 0.05] — generous but rules out pathological fits.
-- **Optimizer**: L-BFGS-B (the standard choice for smooth bounded problems of
+- **Optimiser**: L-BFGS-B (the standard choice for smooth bounded problems of
   this size; ~87 parameters for a 20-team league).
 
 **Why two paths at all, and who uses which?** The tuning harness
@@ -539,7 +539,7 @@ signal reaches the models; availability signal does not.
 | KFold CV | Leaks future→past; overstates every model's skill; rejected on principle. |
 | Feature scaling for the trees | Trees split on thresholds — scaling is a no-op for them. Only LR needs (and has) its own scaler. Simpler pipeline, one less thing to drift. |
 | Hard sample-size thresholds for DC ratings | Replaced by continuous shrinkage (n/(n+6)) — the old threshold caused rating jumps at match 3. |
-| MLE for the Championship | 64 teams → 259 parameters → optimizer fails to converge. Weighted-average path is the deliberate fallback. |
+| MLE for the Championship | 64 teams → 259 parameters → optimiser fails to converge. Weighted-average path is the deliberate fallback. |
 
 ---
 

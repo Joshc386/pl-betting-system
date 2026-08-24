@@ -42,7 +42,7 @@ from pipeline import run_pipeline
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def train_xgb(X_train, y_train, X_val, y_val):
-    """Train XGBoost with strong regularization and early stopping."""
+    """Train XGBoost with strong regularisation and early stopping."""
     model = xgb.XGBClassifier(
         n_estimators=500, max_depth=3, learning_rate=0.01,
         subsample=0.7, colsample_bytree=0.6, min_child_weight=7,
@@ -54,7 +54,7 @@ def train_xgb(X_train, y_train, X_val, y_val):
 
 
 def train_lgb(X_train, y_train, X_val, y_val, feature_names=None):
-    """Train LightGBM with matching regularization."""
+    """Train LightGBM with matching regularisation."""
     model = lgb.LGBMClassifier(
         n_estimators=500, max_depth=3, learning_rate=0.01,
         subsample=0.7, colsample_bytree=0.6, min_child_weight=7,
@@ -91,9 +91,9 @@ def _clip_scaled(X_scaled, clip=5.0):
 
 
 def train_logreg(X_train, y_train):
-    """Train L2-regularized logistic regression (genuinely different model class).
+    """Train L2-regularised logistic regression (genuinely different model class).
 
-    Fills NaN with column medians before scaling (better than 0 for centered data).
+    Fills NaN with column medians before scaling (better than 0 for centred data).
     Clips scaled features to [-5, 5] to prevent distribution-shift catastrophe.
     """
     X_filled, col_medians = _fill_nan_median(X_train)
@@ -220,7 +220,7 @@ class DixonColesPredictor:
         self.rho = rho
         self.half_life = half_life  # matches; more recent = more weight
         self.use_xg = use_xg
-        self.use_mle = use_mle      # use MLE optimization after weighted-average
+        self.use_mle = use_mle      # use MLE optimisation after weighted-average
         self.mle_alpha = mle_alpha   # ridge penalty for MLE
         # Option 2 Step 2: partial pooling toward league mean. On by default
         # for the weighted-average path. Forced off when use_mle=True to
@@ -460,8 +460,8 @@ class DixonColesPredictor:
           - Log-space parameterization ensures positive ratings without bounds
           - Sum-to-zero constraint on log(attack) and log(defence) resolves the
             identifiability issue (scale absorbed into mu, not ratings)
-          - mu is optimized jointly (not fixed to data mean)
-          - Proper normalization: ratings are centered, mu absorbs the scale
+          - mu is optimised jointly (not fixed to data mean)
+          - Proper normalisation: ratings are centred, mu absorbs the scale
           - Warm-starts from the weighted-average estimates already computed by fit()
         """
 
@@ -471,7 +471,7 @@ class DixonColesPredictor:
         else:
             h_score_col, a_score_col = "Home_Goals", "Away_Goals"
 
-        # Build match arrays for vectorized likelihood
+        # Build match arrays for vectorised likelihood
         teams = sorted(set(df["Home_Team"].unique()) | set(df["Away_Team"].unique()))
         team_to_idx = {t: i for i, t in enumerate(teams)}
         n_teams = len(teams)
@@ -481,7 +481,7 @@ class DixonColesPredictor:
         h_goals = df[h_score_col].values.astype(float)
         a_goals = df[a_score_col].values.astype(float)
 
-        # Time-decay weights (normalized so they sum to n_matches)
+        # Time-decay weights (normalised so they sum to n_matches)
         n_matches = len(df)
         weights = self._decay_weights(n_matches)
         if len(weights) == 0:
@@ -538,7 +538,7 @@ class DixonColesPredictor:
             mu = np.exp(log_mu)
             sqrt_g = np.exp(log_gamma / 2)
 
-            # Vectorized lambda: exp(log_att_h + log_def_a + log_mu + log_gamma/2)
+            # Vectorised lambda: exp(log_att_h + log_def_a + log_mu + log_gamma/2)
             lam_h = np.exp(log_att_h[home_idx] + log_def_a[away_idx] + log_mu + log_gamma / 2)
             lam_a = np.exp(log_att_a[away_idx] + log_def_h[home_idx] + log_mu - log_gamma / 2)
 
@@ -546,7 +546,7 @@ class DixonColesPredictor:
             lam_h = np.clip(lam_h, 0.05, 8.0)
             lam_a = np.clip(lam_a, 0.05, 8.0)
 
-            # Poisson log-likelihood (vectorized)
+            # Poisson log-likelihood (vectorised)
             ll = (poisson_dist.logpmf(h_goals, lam_h) +
                   poisson_dist.logpmf(a_goals, lam_a))
 
@@ -582,7 +582,7 @@ class DixonColesPredictor:
         if not result.success:
             print(f"  [DC MLE] Warning: optimizer did not converge ({result.message})")
 
-        # Extract optimized parameters (convert from log-space)
+        # Extract optimised parameters (convert from log-space)
         params = result.x
         log_att_h = params[:n_teams]
         log_att_a = params[n_teams:2*n_teams]
@@ -2118,7 +2118,7 @@ def main(tune=False):
 
     # Overfitting diagnostics
     print(f"\n--- Overfitting Diagnostics ---")
-    # Train+Val AUC (models trained on this data — measures memorization)
+    # Train+Val AUC (models trained on this data — measures memorisation)
     xgb_tv_p = xgb_model.predict_proba(X_train_val)[:, 1]
     lgb_tv_p = lgb_model.predict_proba(pd.DataFrame(X_train_val, columns=features))[:, 1]
     dc_tv_p = dc_model.predict_proba_df(train_val)
