@@ -27,6 +27,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from division_movement import arrivals, fit_seed_params  # noqa: E402
 from model import DixonColesPredictor  # noqa: E402
 
+# Per league: the frame being seeded, the division above it (None where there
+# is none), and the seasons worth walking. Generalised rather than copied —
+# a second harness would drift from this one exactly as a second seed
+# implementation would.
+LEAGUES = {
+    "EFL": {"csv": "CompleteDSChamp_CSV.csv", "above": "CompleteDSPL_CSV.csv",
+            "first": 10, "last": 25},
+    "PL": {"csv": "CompleteDSPL_CSV.csv", "above": None,
+           "first": 10, "last": 25},
+}
+
 FIRST_SEASON = 10   # earlier seasons cannot clear the minimum event count
 LAST_SEASON = 25
 SEED_WINDOW = 5
@@ -49,18 +60,21 @@ def log_loss(probabilities: np.ndarray, outcomes: np.ndarray) -> float:
     return float(-(outcomes * np.log(p) + (1 - outcomes) * np.log(1 - p)).mean())
 
 
-def main() -> None:
+def main(league: str = "EFL") -> None:
+    cfg = LEAGUES[league]
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    ef = pd.read_csv(os.path.join(root, "CompleteDSChamp_CSV.csv"),
-                     low_memory=False)
-    pl = pd.read_csv(os.path.join(root, "CompleteDSPL_CSV.csv"),
-                     low_memory=False)
+    ef = pd.read_csv(os.path.join(root, cfg["csv"]), low_memory=False)
+    pl = (pd.read_csv(os.path.join(root, cfg["above"]), low_memory=False)
+          if cfg["above"] else None)
+    if "TG" not in ef.columns:
+        ef["TG"] = ef["Home_Goals"] + ef["Away_Goals"]
     ef["Over_2_5"] = (ef["TG"] > 2.5).astype(int)
+    print(f"League: {league}")
 
     unaided, seeded, outcomes = [], [], []
     per_season = []
 
-    for season in range(FIRST_SEASON, LAST_SEASON + 1):
+    for season in range(cfg["first"], cfg["last"] + 1):
         incoming = arrivals(ef, pl, season)
         if not incoming:
             continue
@@ -117,8 +131,8 @@ def main() -> None:
     print()
     verdict = "PASSES" if low > 0 else (
         "FAILS" if high < 0 else "INCONCLUSIVE (CI spans zero)")
-    print(f"ADR 0011 criterion 1: {verdict}")
+    print(f"criterion: log-loss on the seed slice -> {verdict}")
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else "EFL")
