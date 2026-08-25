@@ -4,12 +4,16 @@ Date: 2026-08-23
 
 ## Status
 
-**Proposed. Ship criteria pre-committed below, before any measurement has
-run.** This document is committed ahead of the measurement on purpose: ADR
-0011's criteria were honoured because they were fixed while the result was
-still unknown, and a criterion written after the numbers are visible is not a
-criterion. The Outcomes section is deliberately empty and will be filled by
-the measurement, whatever it says.
+**Built and measured 2026-08-23. Not deployed.** The criteria below were
+committed in `3931466` before any measurement ran; the Outcomes section was
+empty at that commit and filled afterwards, so the pre-commitment is checkable
+in the history rather than asserted here.
+
+Deployment is a separate approval against the measured numbers, and the work
+stays on `feat/pl-division-movement-seed` until it is given —
+`PL_RETRAIN_ENABLED` is `True`, so merging would let the weekly scheduler
+deploy it on its own timetable. **Arm 3's statistical half is unmeasured; see
+Outstanding.**
 
 Extends [ADR 0011](0011-one-division-movement-seed-per-arrival.md), which
 built the Division Movement Seed for the EFL and explicitly scoped the PL out:
@@ -227,4 +231,97 @@ separately. If one arm fails and the other passes, the passing one ships alone.
 
 ## Outcomes
 
-*Empty by design. To be filled by the measurement, whatever it reports.*
+Measured 2026-08-23, after the criteria above were committed in `3931466`.
+
+### The measured prior, and a correction to this document's own figures
+
+75 arrival events, one bucket, keyed `promoted` — the single bucket arriving as
+a consequence of `arrival_route` returning `PROMOTED` where nothing sits above,
+not as anything the code says.
+
+| rating | hand-picked | measured (PL) | measured (EFL, ADR 0011) |
+|---|---|---|---|
+| attack_home | 0.900 | **0.779** | 1.004 |
+| attack_away | 0.750 | **0.646** | 0.921 |
+| defence_home | 1.100 | 1.113 | 1.048 |
+| defence_away | 1.200 | 1.233 | 1.093 |
+
+The hand-picked bucket was **not inverted here**, unlike the EFL, where ADR
+0011 found it wrong for both routes. For the PL it was directionally right —
+it was calibrated for weak arrivals — and roughly 13% optimistic on attack. The
+PL defect was therefore mostly *staleness* rather than a bad constant. Note the
+PL and EFL priors disagree in an interpretable direction: a side promoted into
+the PL measures clearly weak, one promoted into the EFL measures near average.
+That difference is the step up between the divisions, in rating units.
+
+**Two figures in the Context section above were measured against a
+league-average counterfactual, before a prior existed to measure against, and
+are corrected here rather than edited away:**
+
+- Ipswich v Liverpool moves **0.7603 → 0.6196, −0.1407** under the real prior,
+  not the 11.7 points quoted. Larger, because the measured prior is weaker than
+  league average rather than equal to it.
+- *"The errors point in opposite directions across fixtures, so the defect does
+  not surface as aggregate ROI drift"* is **weaker than stated**. Against the
+  real correction five of six arrival fixtures move toward Under and only
+  Liverpool v Hull moves the other way. The defect was more one-directional
+  than claimed and would have been partially visible in aggregate.
+
+The control fixture still moves by exactly 0.0000.
+
+### Criteria
+
+| # | Result | Verdict |
+|---|---|---|
+| C1 | Only seed-slice rows change, asserted for the feature widening with a guard that it changes something at all | **Pass** |
+| C2 | Seed slice log-loss 0.6812 → 0.6758, **+0.79%**, CI [−0.0127, +0.0230], 9 of 16 seasons improve | **Pass** |
+| C4 | `SeedParams` round-trip the pickle; a pre-ADR pickle falls back rather than crashing | **Pass** |
+| C5 | Below `_MIN_EVENTS` the hand-picked `PRIORS` stand | **Pass** |
+
+**C2's interval spans zero, exactly as ADR 0011's criterion 1 did.** The
+difference is that this gate was written for what it gates, so shipping needs
+no judgement call. That is the whole return on pre-committing.
+
+**The PL's evidence is weaker than the EFL's throughout**, and this ADR should
+not inherit ADR 0011's confidence. Split by why the arrival was mispriced:
+
+| arrival | rows | unaided | seeded | delta | EFL equivalent |
+|---|---|---|---|---|---|
+| stale rating here | 380 | 0.6801 | 0.6766 | +0.0036 | +0.0117 |
+| never played here | 100 | 0.6849 | 0.6847 | +0.0002 | −0.0025 |
+
+It sorts the way the mechanism predicts, but weakly. The PL takes 3 arrivals a
+season against the EFL's 6, and the slice is 455 scored rows against 855.
+
+### Arm 4 — the venue gate
+
+Added after the criteria were set, because the build found a third instance of
+this ADR chain's defect: the Dixon-Coles gate counted a side's *total*
+appearances while the feature row counted per venue, so a side five home
+matches in and yet to travel had its away seed retired on the strength of home
+matches. Fixed in both leagues; scored only on rows where the two schemes
+disagree, since rows they agree on price identically in both arms and would
+only dilute the result.
+
+| league | rows | totals | per venue | delta |
+|---|---|---|---|---|
+| EFL | 480 | 0.6870 | 0.6827 | **+0.0043** |
+| PL | 225 | 0.6798 | 0.6809 | **−0.0011** |
+| pooled | 705 | 0.6847 | 0.6821 | +0.0026 |
+
+**The PL arm fails a point-estimate reading and passes C3's agreed
+bootstrap-interval tolerance**, its interval [−0.0164, +0.0154] spanning zero.
+Arm 4 post-dates the criteria and had no reading assigned, so which applied was
+put to the pre-committer rather than chosen by the person who had just seen the
+number; C3's tolerance governs, and it ships. The script encodes that reading
+rather than the stricter one it was first written with.
+
+### Outstanding
+
+**Arm 3's statistical half is not measured.** C1 holds for the feature
+widening as a hard invariant, but whether widening the blend improves
+walk-forward log-loss needs a full PL retrain with and without the eight, which
+has not been run. The correctness argument does not depend on it — training and
+serving disagreeing is not a valid alternative whatever the log-loss — but the
+ADR pre-committed three arms and only two are measured. **Deployment should not
+be read as covering arm 3.**
