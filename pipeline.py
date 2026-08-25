@@ -1456,6 +1456,17 @@ PROMOTED_ROLLING_FEATURES = [
     "Home_ChanceQualityAllowed_5", "Away_ChanceQualityAllowed_5",
     "Home_ConversionAllowed_5", "Away_ConversionAllowed_5",
     "Home_GoalDiff_5", "Away_GoalDiff_5",
+    # Added by ADR 0012. Serving has filled these since `fd64bd5` widened the
+    # fill to every numeric column of an arriving side; training blended only
+    # the list above, so each meant one quantity in training and another at
+    # kick-off. What training kept was not a better value either — rolling
+    # features are computed with `groupby("team")` and no gap awareness, so
+    # Ipswich's `CR_20` for their first match of season 24 was a rolling mean
+    # over their 2000/01 and 2001/02 matches.
+    "Home_Past5CornersConceded", "Away_Past5CornersConceded",
+    "Home_CR_20", "Away_CR_20",
+    "Home_SOT_CR_5", "Away_SOT_CR_5",
+    "Home_SOT_CR_20", "Away_SOT_CR_20",
 ]
 
 

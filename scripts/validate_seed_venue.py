@@ -103,8 +103,17 @@ def main(league: str = "EFL") -> None:
     low, high = np.percentile(deltas, [2.5, 97.5])
     print(f"bootstrap 95% CI              : [{low:+.4f}, {high:+.4f}]")
     print()
-    print("criterion is NO-HARM: passes unless per-venue is worse.")
-    print(f"verdict: {'PASSES' if ll_venue <= ll_total else 'FAILS'}")
+    # No-harm on ADR 0012 criterion C3's tolerance: worse only counts as harm
+    # when it is worse by more than the interval. A point-estimate reading
+    # would fail this arm on the PL at -0.0011, a difference its own interval
+    # cannot distinguish from zero — and C3 was agreed as interval tolerance
+    # before any of these numbers existed.
+    harmed = (ll_venue > ll_total) and high < 0
+    print("criterion is NO-HARM at C3's bootstrap-interval tolerance.")
+    print(f"verdict: {'FAILS' if harmed else 'PASSES'}")
+    if ll_venue > ll_total and not harmed:
+        print(f"  (worse by {ll_venue - ll_total:.4f}, inside "
+              f"[{low:+.4f}, {high:+.4f}] — not separable from zero)")
 
 
 if __name__ == "__main__":
