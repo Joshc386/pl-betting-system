@@ -189,6 +189,10 @@ class LivePredictor:
             "ou_logit_shift": self._ou_logit_shift,
             "ou_val_mean_logit": self._ou_val_mean_logit,
             "btts_cal_shifts": self._btts_cal_shifts,
+            # Measured in train(), never refitted at predict time — two
+            # callers measuring their own constants is this ADR chain's
+            # divergence one level further down (ADR 0012).
+            "seed_params": getattr(self, "_seed_params_cache", None),
         }
         save_pickle(state, path, self._STATE_PATH, self._log,
                      label="Trained state")
@@ -223,6 +227,9 @@ class LivePredictor:
         self._ou_logit_shift = state.get("ou_logit_shift", 0.0)
         self._ou_val_mean_logit = state.get("ou_val_mean_logit", 0.0)
         self._btts_cal_shifts = state.get("btts_cal_shifts")
+        # Backward compat: a pre-ADR-0012 pickle has no seed params, and
+        # falls back to the hand-picked PRIORS bucket rather than failing.
+        self._seed_params_cache = state.get("seed_params")
         if self._ou_stacker is not None:
             self._log(f"  Stacker loaded (logit_shift={self._ou_logit_shift:.4f})")
         else:
@@ -331,6 +338,17 @@ class LivePredictor:
 
         df = self._full_df
         train_df = df[df["SeasonIndex"] >= 14].copy()
+
+        # Division Movement Seed constants (ADR 0012), measured here so the
+        # predictor never refits them. Walk-forward by construction: only
+        # seasons below the one being seeded are read. No division above the
+        # Premier League, so every arrival is PROMOTED and the measurement
+        # returns the one bucket ADR 0012 decided on, without saying so.
+        self._seed_params_cache = fit_seed_params(
+            df, None, through_season=int(df["SeasonIndex"].max()) + 1)
+        self._log(
+            f"Seed params measured from {self._seed_params_cache.n_events} "
+            f"arrival events")
 
         # Materialise BTTS target column for the BTTS DC tuner.
         # pipeline.py computes BTTS in long-format only; the wide df
@@ -1168,15 +1186,27 @@ class LivePredictor:
         # canonical holds nothing for a season whose games are still to be
         # played — and that pre-season window is the whole of a promoted
         # side's first matchday.
-        _previous = df[df["SeasonIndex"] == season - 1]
-        _known = set(_previous["Home_Team"]) | set(_previous["Away_Team"])
+        #
+        # Through `arrivals_for` rather than inline. This was a third
+        # declaration of arrival, alongside `arrivals` and `arrivals_for`,
+        # and agreed with them only because the PL canonical happens to hold
+        # no rows for the season in play: `arrivals_for` also counts sides
+        # the canonical already knows about, which the inline version could
+        # not see. One definition, however many callers.
         _fixture_teams = set()
         for _m in matches:
             _h, _a = match_to_our_teams(_m, self._our_teams)
             _fixture_teams.update(t for t in (_h, _a) if t is not None)
-        arrivals = _fixture_teams - _known if _known else set()
+        arrivals = set(arrivals_for(
+            df, None, season, fixture_teams=_fixture_teams))
         if arrivals:
             self._log(f"New to the division: {', '.join(sorted(arrivals))}")
+
+        # Dixon-Coles reads team identity rather than the feature row, so the
+        # seed never reaches it by filling that row and has to be applied in
+        # its own parameter space (ADR 0012). Driven by the fixture list for
+        # the same reason the arrivals above are.
+        self._seed_dixon_coles(_fixture_teams)
 
         recommendations = []
         self._match_analysis: list[dict] = []  # ALL fixture-market-side rows

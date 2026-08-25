@@ -132,16 +132,23 @@ class TestGenerateRecommendationsReachesTheSeed:
             f"{cls} no longer builds rows through _fixture_feature_row, so "
             f"arrivals are skipped again")
 
-    def test_the_efl_body_seeds_dixon_coles(self):
-        """PL has no equivalent yet - ADR 0011's unbuilt half."""
-        from championship_predict import ChampionshipPredictor
+    @pytest.mark.parametrize("module,cls", [
+        ("championship_predict", "ChampionshipPredictor"),
+        ("predict", "LivePredictor"),
+    ])
+    def test_the_body_seeds_dixon_coles(self, module, cls):
+        """Both leagues now. The PL was ADR 0011's unbuilt half until
+        [ADR 0012](../docs/adr/0012-division-movement-seed-for-the-premier-league.md).
+        """
+        import importlib
 
+        predictor = getattr(importlib.import_module(module), cls)
         source = inspect.getsource(
-            ChampionshipPredictor._generate_recommendations_body)
+            predictor._generate_recommendations_body)
 
         assert any("self._seed_dixon_coles(" in line
                    for line in source.splitlines()), (
-            "the EFL body no longer seeds Dixon-Coles, so an arrival is "
+            f"the {cls} body no longer seeds Dixon-Coles, so an arrival is "
             "priced on whatever rating it carried out of its previous "
             "division")
 

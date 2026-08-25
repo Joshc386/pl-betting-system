@@ -158,3 +158,65 @@ def test_the_seed_retires_as_the_arrival_accumulates_a_record():
     assert dc.attack_home["NEWCO"] == _STALE_ATTACK, (
         "a side past the seed window must keep whatever Dixon-Coles fitted "
         "for it, not be overwritten by the route prior")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The measured constants must reach predict time, or every arrival silently
+# falls back to the hand-picked bucket and nothing reports it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestMeasuredSeedParamsSurviveThePickle:
+    """Round-trip through the file the scheduler actually writes."""
+
+    @staticmethod
+    def _bare():
+        from predict import LivePredictor
+
+        p = LivePredictor.__new__(LivePredictor)
+        p.verbose = False
+        for attr in ("_ou_models", "_btts_models", "_ou_features",
+                     "_btts_features", "_ou_base_rate", "_btts_base_rate",
+                     "_dc_kwargs", "_btts_dc_kwargs", "_train_medians",
+                     "_our_teams"):
+            setattr(p, attr, {})
+        p._ou_stacker = None
+        p._ou_logit_shift = 0.0
+        p._ou_val_mean_logit = 0.0
+        p._btts_cal_shifts = None
+        return p
+
+    def test_priors_and_sample_size_both_come_back(self, tmp_path):
+        path = str(tmp_path / "state.pkl")
+
+        saver = self._bare()
+        saver._seed_params_cache = SeedParams(priors={PROMOTED: _PRIOR},
+                                              n_events=75)
+        saver.save_trained_state(path)
+
+        loader = self._bare()
+        assert loader.load_trained_state(path) is True
+        assert loader._seed_params().priors == {PROMOTED: _PRIOR}, (
+            "the measured prior did not survive the pickle — every PL arrival "
+            "would silently fall back to the hand-picked bucket, which is the "
+            "state ADR 0012 exists to leave behind")
+        assert loader._seed_params().n_events == 75
+
+    def test_a_pre_adr_pickle_falls_back_rather_than_crashing(self, tmp_path):
+        """Every PL pickle written before today has no seed_params key."""
+        import pickle
+
+        path = tmp_path / "legacy.pkl"
+        saver = self._bare()
+        saver._seed_params_cache = None
+        saver.save_trained_state(str(path))
+
+        with open(path, "rb") as fh:
+            state = pickle.load(fh)
+        del state["seed_params"]
+        with open(path, "wb") as fh:
+            pickle.dump(state, fh)
+
+        loader = self._bare()
+        assert loader.load_trained_state(str(path)) is True
+        assert loader._seed_params().priors == {}
+        assert loader._seed_params().n_events == 0
