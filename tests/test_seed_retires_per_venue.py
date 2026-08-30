@@ -169,3 +169,83 @@ def test_the_away_seed_survives_a_side_that_has_only_played_at_home(build):
         "NEWCO has never played away and must still carry the away seed")
     assert dc.attack_home["NEWCO"] == _FITTED, (
         "five home matches is a record worth rating — the home seed retires")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# One declaration of the blend, not three.
+#
+# Both pipelines held the weights as an inline local, and the only thing
+# keeping them in step with `SEED_BLEND_WEIGHTS` was a test matching a literal
+# line of source. That test passes against a dict that is correct today and
+# says nothing about whether the pipeline still reads it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("module", ["pipeline", "championship_pipeline"])
+def test_the_pipeline_blend_follows_the_shared_weights(module, monkeypatch):
+    """Change the shared weights and the pipeline's output must change.
+
+    Behavioural, where the previous guard was textual. If a pipeline ever goes
+    back to its own copy of the numbers this fails, whereas a source match
+    would keep passing for as long as the copy happened to agree.
+    """
+    import importlib
+
+    import division_movement
+    import pandas as pd
+
+    mod = importlib.import_module(module)
+    teams = 24 if module == "championship_pipeline" else 20
+
+    def _season(season, sides):
+        """A season over `sides`, the weakest five carrying the cohort value.
+
+        The cohort and the arrival's own form must differ, or every weight
+        blends the same number into the same number and the test passes
+        whatever the pipeline does.
+        """
+        rows = []
+        for i in range(len(sides) * 6):
+            h, a = sides[i % len(sides)], sides[(i + 1) % len(sides)]
+            hp, ap = (i % len(sides)) + 1, ((i + 1) % len(sides)) + 1
+            cut = len(sides) - 5
+            rows.append({
+                "SeasonIndex": season,
+                "Date": f"20{20 + season:02d}-0{(i % 9) + 1}-{(i % 28) + 1:02d}",
+                "Home_Team": h, "Away_Team": a,
+                "Home_Promoted": int(h == "NEWCO"),
+                "Away_Promoted": int(a == "NEWCO"),
+                "Home_LeaguePosition": hp, "Away_LeaguePosition": ap,
+                "Home_Past5Goals": 2.0 if hp > cut else 9.0,
+                "Away_Past5Goals": 2.0 if ap > cut else 9.0,
+            })
+        return rows
+
+    established = [f"T{i:02d}" for i in range(1, teams + 1)]
+    # NEWCO must be absent in season 24 and present in 25: the EFL detects
+    # arrivals by that difference, where the PL reads the Promoted flag. A
+    # frame that satisfies only one of them tests only one pipeline.
+    df = pd.DataFrame(
+        _season(24, established)
+        + _season(25, ["NEWCO"] + established[1:]))
+
+    baseline = mod.initialize_promoted_features(df.copy())
+    baseline = baseline[0] if isinstance(baseline, tuple) else baseline
+
+    # A weight the production dict does not hold, at match 1, where the seed
+    # is otherwise total. If the pipeline reads the shared definition the
+    # first match stops being pure seed; if it holds its own copy, nothing
+    # moves.
+    monkeypatch.setitem(division_movement.SEED_BLEND_WEIGHTS, 1, 0.5)
+    changed = mod.initialize_promoted_features(df.copy())
+    changed = changed[0] if isinstance(changed, tuple) else changed
+
+    first = baseline[(baseline["SeasonIndex"] == 25)
+                     & (baseline["Home_Team"] == "NEWCO")].sort_values("Date")
+    after = changed[(changed["SeasonIndex"] == 25)
+                    & (changed["Home_Team"] == "NEWCO")].sort_values("Date")
+
+    assert not first.empty, "the arrival has no rows; the frame is wrong"
+    assert first.iloc[0]["Home_Past5Goals"] != after.iloc[0]["Home_Past5Goals"], (
+        f"{module} did not follow SEED_BLEND_WEIGHTS — it is holding its own "
+        f"copy of the blend, which is the divergence the shared constant "
+        f"exists to prevent")

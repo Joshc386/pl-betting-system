@@ -277,28 +277,17 @@ class TestTheSeedWindowIsCountedPerVenue:
 class TestBothPipelinesStillUseTheseWeights:
     """The serving blend is only correct while training agrees with it.
 
-    Both pipelines declare the weights inline as a local. Matched line-wise
-    rather than by substring, because a substring check here would pass
-    against a dict that merely contains these pairs among others.
+    The weights themselves are no longer asserted here. Both pipelines now
+    call `seed_weight`, and
+    `test_seed_retires_per_venue.test_the_pipeline_blend_follows_the_shared_weights`
+    proves it behaviourally by changing the shared dict and requiring the
+    pipeline's output to move. The test that used to live here matched a
+    literal line of source, which passes for exactly as long as a private
+    copy happens to agree with the shared one — the failure mode it was
+    written to catch.
+
+    The cutoff stays, because it is a separate number and still a literal.
     """
-
-    @pytest.mark.parametrize("module,func", [
-        ("pipeline", "initialize_promoted_features"),
-        ("championship_pipeline", "initialize_promoted_features"),
-    ])
-    def test_the_inline_weights_match_the_shared_constant(self, module, func):
-        import importlib
-        import inspect
-        from division_movement import SEED_BLEND_WEIGHTS
-
-        source = inspect.getsource(
-            getattr(importlib.import_module(module), func))
-        expected = ("blend_weights = "
-                    "{1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4, 5: 0.2}")
-
-        assert any(line.strip() == expected for line in source.splitlines()), (
-            f"{module}.{func} no longer blends on SEED_BLEND_WEIGHTS "
-            f"({SEED_BLEND_WEIGHTS}); serving and training have diverged")
 
     @pytest.mark.parametrize("module,func", [
         ("pipeline", "initialize_promoted_features"),
