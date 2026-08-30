@@ -7,7 +7,7 @@ row; Dixon-Coles consumes *team identity* and looks up venue-specific ratings,
 so the row never reaches it. Left alone it rates an arriving side on that
 side's exit season, however long ago that was.
 
-Measured against the live pickle on 2026-08-23: Coventry (last PL season index
+Measured against the live pickle on 2026-08-30: Coventry (last PL season index
 0) was unrated and fell through to the hand-picked ``PRIORS`` bucket, Hull
 carried 2016/17, and Ipswich carried 2024/25 with ``defence_home`` 1.681. On
 Ipswich v Liverpool that is 0.7603 against 0.6431 — 11.7 points of P(Over 2.5)

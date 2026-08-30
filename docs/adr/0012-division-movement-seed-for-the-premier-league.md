@@ -1,10 +1,10 @@
 # 12. Division Movement Seed for the Premier League
 
-Date: 2026-08-23
+Date: 2026-08-30
 
 ## Status
 
-**Built and measured 2026-08-23. Not deployed.** The criteria below were
+**Built and measured 2026-08-30. Not deployed.** The criteria below were
 committed in `3931466` before any measurement ran; the Outcomes section was
 empty at that commit and filled afterwards, so the pre-commitment is checkable
 in the history rather than asserted here.
@@ -28,7 +28,7 @@ Two defects, one mechanism, both live in the PL today.
 
 `seed_arrivals` exists in `model.py` and is shared by both leagues, but only
 `championship_predict.py` calls it. The PL trained state carries no
-`seed_params` key at all. Measured against the live pickle on 2026-08-23, the
+`seed_params` key at all. Measured against the live pickle on 2026-08-30, the
 three sides arriving for 2026/27 fail in three different ways:
 
 | side | PL seasons held | `att_h` | `att_a` | `def_h` | `def_a` |
@@ -223,7 +223,7 @@ separately. If one arm fails and the other passes, the passing one ships alone.
   rolling window has not cleared. The seed cannot reach this; it is the
   `groupby("team")` problem. **Known-open, deliberately out of scope.**
 - **The PL Freshness Gate is green**, and `E0` 2026/27 remains unpublished
-  upstream (verified 2026-08-23: `E0` answers HTTP 300 where `E1` answers 200),
+  upstream (verified 2026-08-30: `E0` answers HTTP 300 where `E1` answers 200),
   so `current_season_idx` stays 25. The measured prior can be validated against
   history but not against the season now being priced.
 - **Two things named "route" now exist**: ADR 0011's arrival direction and
@@ -232,7 +232,7 @@ separately. If one arm fails and the other passes, the passing one ships alone.
 
 ## Outcomes
 
-Measured 2026-08-23, after the criteria above were committed in `3931466`.
+Measured 2026-08-30, after the criteria above were committed in `3931466`.
 
 ### The measured prior, and a correction to this document's own figures
 
