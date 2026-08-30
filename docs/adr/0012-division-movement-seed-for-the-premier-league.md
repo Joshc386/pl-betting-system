@@ -9,11 +9,12 @@ committed in `3931466` before any measurement ran; the Outcomes section was
 empty at that commit and filled afterwards, so the pre-commitment is checkable
 in the history rather than asserted here.
 
+All four measurement arms have run and every pre-committed criterion holds.
+
 Deployment is a separate approval against the measured numbers, and the work
 stays on `feat/pl-division-movement-seed` until it is given —
 `PL_RETRAIN_ENABLED` is `True`, so merging would let the weekly scheduler
-deploy it on its own timetable. **Arm 3's statistical half is unmeasured; see
-Outstanding.**
+deploy it on its own timetable.
 
 Extends [ADR 0011](0011-one-division-movement-seed-per-arrival.md), which
 built the Division Movement Seed for the EFL and explicitly scoped the PL out:
@@ -316,12 +317,34 @@ put to the pre-committer rather than chosen by the person who had just seen the
 number; C3's tolerance governs, and it ships. The script encodes that reading
 rather than the stricter one it was first written with.
 
+### Arm 3 — the eight features
+
+Walk-forward, the frame initialised twice and a fixed-seed XGBoost fitted on
+everything below each season, scoring that season's seed slice. Only the slice
+is scored: every other row is identical between the two frames by construction,
+so including them would dilute the difference toward zero and prove nothing.
+
+| | rows | eleven pairs | nineteen pairs | delta |
+|---|---|---|---|---|
+| PL seed slice | 455 | 0.6844 | 0.6844 | **−0.0001** |
+
+Bootstrap 95% CI [−0.0110, +0.0106]. **Passes** — no harm, and no detectable
+benefit either, which is the expected result for a divergence repair. The
+change exists so that a feature means one thing in both places; that training
+and serving now agree is the outcome, and log-loss was never the argument for
+it. C1 is the criterion that carries this change, and it holds.
+
+**Two limitations, recorded rather than buried.** The model is a single
+XGBoost over the **34** of 183 `ALL_FEATURES` the canonical holds directly, not
+the production ensemble — the rest are derived by `run_pipeline`. All eight
+changed features are among the 34, so the model can see the change and the
+result is not vacuous; but this measures whether the corrected values carry
+more signal than the stale ones, not what the full stacker would do with them.
+A production-scale answer needs a real retrain, and that is deployment's
+business rather than this ADR's.
+
 ### Outstanding
 
-**Arm 3's statistical half is not measured.** C1 holds for the feature
-widening as a hard invariant, but whether widening the blend improves
-walk-forward log-loss needs a full PL retrain with and without the eight, which
-has not been run. The correctness argument does not depend on it — training and
-serving disagreeing is not a valid alternative whatever the log-loss — but the
-ADR pre-committed three arms and only two are measured. **Deployment should not
-be read as covering arm 3.**
+Nothing from the pre-committed criteria. Remaining known-open items are in
+Consequences: the match 6-to-20 contamination tail on the 20-match windows, and
+the `route` naming collision.
