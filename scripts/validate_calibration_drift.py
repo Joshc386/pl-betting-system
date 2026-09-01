@@ -184,3 +184,86 @@ def selection_effect() -> None:
         star = "" if lo <= 0 <= hi else "  *"
         print(f"  {label:44s} n={len(sub):6d}  gap {pt:+6.2f} pp  "
               f"[{lo:+6.2f},{hi:+6.2f}]{star}")
+
+
+def stacker_comparison() -> None:
+    """Measure with the construction production actually uses.
+
+    ``roi_validate`` averages the calibrated base models. Production runs the
+    raw base probabilities through a logistic stacker, which is a different
+    quantity — so a calibration figure built the first way is not a statement
+    about what the live system predicts.
+
+    The stacker is refitted **walk-forward** here, on seasons below each test
+    season. The production stacker is fitted on all OOF rows at once
+    (``model.py``), so applying the live one to these caches would score it on
+    outcomes it was trained on.
+    """
+    import glob
+    import os
+
+    from sklearn.linear_model import LogisticRegression
+
+    from scripts.roi_validate import _implied_fair_prob
+
+    frames = []
+    for path in sorted(glob.glob(os.path.join(CACHE_DIR, "*.parquet"))):
+        league, market = os.path.basename(path).replace(".parquet", "").split("_")
+        df = pd.read_parquet(path)
+        df["league"], df["market"] = league.upper(), market
+        df["mean_cal"] = df.apply(model_prob, axis=1)
+        frames.append(df)
+    d = pd.concat(frames, ignore_index=True)
+    d = d[d.mean_cal.notna() & d.outcome.notna()]
+    d["actual"] = d.outcome.astype(float)
+
+    parts = []
+    for (_lg, _mkt), g in d.groupby(["league", "market"]):
+        cols = [c for c in ("xgb_prob", "lgb_prob", "dc_prob")
+                if g[c].notna().any()]
+        for season in sorted(g.season.unique()):
+            train = g[g.season < season].dropna(subset=cols)
+            test = g[g.season == season].dropna(subset=cols)
+            if len(train) < 200 or test.empty:
+                continue
+            lr = LogisticRegression(C=1.0, max_iter=1000, random_state=42)
+            lr.fit(train[cols].to_numpy(), train.actual.to_numpy())
+            test = test.copy()
+            test["stk"] = lr.predict_proba(test[cols].to_numpy())[:, 1]
+            parts.append(test)
+    r = pd.concat(parts, ignore_index=True)
+
+    print("\n=== CONSTRUCTION: MEAN-OF-CALIBRATED vs WALK-FORWARD STACKER ===")
+    for label, col in (("mean of calibrated base models", "mean_cal"),
+                       ("walk-forward stacker (production)", "stk")):
+        pt, lo, hi = gap_ci(r[col].to_numpy(), r.actual.to_numpy())
+        star = "" if lo <= 0 <= hi else "  *"
+        print(f"  {label:38s} gap {pt:+6.2f} pp  [{lo:+6.2f},{hi:+6.2f}]{star}")
+
+    print("\n  per season:")
+    for season, g in r.groupby("season"):
+        a, _, _ = gap_ci(g["stk"].to_numpy(), g.actual.to_numpy())
+        b, _, _ = gap_ci(g["mean_cal"].to_numpy(), g.actual.to_numpy())
+        print(f"    season {int(season)}  n={len(g):5d}  "
+              f"stacker {a:+6.2f}   mean-cal {b:+6.2f}")
+
+    # Does the winner's curse depend on the construction? It should not: it is
+    # a property of selecting on the model's own disagreement with the market.
+    fair = r.apply(lambda x: _implied_fair_prob(x.odds_a, x.odds_b), axis=1)
+    r["fa"] = [f[0] for f in fair]
+    r["fb"] = [f[1] for f in fair]
+    r = r[r.fa.notna()]
+    long = pd.concat([
+        pd.DataFrame({"m": r["stk"], "f": r.fa, "a": r.actual}),
+        pd.DataFrame({"m": 1 - r["stk"], "f": r.fb, "a": 1 - r.actual}),
+    ], ignore_index=True)
+    long["edge"] = long.m - long.f
+
+    print("\n  selection effect under the stacker:")
+    for label, sub in (("every game, both sides", long),
+                       ("positive edge only", long[long.edge > 0]),
+                       ("edge >= 2%", long[long.edge >= 0.02])):
+        pt, lo, hi = gap_ci(sub.m.to_numpy(), sub.a.to_numpy())
+        star = "" if lo <= 0 <= hi else "  *"
+        print(f"    {label:24s} n={len(sub):6d}  gap {pt:+6.2f} pp  "
+              f"[{lo:+6.2f},{hi:+6.2f}]{star}")
