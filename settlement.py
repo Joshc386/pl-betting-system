@@ -332,3 +332,85 @@ if __name__ == "__main__":
     settle_bets(days_back=7, verbose=True)
     print("\n=== Prediction Settlement ===\n")
     settle_predictions(days_back=7, verbose=True)
+
+
+def settle_match_analysis(
+    finished: dict[tuple[str, str], tuple[int, int]] | None = None,
+    days_back: int = 7,
+    league: str = "PL",
+    verbose: bool = True,
+) -> dict:
+    """Record the outcome of every evaluated market, winners and losers alike.
+
+    ``settle_predictions`` covers only rows ``db.log_predictions`` stored, and
+    that function keeps a prediction solely when ``edge_pct > 0``.
+    ``settle_bets`` is narrower still. Both are therefore selected samples, and
+    conditioning on the model's own positive edge inflates its apparent
+    confidence by roughly 6 percentage points whatever its true calibration —
+    measured walk-forward across the OOF caches, on both sides symmetrically.
+    That is the winner's curse, not a fault, and it means neither table can
+    answer "is the model miscalibrated".
+
+    ``match_analysis`` holds every fixture-market-side the predictor evaluated.
+    Settling it is what makes an unbiased calibration measurement possible.
+
+    Args:
+        finished: ``{(home, away): (home_goals, away_goals)}``. Fetched via
+            :func:`get_finished_matches` when omitted; injected by tests.
+        days_back: How far back to fetch results when *finished* is omitted.
+        league: League key.
+        verbose: Print a summary.
+
+    Returns:
+        ``{"settled": int, "skipped": int}``.
+    """
+    from db import get_db
+
+    if finished is None:
+        # get_finished_matches returns a list of match dicts; key it the way
+        # settle_predictions does rather than inventing a second shape.
+        finished = {
+            (m["home_team"], m["away_team"]): (m["home_goals"], m["away_goals"])
+            for m in get_finished_matches(days_back=days_back)
+        }
+    if not finished:
+        if verbose:
+            print("No finished matches found to settle match analysis against.")
+        return {"settled": 0, "skipped": 0}
+
+    settled_count = 0
+    skipped = 0
+    now = datetime.now().isoformat()
+
+    with get_db(league) as conn:
+        rows = conn.execute(
+            "SELECT id, home_team, away_team, market, side "
+            "FROM match_analysis WHERE settled=0"
+        ).fetchall()
+
+        for row in rows:
+            score = finished.get((row["home_team"], row["away_team"]))
+            if score is None:
+                skipped += 1
+                continue
+            try:
+                # One definition of winning, shared with every other settler.
+                won, actual = _determine_outcome(
+                    row["market"], row["side"], score[0], score[1])
+            except (ValueError, KeyError):
+                skipped += 1
+                continue
+
+            conn.execute(
+                """UPDATE match_analysis
+                   SET settled=1, won=?, actual_result=?, settled_at=?
+                   WHERE id=?""",
+                (int(won), actual, now, row["id"]),
+            )
+            settled_count += 1
+        conn.commit()
+
+    if verbose:
+        print(f"Match analysis settlement: {settled_count} settled, "
+              f"{skipped} awaiting a result")
+    return {"settled": settled_count, "skipped": skipped}
