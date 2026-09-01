@@ -1,0 +1,3285 @@
+{
+  "timestamp": "2026-09-01T19:25:45.728002",
+  "data": [
+    {
+      "id": "625c096fabb6047cbeb082dab9affce4",
+      "home_team": "Ipswich Town",
+      "away_team": "Liverpool",
+      "commence_time": "2026-09-04T19:00:00Z",
+      "bookmakers": {
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.5,
+          "under": 2.5,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.5,
+              "under": 2.5
+            }
+          }
+        },
+        "nordicbet": {
+          "title": "Nordic Bet",
+          "over": 1.49,
+          "under": 2.62,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.49,
+              "under": 2.62
+            }
+          }
+        },
+        "betsson": {
+          "title": "Betsson",
+          "over": 1.49,
+          "under": 2.62,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.49,
+              "under": 2.62
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.54,
+          "no": 2.35,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "yes": 1.58,
+          "no": 2.23,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.6,
+          "no": 2.3,
+          "is_sharp": false,
+          "is_major": true
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "yes": 1.59,
+          "no": 2.45,
+          "is_sharp": true,
+          "is_major": false
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "yes": 1.64,
+          "no": 2.44,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "yes": 1.6,
+          "no": 2.25,
+          "is_sharp": false,
+          "is_major": false
+        }
+      }
+    },
+    {
+      "id": "686358c484cc44fe8e617674c335d531",
+      "home_team": "Newcastle United",
+      "away_team": "Bournemouth",
+      "commence_time": "2026-09-05T11:30:00Z",
+      "bookmakers": {
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.6,
+          "under": 2.3,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.6,
+              "under": 2.3
+            }
+          }
+        },
+        "betsson": {
+          "title": "Betsson",
+          "over": 1.58,
+          "under": 2.4,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.58,
+              "under": 2.4
+            }
+          }
+        },
+        "nordicbet": {
+          "title": "Nordic Bet",
+          "over": 1.58,
+          "under": 2.4,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.58,
+              "under": 2.4
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.57,
+          "under": 2.38,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.57,
+              "under": 2.38
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.57,
+          "under": 2.35,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.57,
+              "under": 2.35
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.49,
+          "under": 2.23,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.49,
+              "under": 2.23
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.57,
+          "under": 2.38,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.57,
+              "under": 2.38
+            }
+          }
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "over": 1.62,
+          "under": 2.56,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.62,
+              "under": 2.56
+            }
+          }
+        },
+        "gtbets": {
+          "title": "GTbets",
+          "over": 1.6,
+          "under": 2.29,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.6,
+              "under": 2.29
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.47,
+          "no": 2.53,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "yes": 1.48,
+          "no": 2.47,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.55,
+          "no": 2.4,
+          "is_sharp": false,
+          "is_major": true
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "yes": 1.49,
+          "no": 2.72,
+          "is_sharp": true,
+          "is_major": false
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "yes": 1.54,
+          "no": 2.64,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "yes": 1.48,
+          "no": 2.52,
+          "is_sharp": false,
+          "is_major": false
+        }
+      }
+    },
+    {
+      "id": "29f81160baf6a97d6391d7172fad2425",
+      "home_team": "Brentford",
+      "away_team": "Sunderland",
+      "commence_time": "2026-09-05T14:00:00Z",
+      "bookmakers": {
+        "codere_it": {
+          "title": "Codere (IT)",
+          "over": 1.76,
+          "under": 1.92,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.76,
+              "under": 1.92
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.77,
+          "under": 1.94,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.77,
+              "under": 1.94
+            }
+          }
+        },
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.77,
+          "under": 2.0,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.77,
+              "under": 2.0
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.83,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.83,
+              "under": 1.95
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.9,
+          "under": 2.05,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.9,
+              "under": 2.05
+            }
+          }
+        },
+        "betsson": {
+          "title": "Betsson",
+          "over": 1.82,
+          "under": 1.98,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.82,
+              "under": 1.98
+            }
+          }
+        },
+        "nordicbet": {
+          "title": "Nordic Bet",
+          "over": 1.82,
+          "under": 1.98,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.82,
+              "under": 1.98
+            }
+          }
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "over": 1.87,
+          "under": 2.02,
+          "is_sharp": true,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.87,
+              "under": 2.02
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.85,
+          "under": 1.97,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.97
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.72,
+          "under": 1.85,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.72,
+              "under": 1.85
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.82,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.82,
+              "under": 1.95
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.85,
+          "under": 1.97,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.97
+            }
+          }
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "over": 1.9,
+          "under": 2.08,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.9,
+              "under": 2.08
+            }
+          }
+        },
+        "gtbets": {
+          "title": "GTbets",
+          "over": 1.8,
+          "under": 1.98,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.8,
+              "under": 1.98
+            }
+          }
+        },
+        "coolbet": {
+          "title": "Coolbet",
+          "over": 1.83,
+          "under": 2.05,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.83,
+              "under": 2.05
+            }
+          }
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "over": 1.79,
+          "under": 2.03,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.79,
+              "under": 2.03
+            }
+          }
+        },
+        "betanysports": {
+          "title": "BetAnything",
+          "over": 1.79,
+          "under": 2.06,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.79,
+              "under": 2.06
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "yes": 1.85,
+          "no": 1.86,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.85,
+          "no": 1.91,
+          "is_sharp": false,
+          "is_major": true
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.82,
+          "no": 1.9,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "yes": 1.88,
+          "no": 1.98,
+          "is_sharp": true,
+          "is_major": false
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "yes": 1.9,
+          "no": 2.04,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "yes": 1.85,
+          "no": 1.92,
+          "is_sharp": false,
+          "is_major": false
+        }
+      }
+    },
+    {
+      "id": "3b81531990da7ea3e461c43e8827672b",
+      "home_team": "Brighton and Hove Albion",
+      "away_team": "Leeds United",
+      "commence_time": "2026-09-05T14:00:00Z",
+      "bookmakers": {
+        "codere_it": {
+          "title": "Codere (IT)",
+          "over": 1.76,
+          "under": 1.92,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.76,
+              "under": 1.92
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.93,
+          "under": 2.01,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.93,
+              "under": 2.01
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.77,
+          "under": 1.94,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.77,
+              "under": 1.94
+            }
+          }
+        },
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.77,
+          "under": 2.0,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.77,
+              "under": 2.0
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.8,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.8,
+              "under": 1.95
+            }
+          }
+        },
+        "betsson": {
+          "title": "Betsson",
+          "over": 1.82,
+          "under": 2.0,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.82,
+              "under": 2.0
+            }
+          }
+        },
+        "nordicbet": {
+          "title": "Nordic Bet",
+          "over": 1.82,
+          "under": 2.0,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.82,
+              "under": 2.0
+            }
+          }
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "over": 1.91,
+          "under": 1.98,
+          "is_sharp": true,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.91,
+              "under": 1.98
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.72,
+          "under": 1.83,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.72,
+              "under": 1.83
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.85,
+          "under": 1.97,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.97
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.83,
+          "under": 1.94,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.83,
+              "under": 1.94
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.85,
+          "under": 1.97,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.97
+            }
+          }
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "over": 1.93,
+          "under": 2.06,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.93,
+              "under": 2.06
+            }
+          }
+        },
+        "gtbets": {
+          "title": "GTbets",
+          "over": 1.81,
+          "under": 1.98,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.81,
+              "under": 1.98
+            }
+          }
+        },
+        "coolbet": {
+          "title": "Coolbet",
+          "over": 1.81,
+          "under": 2.08,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.81,
+              "under": 2.08
+            }
+          }
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "over": 1.83,
+          "under": 1.98,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.83,
+              "under": 1.98
+            }
+          }
+        },
+        "betanysports": {
+          "title": "BetAnything",
+          "over": 1.83,
+          "under": 2.0,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.83,
+              "under": 2.0
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.71,
+          "no": 2.04,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "yes": 1.69,
+          "no": 2.05,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.75,
+          "no": 2.0,
+          "is_sharp": false,
+          "is_major": true
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "yes": 1.79,
+          "no": 2.09,
+          "is_sharp": true,
+          "is_major": false
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "yes": 1.79,
+          "no": 2.16,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "yes": 1.74,
+          "no": 2.04,
+          "is_sharp": false,
+          "is_major": false
+        }
+      }
+    },
+    {
+      "id": "3db5f919507eb8ab0c8c72bddaca8f08",
+      "home_team": "Manchester City",
+      "away_team": "Coventry City",
+      "commence_time": "2026-09-05T14:00:00Z",
+      "bookmakers": {
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.33,
+          "under": 3.25,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.33,
+              "under": 3.25
+            }
+          }
+        },
+        "betsson": {
+          "title": "Betsson",
+          "over": 1.35,
+          "under": 3.2,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.35,
+              "under": 3.2
+            }
+          }
+        },
+        "nordicbet": {
+          "title": "Nordic Bet",
+          "over": 1.35,
+          "under": 3.2,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.35,
+              "under": 3.2
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.87,
+          "no": 1.85,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "yes": 1.87,
+          "no": 1.83,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.8,
+          "no": 1.95,
+          "is_sharp": false,
+          "is_major": true
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "yes": 1.98,
+          "no": 1.86,
+          "is_sharp": true,
+          "is_major": false
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "yes": 2.02,
+          "no": 1.9,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "yes": 1.83,
+          "no": 1.93,
+          "is_sharp": false,
+          "is_major": false
+        }
+      }
+    },
+    {
+      "id": "8f68612bf47c3193e7fa2d8783e79373",
+      "home_team": "Fulham",
+      "away_team": "Crystal Palace",
+      "commence_time": "2026-09-05T14:00:00Z",
+      "bookmakers": {
+        "codere_it": {
+          "title": "Codere (IT)",
+          "over": 1.8,
+          "under": 1.87,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.8,
+              "under": 1.87
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.82,
+          "under": 1.88,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.82,
+              "under": 1.88
+            }
+          }
+        },
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.77,
+          "under": 2.0,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.77,
+              "under": 2.0
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.85,
+          "under": 1.85,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.85
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.95,
+          "under": 1.99,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.95,
+              "under": 1.99
+            }
+          }
+        },
+        "betsson": {
+          "title": "Betsson",
+          "over": 1.85,
+          "under": 1.98,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.98
+            }
+          }
+        },
+        "nordicbet": {
+          "title": "Nordic Bet",
+          "over": 1.85,
+          "under": 1.98,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.98
+            }
+          }
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "over": 1.93,
+          "under": 1.96,
+          "is_sharp": true,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.93,
+              "under": 1.96
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.77,
+          "under": 1.79,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.77,
+              "under": 1.79
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.89,
+          "under": 1.93,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.89,
+              "under": 1.93
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.89,
+          "under": 1.93,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.89,
+              "under": 1.93
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.88,
+          "under": 1.89,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.88,
+              "under": 1.89
+            }
+          }
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "over": 1.95,
+          "under": 2.02,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.95,
+              "under": 2.02
+            }
+          }
+        },
+        "gtbets": {
+          "title": "GTbets",
+          "over": 1.88,
+          "under": 1.9,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.88,
+              "under": 1.9
+            }
+          }
+        },
+        "coolbet": {
+          "title": "Coolbet",
+          "over": 1.87,
+          "under": 2.0,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.87,
+              "under": 2.0
+            }
+          }
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "over": 1.87,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.87,
+              "under": 1.95
+            }
+          }
+        },
+        "betanysports": {
+          "title": "BetAnything",
+          "over": 1.87,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.87,
+              "under": 1.95
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "yes": 1.66,
+          "no": 2.09,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.7,
+          "no": 2.1,
+          "is_sharp": false,
+          "is_major": true
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.67,
+          "no": 2.1,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "yes": 1.72,
+          "no": 2.19,
+          "is_sharp": true,
+          "is_major": false
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "yes": 1.74,
+          "no": 2.28,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "yes": 1.68,
+          "no": 2.12,
+          "is_sharp": false,
+          "is_major": false
+        }
+      }
+    },
+    {
+      "id": "a6f2622727548c33369cc15c88b2aabd",
+      "home_team": "Nottingham Forest",
+      "away_team": "Tottenham Hotspur",
+      "commence_time": "2026-09-05T14:00:00Z",
+      "bookmakers": {
+        "codere_it": {
+          "title": "Codere (IT)",
+          "over": 1.88,
+          "under": 1.79,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.88,
+              "under": 1.79
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 2.02,
+          "under": 1.92,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 2.02,
+              "under": 1.92
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.9,
+          "under": 1.81,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.9,
+              "under": 1.81
+            }
+          }
+        },
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.87,
+          "under": 1.87,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.87,
+              "under": 1.87
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 2.0,
+          "under": 1.75,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 2.0,
+              "under": 1.75
+            }
+          }
+        },
+        "betsson": {
+          "title": "Betsson",
+          "over": 1.95,
+          "under": 1.85,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.95,
+              "under": 1.85
+            }
+          }
+        },
+        "nordicbet": {
+          "title": "Nordic Bet",
+          "over": 1.95,
+          "under": 1.85,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.95,
+              "under": 1.85
+            }
+          }
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "over": 2.0,
+          "under": 1.89,
+          "is_sharp": true,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 2.0,
+              "under": 1.89
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 2.02,
+          "under": 1.78,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 2.02,
+              "under": 1.78
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 2.04,
+          "under": 1.8,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 2.04,
+              "under": 1.8
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.89,
+          "under": 1.67,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.89,
+              "under": 1.67
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 2.04,
+          "under": 1.8,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 2.04,
+              "under": 1.8
+            }
+          }
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "over": 2.02,
+          "under": 1.92,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 2.02,
+              "under": 1.92
+            }
+          }
+        },
+        "gtbets": {
+          "title": "GTbets",
+          "over": 1.94,
+          "under": 1.84,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.94,
+              "under": 1.84
+            }
+          }
+        },
+        "coolbet": {
+          "title": "Coolbet",
+          "over": 2.0,
+          "under": 1.87,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 2.0,
+              "under": 1.87
+            }
+          }
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "over": 1.98,
+          "under": 1.83,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.98,
+              "under": 1.83
+            }
+          }
+        },
+        "betanysports": {
+          "title": "BetAnything",
+          "over": 2.0,
+          "under": 1.83,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 2.0,
+              "under": 1.83
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.72,
+          "no": 2.02,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "yes": 1.72,
+          "no": 2.01,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.8,
+          "no": 1.95,
+          "is_sharp": false,
+          "is_major": true
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "yes": 1.76,
+          "no": 2.13,
+          "is_sharp": true,
+          "is_major": false
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "yes": 1.79,
+          "no": 2.14,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "yes": 1.84,
+          "no": 1.92,
+          "is_sharp": false,
+          "is_major": false
+        }
+      }
+    },
+    {
+      "id": "21fd24ad6732df00774304a046d84fe9",
+      "home_team": "Hull City",
+      "away_team": "Aston Villa",
+      "commence_time": "2026-09-05T16:30:00Z",
+      "bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.93,
+          "under": 2.01,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.93,
+              "under": 2.01
+            }
+          }
+        },
+        "codere_it": {
+          "title": "Codere (IT)",
+          "over": 1.8,
+          "under": 1.87,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.8,
+              "under": 1.87
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.81,
+          "under": 1.89,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.81,
+              "under": 1.89
+            }
+          }
+        },
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.8,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.8,
+              "under": 1.95
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.8,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.8,
+              "under": 1.95
+            }
+          }
+        },
+        "nordicbet": {
+          "title": "Nordic Bet",
+          "over": 1.85,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.95
+            }
+          }
+        },
+        "betsson": {
+          "title": "Betsson",
+          "over": 1.85,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.95
+            }
+          }
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "over": 1.9,
+          "under": 1.99,
+          "is_sharp": true,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.9,
+              "under": 1.99
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.85,
+          "under": 1.96,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.96
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.83,
+          "under": 1.93,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.83,
+              "under": 1.93
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.73,
+          "under": 1.83,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.73,
+              "under": 1.83
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.85,
+          "under": 1.96,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.96
+            }
+          }
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "over": 1.92,
+          "under": 2.02,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.92,
+              "under": 2.02
+            }
+          }
+        },
+        "gtbets": {
+          "title": "GTbets",
+          "over": 1.85,
+          "under": 1.93,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.93
+            }
+          }
+        },
+        "coolbet": {
+          "title": "Coolbet",
+          "over": 1.9,
+          "under": 1.97,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.9,
+              "under": 1.97
+            }
+          }
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "over": 1.87,
+          "under": 1.94,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.87,
+              "under": 1.94
+            }
+          }
+        },
+        "betanysports": {
+          "title": "BetAnything",
+          "over": 1.87,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.87,
+              "under": 1.95
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.75,
+          "no": 1.98,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "yes": 1.75,
+          "no": 1.97,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.73,
+          "no": 2.05,
+          "is_sharp": false,
+          "is_major": true
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "yes": 1.81,
+          "no": 2.05,
+          "is_sharp": true,
+          "is_major": false
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "yes": 1.84,
+          "no": 2.12,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "yes": 1.78,
+          "no": 2.0,
+          "is_sharp": false,
+          "is_major": false
+        }
+      }
+    },
+    {
+      "id": "8ea6c863f1852654399073b518b0a1f8",
+      "home_team": "Everton",
+      "away_team": "Manchester United",
+      "commence_time": "2026-09-06T13:00:00Z",
+      "bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.78,
+          "under": 2.2,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.78,
+              "under": 2.2
+            }
+          }
+        },
+        "codere_it": {
+          "title": "Codere (IT)",
+          "over": 1.66,
+          "under": 2.05,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.66,
+              "under": 2.05
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.68,
+          "under": 2.07,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.68,
+              "under": 2.07
+            }
+          }
+        },
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.67,
+          "under": 2.15,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.67,
+              "under": 2.15
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.75,
+          "under": 2.0,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.75,
+              "under": 2.0
+            }
+          }
+        },
+        "nordicbet": {
+          "title": "Nordic Bet",
+          "over": 1.72,
+          "under": 2.12,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.72,
+              "under": 2.12
+            }
+          }
+        },
+        "betsson": {
+          "title": "Betsson",
+          "over": 1.72,
+          "under": 2.12,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.72,
+              "under": 2.12
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.6,
+          "under": 2.02,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.6,
+              "under": 2.02
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.71,
+          "under": 2.17,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.71,
+              "under": 2.17
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.7,
+          "under": 2.14,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.7,
+              "under": 2.14
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.71,
+          "under": 2.17,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.71,
+              "under": 2.17
+            }
+          }
+        },
+        "coolbet": {
+          "title": "Coolbet",
+          "over": 1.76,
+          "under": 2.15,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.76,
+              "under": 2.15
+            }
+          }
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "over": 1.77,
+          "under": 2.2,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.77,
+              "under": 2.2
+            }
+          }
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "over": 1.74,
+          "under": 2.09,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.74,
+              "under": 2.09
+            }
+          }
+        },
+        "gtbets": {
+          "title": "GTbets",
+          "over": 1.71,
+          "under": 2.1,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.71,
+              "under": 2.1
+            }
+          }
+        },
+        "betanysports": {
+          "title": "BetAnything",
+          "over": 1.74,
+          "under": 2.15,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.74,
+              "under": 2.15
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.57,
+          "no": 2.28,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "yes": 1.57,
+          "no": 2.26,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.62,
+          "no": 2.25,
+          "is_sharp": false,
+          "is_major": true
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "yes": 1.59,
+          "no": 2.43,
+          "is_sharp": true,
+          "is_major": false
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "yes": 1.66,
+          "no": 2.44,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "yes": 1.6,
+          "no": 2.25,
+          "is_sharp": false,
+          "is_major": false
+        }
+      }
+    },
+    {
+      "id": "78d4dfda8c2dc27bdc3ec26c2654f8fc",
+      "home_team": "Arsenal",
+      "away_team": "Chelsea",
+      "commence_time": "2026-09-06T15:30:00Z",
+      "bookmakers": {
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.75,
+          "under": 1.96,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.75,
+              "under": 1.96
+            }
+          }
+        },
+        "codere_it": {
+          "title": "Codere (IT)",
+          "over": 1.74,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.74,
+              "under": 1.95
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.87,
+          "under": 2.08,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.87,
+              "under": 2.08
+            }
+          }
+        },
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.72,
+          "under": 2.05,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.72,
+              "under": 2.05
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.85,
+          "under": 1.91,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.91
+            }
+          }
+        },
+        "nordicbet": {
+          "title": "Nordic Bet",
+          "over": 1.78,
+          "under": 2.02,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.78,
+              "under": 2.02
+            }
+          }
+        },
+        "betsson": {
+          "title": "Betsson",
+          "over": 1.78,
+          "under": 2.02,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.78,
+              "under": 2.02
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.82,
+          "under": 2.02,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.82,
+              "under": 2.02
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.7,
+          "under": 1.87,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.7,
+              "under": 1.87
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.8,
+          "under": 2.0,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.8,
+              "under": 2.0
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.82,
+          "under": 2.02,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.82,
+              "under": 2.02
+            }
+          }
+        },
+        "coolbet": {
+          "title": "Coolbet",
+          "over": 1.8,
+          "under": 2.09,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.8,
+              "under": 2.09
+            }
+          }
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "over": 1.86,
+          "under": 2.12,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.86,
+              "under": 2.12
+            }
+          }
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "over": 1.82,
+          "under": 2.0,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.82,
+              "under": 2.0
+            }
+          }
+        },
+        "gtbets": {
+          "title": "GTbets",
+          "over": 1.79,
+          "under": 1.99,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.79,
+              "under": 1.99
+            }
+          }
+        },
+        "betanysports": {
+          "title": "BetAnything",
+          "over": 1.82,
+          "under": 2.02,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.82,
+              "under": 2.02
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "yes": 1.75,
+          "no": 1.97,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.75,
+          "no": 1.98,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.75,
+          "no": 2.0,
+          "is_sharp": false,
+          "is_major": true
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "yes": 1.8,
+          "no": 2.07,
+          "is_sharp": true,
+          "is_major": false
+        },
+        "matchbook": {
+          "title": "Matchbook",
+          "yes": 1.82,
+          "no": 2.12,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "betonlineag": {
+          "title": "BetOnline.ag",
+          "yes": 1.76,
+          "no": 2.01,
+          "is_sharp": false,
+          "is_major": false
+        }
+      }
+    },
+    {
+      "id": "d09677edcf1fb82ad75a8df58bb26eab",
+      "home_team": "Aston Villa",
+      "away_team": "Nottingham Forest",
+      "commence_time": "2026-09-12T14:00:00Z",
+      "bookmakers": {
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.83,
+          "under": 1.93,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.83,
+              "under": 1.93
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.83,
+          "under": 1.87,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.83,
+              "under": 1.87
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.97,
+          "under": 1.97,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.97,
+              "under": 1.97
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.85,
+          "under": 1.91,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.85,
+              "under": 1.91
+            }
+          }
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "over": 1.93,
+          "under": 1.91,
+          "is_sharp": true,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.93,
+              "under": 1.91
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.77,
+          "under": 1.79,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.77,
+              "under": 1.79
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.88,
+          "under": 1.91,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.88,
+              "under": 1.91
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.88,
+          "under": 1.91,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.88,
+              "under": 1.91
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.88,
+          "under": 1.91,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.88,
+              "under": 1.91
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.74,
+          "no": 2.0,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.73,
+          "no": 2.05,
+          "is_sharp": false,
+          "is_major": true
+        }
+      }
+    },
+    {
+      "id": "d856d4353db0b4cca2a49b96dfd19c92",
+      "home_team": "Bournemouth",
+      "away_team": "Brentford",
+      "commence_time": "2026-09-12T14:00:00Z",
+      "bookmakers": {
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.65,
+          "under": 2.2,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.65,
+              "under": 2.2
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.63,
+          "under": 2.14,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.63,
+              "under": 2.14
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.73,
+          "under": 2.28,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.73,
+              "under": 2.28
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.67,
+          "under": 2.15,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.67,
+              "under": 2.15
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.65,
+          "under": 2.2,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.65,
+              "under": 2.2
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.55,
+          "under": 2.08,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.55,
+              "under": 2.08
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.65,
+          "under": 2.2,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.65,
+              "under": 2.2
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.65,
+          "under": 2.2,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.65,
+              "under": 2.2
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.53,
+          "no": 2.37,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.55,
+          "no": 2.38,
+          "is_sharp": false,
+          "is_major": true
+        }
+      }
+    },
+    {
+      "id": "5163190733dcaaea80474e43cbe20a51",
+      "home_team": "Chelsea",
+      "away_team": "Hull City",
+      "commence_time": "2026-09-12T14:00:00Z",
+      "bookmakers": {
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.4,
+          "under": 2.75,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.4,
+              "under": 2.75
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.86,
+          "no": 1.86,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.85,
+          "no": 1.85,
+          "is_sharp": false,
+          "is_major": true
+        }
+      }
+    },
+    {
+      "id": "14f6639178a943ac614c7b872bf6e4d6",
+      "home_team": "Crystal Palace",
+      "away_team": "Ipswich Town",
+      "commence_time": "2026-09-12T14:00:00Z",
+      "bookmakers": {
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.9,
+          "under": 1.85,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.9,
+              "under": 1.85
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.86,
+          "under": 1.84,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.86,
+              "under": 1.84
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.97,
+          "under": 1.97,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.97,
+              "under": 1.97
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.91,
+          "under": 1.85,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.91,
+              "under": 1.85
+            }
+          }
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "over": 1.9,
+          "under": 1.93,
+          "is_sharp": true,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.9,
+              "under": 1.93
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.93,
+          "under": 1.85,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.93,
+              "under": 1.85
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.82,
+          "under": 1.74,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.82,
+              "under": 1.74
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.93,
+          "under": 1.85,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.93,
+              "under": 1.85
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.93,
+          "under": 1.85,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.93,
+              "under": 1.85
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.75,
+          "no": 1.98,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.83,
+          "no": 1.95,
+          "is_sharp": false,
+          "is_major": true
+        }
+      }
+    },
+    {
+      "id": "63da4075a4ae406575fd3086b839fe49",
+      "home_team": "Liverpool",
+      "away_team": "Fulham",
+      "commence_time": "2026-09-12T14:00:00Z",
+      "bookmakers": {
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.44,
+          "under": 2.62,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.44,
+              "under": 2.62
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.58,
+          "no": 2.26,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.57,
+          "no": 2.3,
+          "is_sharp": false,
+          "is_major": true
+        }
+      }
+    },
+    {
+      "id": "cbbc88759fe3e2f1677a0c6ee40955af",
+      "home_team": "Tottenham Hotspur",
+      "away_team": "Everton",
+      "commence_time": "2026-09-12T16:30:00Z",
+      "bookmakers": {
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.87,
+          "under": 1.87,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.87,
+              "under": 1.87
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.88,
+          "under": 1.83,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.88,
+              "under": 1.83
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.98,
+          "under": 1.96,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.98,
+              "under": 1.96
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.91,
+          "under": 1.85,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.91,
+              "under": 1.85
+            }
+          }
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "over": 1.93,
+          "under": 1.9,
+          "is_sharp": true,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.93,
+              "under": 1.9
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.91,
+          "under": 1.88,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.91,
+              "under": 1.88
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.8,
+          "under": 1.76,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.8,
+              "under": 1.76
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.91,
+          "under": 1.88,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.91,
+              "under": 1.88
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.91,
+          "under": 1.88,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.91,
+              "under": 1.88
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.73,
+          "no": 2.01,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.75,
+          "no": 2.05,
+          "is_sharp": false,
+          "is_major": true
+        }
+      }
+    },
+    {
+      "id": "082f74fe6a8bc5826555b76e9e114dab",
+      "home_team": "Sunderland",
+      "away_team": "Arsenal",
+      "commence_time": "2026-09-12T19:00:00Z",
+      "bookmakers": {
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.93,
+          "under": 1.83,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.93,
+              "under": 1.83
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.93,
+          "under": 1.78,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.93,
+              "under": 1.78
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 2.06,
+          "under": 1.89,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 2.06,
+              "under": 1.89
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.95,
+          "under": 1.8,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.95,
+              "under": 1.8
+            }
+          }
+        },
+        "pinnacle": {
+          "title": "Pinnacle",
+          "over": 2.02,
+          "under": 1.83,
+          "is_sharp": true,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 2.02,
+              "under": 1.83
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.95,
+          "under": 1.83,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.95,
+              "under": 1.83
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.83,
+          "under": 1.72,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.83,
+              "under": 1.72
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.95,
+          "under": 1.83,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.95,
+              "under": 1.83
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.95,
+          "under": 1.83,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.95,
+              "under": 1.83
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 2.08,
+          "no": 1.68,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 2.05,
+          "no": 1.73,
+          "is_sharp": false,
+          "is_major": true
+        }
+      }
+    },
+    {
+      "id": "c97a93b915115f2b4659fb88262b71f8",
+      "home_team": "Coventry City",
+      "away_team": "Brighton and Hove Albion",
+      "commence_time": "2026-09-13T13:00:00Z",
+      "bookmakers": {
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.72,
+          "under": 2.05,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.72,
+              "under": 2.05
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.7,
+          "under": 2.04,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.7,
+              "under": 2.04
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.84,
+          "under": 2.12,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.84,
+              "under": 2.12
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.73,
+          "under": 2.05,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.73,
+              "under": 2.05
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.63,
+          "under": 1.94,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.63,
+              "under": 1.94
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.74,
+          "under": 2.08,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.74,
+              "under": 2.08
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.74,
+          "under": 2.08,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.74,
+              "under": 2.08
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.74,
+          "under": 2.08,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.74,
+              "under": 2.08
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.68,
+          "no": 2.08,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.7,
+          "no": 2.1,
+          "is_sharp": false,
+          "is_major": true
+        }
+      }
+    },
+    {
+      "id": "e40d0fb44319f7bd0ebe1ffbc61fa661",
+      "home_team": "Manchester United",
+      "away_team": "Manchester City",
+      "commence_time": "2026-09-13T15:30:00Z",
+      "bookmakers": {
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.53,
+          "under": 2.4,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.53,
+              "under": 2.4
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {
+        "onexbet": {
+          "title": "1xBet",
+          "yes": 1.43,
+          "no": 2.66,
+          "is_sharp": false,
+          "is_major": false
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "yes": 1.44,
+          "no": 2.6,
+          "is_sharp": false,
+          "is_major": true
+        }
+      }
+    },
+    {
+      "id": "b7a2cad26d908a943a27340b4b607068",
+      "home_team": "Leeds United",
+      "away_team": "Newcastle United",
+      "commence_time": "2026-09-14T19:00:00Z",
+      "bookmakers": {
+        "tipico_de": {
+          "title": "Tipico",
+          "over": 1.72,
+          "under": 2.05,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.72,
+              "under": 2.05
+            }
+          }
+        },
+        "mybookieag": {
+          "title": "MyBookie.ag",
+          "over": 1.72,
+          "under": 2.01,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.72,
+              "under": 2.01
+            }
+          }
+        },
+        "onexbet": {
+          "title": "1xBet",
+          "over": 1.81,
+          "under": 2.17,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.81,
+              "under": 2.17
+            }
+          }
+        },
+        "williamhill": {
+          "title": "William Hill",
+          "over": 1.8,
+          "under": 1.95,
+          "is_sharp": false,
+          "is_major": true,
+          "all_lines": {
+            "2.5": {
+              "over": 1.8,
+              "under": 1.95
+            }
+          }
+        },
+        "pmu_fr": {
+          "title": "PMU (FR)",
+          "over": 1.6,
+          "under": 2.0,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.6,
+              "under": 2.0
+            }
+          }
+        },
+        "unibet_se": {
+          "title": "Unibet (SE)",
+          "over": 1.7,
+          "under": 2.14,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.7,
+              "under": 2.14
+            }
+          }
+        },
+        "leovegas_se": {
+          "title": "LeoVegas (SE)",
+          "over": 1.7,
+          "under": 2.14,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.7,
+              "under": 2.14
+            }
+          }
+        },
+        "unibet_nl": {
+          "title": "Unibet (NL)",
+          "over": 1.7,
+          "under": 2.14,
+          "is_sharp": false,
+          "is_major": false,
+          "all_lines": {
+            "2.5": {
+              "over": 1.7,
+              "under": 2.14
+            }
+          }
+        }
+      },
+      "btts_bookmakers": {}
+    }
+  ]
+}

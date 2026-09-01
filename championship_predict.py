@@ -210,8 +210,8 @@ def _fetch_champ_odds(
 ) -> list[dict]:
     """Fetch Championship odds by temporarily overriding the sport key.
 
-    The-Odds-API uses 'soccer_efl_champ' for Championship fixtures.
-    We swap the module-level SPORT variable, fetch, then restore it.
+    The-Odds-API uses 'soccer_efl_champ' for Championship fixtures, and the
+    Championship keeps its own cache file. Both are passed to the fetch.
 
     Args:
         force_refresh: Bypass odds cache.
@@ -220,17 +220,15 @@ def _fetch_champ_odds(
     Returns:
         List of match dicts with bookmaker odds.
     """
-    original_sport = odds_api_module.SPORT
-    original_cache = odds_api_module.CACHE_FILE
-
-    try:
-        odds_api_module.SPORT = LEAGUE_CFG["odds_api_sport"]
-        odds_api_module.CACHE_FILE = os.path.join(
-            odds_api_module.CACHE_DIR, "odds_cache_efl.json")
-        return fetch_epl_odds(force_refresh=force_refresh, markets=markets)
-    finally:
-        odds_api_module.SPORT = original_sport
-        odds_api_module.CACHE_FILE = original_cache
+    # Passed, not swapped. See the note on fetch_epl_odds: the swap this
+    # replaces raced with concurrent PL scans and crossed the two caches.
+    return fetch_epl_odds(
+        force_refresh=force_refresh,
+        markets=markets,
+        sport=LEAGUE_CFG["odds_api_sport"],
+        cache_file=os.path.join(
+            odds_api_module.CACHE_DIR, "odds_cache_efl.json"),
+    )
 
 
 def _fetch_champ_oddspapi(
