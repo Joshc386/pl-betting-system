@@ -129,3 +129,58 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def selection_effect() -> None:
+    """How much of an apparent edge is the winner's curse?
+
+    `db.log_predictions` stores a prediction only when `edge_pct > 0`, so the
+    live predictions table is a *selected* sample: it records the model only
+    where the model already disagreed with the market. Conditional on that,
+    any model looks over-confident, because the subset is selected for its
+    largest errors as much as for its largest insights.
+
+    Measuring the same walk-forward rows under each selection separates the
+    model's actual calibration from the artefact of how it is sampled.
+    """
+    import glob
+    import os
+
+    from scripts.roi_validate import _implied_fair_prob
+
+    frames = []
+    for path in sorted(glob.glob(os.path.join(CACHE_DIR, "*.parquet"))):
+        league, market = os.path.basename(path).replace(".parquet", "").split("_")
+        df = pd.read_parquet(path)
+        df["league"], df["market"] = league.upper(), market
+        df["model_p"] = df.apply(model_prob, axis=1)
+        frames.append(df)
+    d = pd.concat(frames, ignore_index=True)
+    d = d[d.model_p.notna() & d.outcome.notna()
+          & d.odds_a.notna() & d.odds_b.notna()]
+    fair = d.apply(lambda r: _implied_fair_prob(r.odds_a, r.odds_b), axis=1)
+    d["fair_a"] = [f[0] for f in fair]
+    d["fair_b"] = [f[1] for f in fair]
+    d = d[d.fair_a.notna()]
+    actual_a = d.outcome.astype(float)
+
+    # Both sides, each selectable on its own edge — as log_predictions does.
+    long = pd.concat([
+        pd.DataFrame({"model": d.model_p, "fair": d.fair_a, "actual": actual_a}),
+        pd.DataFrame({"model": 1 - d.model_p, "fair": d.fair_b,
+                      "actual": 1 - actual_a}),
+    ], ignore_index=True)
+    long["edge"] = long.model - long.fair
+
+    print("\n=== SELECTION EFFECT (same rows, different sampling) ===")
+    print("Gap = mean model P(side) - realised rate. Positive = model TOO HIGH.")
+    for label, sub in (
+        ("every game, both sides", long),
+        ("positive edge only (what predictions logs)", long[long.edge > 0]),
+        ("edge >= 2% (the gate minimum)", long[long.edge >= 0.02]),
+        ("negative edge (never logged)", long[long.edge <= 0]),
+    ):
+        pt, lo, hi = gap_ci(sub.model.to_numpy(), sub.actual.to_numpy())
+        star = "" if lo <= 0 <= hi else "  *"
+        print(f"  {label:44s} n={len(sub):6d}  gap {pt:+6.2f} pp  "
+              f"[{lo:+6.2f},{hi:+6.2f}]{star}")
