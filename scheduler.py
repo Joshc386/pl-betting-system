@@ -436,7 +436,8 @@ def job_settle_bets() -> None:
 
     try:
         logger.info("Starting bet settlement...")
-        from settlement import settle_bets, settle_predictions
+        from settlement import (settle_bets, settle_match_analysis,
+                                settle_predictions)
         summary = settle_bets(days_back=3, verbose=True)
         logger.info(f"Settlement complete: {summary}")
         print(f"[{datetime.now():%H:%M:%S}] Settlement: "
@@ -447,6 +448,16 @@ def job_settle_bets() -> None:
         # Also settle prediction tracking (model accuracy, not stakes)
         pred_summary = settle_predictions(days_back=3, verbose=True)
         logger.info(f"Prediction settlement: {pred_summary}")
+
+        # And every evaluated market, winners and losers alike. The two
+        # settlers above cover selected samples only — predictions keeps a row
+        # solely when edge_pct > 0 — and a calibration measured on those is
+        # stuck at roughly +6 points by construction whatever the model is
+        # doing. This is the unbiased half.
+        for _lg in ("PL", "EFL"):
+            ma_summary = settle_match_analysis(
+                days_back=3, league=_lg, verbose=True)
+            logger.info(f"{_lg} match analysis settlement: {ma_summary}")
     except Exception as e:
         logger.error(f"Settlement failed: {e}", exc_info=True)
         print(f"[{datetime.now():%H:%M:%S}] Settlement FAILED: {e}")

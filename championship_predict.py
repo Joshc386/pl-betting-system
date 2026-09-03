@@ -78,6 +78,7 @@ from division_movement import (
     season_in_play,
     recompute_two_sided,
     seed_features,
+    seed_venues,
     seed_weight,
 )
 import api.odds_api as odds_api_module
@@ -209,8 +210,8 @@ def _fetch_champ_odds(
 ) -> list[dict]:
     """Fetch Championship odds by temporarily overriding the sport key.
 
-    The-Odds-API uses 'soccer_efl_champ' for Championship fixtures.
-    We swap the module-level SPORT variable, fetch, then restore it.
+    The-Odds-API uses 'soccer_efl_champ' for Championship fixtures, and the
+    Championship keeps its own cache file. Both are passed to the fetch.
 
     Args:
         force_refresh: Bypass odds cache.
@@ -219,17 +220,15 @@ def _fetch_champ_odds(
     Returns:
         List of match dicts with bookmaker odds.
     """
-    original_sport = odds_api_module.SPORT
-    original_cache = odds_api_module.CACHE_FILE
-
-    try:
-        odds_api_module.SPORT = LEAGUE_CFG["odds_api_sport"]
-        odds_api_module.CACHE_FILE = os.path.join(
-            odds_api_module.CACHE_DIR, "odds_cache_efl.json")
-        return fetch_epl_odds(force_refresh=force_refresh, markets=markets)
-    finally:
-        odds_api_module.SPORT = original_sport
-        odds_api_module.CACHE_FILE = original_cache
+    # Passed, not swapped. See the note on fetch_epl_odds: the swap this
+    # replaces raced with concurrent PL scans and crossed the two caches.
+    return fetch_epl_odds(
+        force_refresh=force_refresh,
+        markets=markets,
+        sport=LEAGUE_CFG["odds_api_sport"],
+        cache_file=os.path.join(
+            odds_api_module.CACHE_DIR, "odds_cache_efl.json"),
+    )
 
 
 def _fetch_champ_oddspapi(
@@ -1173,17 +1172,18 @@ class ChampionshipPredictor:
         # Past it, Dixon-Coles has fitted the side on its actual results and
         # the route prior would discard every one of them — including the
         # estimate the weekly retrain had just produced, on the very next
-        # scan. Gated on `seed_weight` rather than a second threshold, so the
-        # rating and the feature row can never disagree about when the seed
-        # stops applying.
+        # scan. Arrival selects the route; it never selects the duration.
+        #
+        # Counted per venue, because that is what the window is: the four
+        # ratings split home from away exactly as `Home_Past5Goals` splits
+        # from `Away_Past5Goals`, and the feature row has always counted it
+        # this way. Counting total appearances retired both halves at five
+        # and left a side that had never played away rated on its exit
+        # season — the two gates disagreed while the comment here claimed
+        # they could not.
         season_rows = self._full_df[self._full_df["SeasonIndex"] == season]
-        played = pd.concat(
-            [season_rows["Home_Team"], season_rows["Away_Team"]]
-        ).value_counts()
-        incoming = {
-            team: route for team, route in incoming.items()
-            if seed_weight(int(played.get(team, 0))) > 0
-        }
+        venues = seed_venues(season_rows, incoming)
+        incoming = {t: r for t, r in incoming.items() if t in venues}
         if not incoming:
             return {}
 
@@ -1191,7 +1191,7 @@ class ChampionshipPredictor:
         for models in (self._ou_models, self._ou15_models, self._btts_models):
             dc = (models or {}).get("dc")
             if dc is not None:
-                dc.seed_arrivals(incoming, priors)
+                dc.seed_arrivals(incoming, priors, venues=venues)
 
         self._log(
             f"Division Movement Seed applied to {len(incoming)} arrival(s): "

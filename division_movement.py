@@ -63,6 +63,46 @@ def seed_weight(played: int) -> float:
     return SEED_BLEND_WEIGHTS.get(played + 1, 0.0)
 
 
+def seed_venues(
+    season_rows: pd.DataFrame,
+    teams,
+) -> dict[str, set[str]]:
+    """Which venues each side is still inside the seed window at.
+
+    The window is per venue, and the whole of this module's difficulty comes
+    from callers forgetting that. ``Home_Past5Goals`` and ``Away_Past5Goals``
+    are different quantities, and Dixon-Coles' four ratings split on exactly
+    the same line, so a side's home seed and away seed retire independently.
+
+    Both predictors previously counted a side's *total* appearances, which
+    retires everything at five and takes the away half with it — leaving a
+    side that has never played away rated on the exit season the seed exists
+    to displace.
+
+    Args:
+        season_rows: The rows of the season in play.
+        teams: The sides to judge.
+
+    Returns:
+        Team -> the subset of ``{"home", "away"}`` still seeded. A side past
+        the window at both venues is absent, which is the caller's signal to
+        stop treating it as seeded at all.
+    """
+    home = season_rows["Home_Team"].value_counts()
+    away = season_rows["Away_Team"].value_counts()
+
+    within: dict[str, set[str]] = {}
+    for team in teams:
+        at = set()
+        if seed_weight(int(home.get(team, 0))) > 0:
+            at.add("home")
+        if seed_weight(int(away.get(team, 0))) > 0:
+            at.add("away")
+        if at:
+            within[team] = at
+    return within
+
+
 @dataclass(frozen=True)
 class SeedParams:
     """Constants measured from historical arrivals, never hand-picked.
@@ -337,14 +377,34 @@ def _final_positions(df: pd.DataFrame, season: int) -> dict[str, float]:
     return dict(zip(last["Home_Team"], last["Home_LeaguePosition"]))
 
 
-def arrival_route(pl_df: pd.DataFrame, team: str, season: int) -> str:
+def arrival_route(
+    above_df: pd.DataFrame | None,
+    team: str,
+    season: int,
+) -> str:
     """Which direction a side arrived from.
 
     A side that played in the division *above* last season dropped in;
     anything else came up from below. There is no League One frame to check
     against, so "came up" is what remains once "came down" is excluded.
+
+    Args:
+        above_df: The division above, or ``None`` when there is none. The
+            Premier League is the top division, so every side arriving in it
+            came up — one direction, not two. That is not a PL special case
+            written anywhere; it is what this function returns when nothing
+            sits above, and the single-bucket prior
+            ([ADR 0012](docs/adr/0012-division-movement-seed-for-the-premier-league.md))
+            falls out of it without further code.
+        team: The arriving side.
+        season: The season it arrives in.
+
+    Returns:
+        ``RELEGATED`` or ``PROMOTED``.
     """
-    above = _season_teams(pl_df, season - 1)
+    if above_df is None or above_df.empty:
+        return PROMOTED
+    above = _season_teams(above_df, season - 1)
     return RELEGATED if normalize(team) in {
         normalize(t) for t in above} else PROMOTED
 

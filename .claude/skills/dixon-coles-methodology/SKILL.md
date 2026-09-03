@@ -97,7 +97,41 @@ fair_prob = implied_prob / overround
 - Uses FBref for some features (fbref_comp_id: 10)
 - Higher average goals per game — model parameters reflect this
 - Greater variance in team quality
-- Synthesises features for newly promoted teams using league averages
+
+### The Division Movement Seed
+
+What a side looks like in a division it has not played in yet. It is **not** a
+league average — that was the live path's old behaviour and the defect
+[ADR 0011](../../../docs/adr/0011-one-division-movement-seed-per-arrival.md)
+removed, measured at 16 percentage points on `Over25_5` against what training
+actually used. Avoid the words "synthesis" / "synthesised row": they named the
+mechanism at one call site while hiding that two call sites disagreed.
+
+- **A side's own history in the division is never the seed.** Movement is a
+  cycle, so a returning side's most recent rows are always its *exit* season,
+  biased in a direction the route predicts and stale on top.
+- **Feature rows** take the cohort for the side's route: EFL arrivals from
+  League One and all PL arrivals take the bottom five of the prior season;
+  sides relegated into the EFL take mid-table (8-16).
+- **Dixon-Coles is seeded in its own parameter space**, because it reads team
+  identity rather than a feature row. An arrival is treated as unrated and
+  takes a **measured** venue-aware prior for its route, carried in the trained
+  state as `seed_params` and never refitted at predict time.
+- **The window is five matches per venue, not per season**, and retiring the
+  seed is `seed_weight`'s question alone. Arrival selects the route; it never
+  selects the duration.
+
+Both leagues are seeded. The EFL splits arrivals two ways (relegated /
+promoted); the PL has no division above it, so every arrival is promoted and
+one measured bucket falls out of the shared machinery —
+[ADR 0012](../../../docs/adr/0012-division-movement-seed-for-the-premier-league.md).
+
+| rating | hand-picked (legacy) | measured PL | measured EFL relegated | measured EFL promoted |
+|---|---|---|---|---|
+| attack_home | 0.900 | 0.779 | 1.156 | 1.004 |
+| attack_away | 0.750 | 0.646 | 0.993 | 0.921 |
+| defence_home | 1.100 | 1.113 | 0.797 | 1.048 |
+| defence_away | 1.200 | 1.233 | 0.909 | 1.093 |
 
 ### Academic References
 

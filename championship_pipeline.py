@@ -17,7 +17,7 @@ from scipy.stats import poisson as poisson_dist
 
 import os
 
-from division_movement import SeedParams, seed_features
+from division_movement import SeedParams, seed_features, seed_weight
 from features.common import (
     add_congestion_features,
     add_defensive_components,
@@ -997,7 +997,6 @@ def initialize_promoted_features(
     # Only keep features actually present in the DataFrame
     rolling_features = [f for f in rolling_features if f in df.columns]
 
-    blend_weights = {1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4, 5: 0.2}
     filled = 0
 
     # Cross-reference PL data to classify new teams
@@ -1044,7 +1043,7 @@ def initialize_promoted_features(
                 for match_num, (idx, _) in enumerate(team_matches.iterrows(), 1):
                     if match_num > 5:
                         break
-                    weight = blend_weights.get(match_num, 0)
+                    weight = seed_weight(match_num - 1)
                     if weight == 0:
                         continue
 

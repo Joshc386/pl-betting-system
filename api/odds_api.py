@@ -39,7 +39,7 @@ SHARP_BOOKS = {"pinnacle"}  # sharpest lines
 MAJOR_BOOKS = {"betfair", "bet365", "williamhill", "unibet", "betsson"}
 
 
-def _load_cache(allow_stale: bool = False):
+def _load_cache(allow_stale: bool = False, cache_file: str | None = None):
     """Load cached odds if within the applicable age bound.
 
     Two age bounds apply, never unbounded: normal calls serve only cache
@@ -50,11 +50,15 @@ def _load_cache(allow_stale: bool = False):
     Args:
         allow_stale: If True, apply the wider ``STALE_TTL_MINUTES`` bound
             instead of the normal freshness bound.
+        cache_file: Which cache to read. Defaults to the module path, which
+            is the Premier League's. Pass it explicitly for any other league
+            — see the note on ``fetch_epl_odds``.
     """
-    if not os.path.exists(CACHE_FILE):
+    path = cache_file or CACHE_FILE
+    if not os.path.exists(path):
         return None
     try:
-        with open(CACHE_FILE, "r") as f:
+        with open(path, "r") as f:
             cache = json.load(f)
         data = cache.get("data", None)
         # Treat empty data as no cache
@@ -74,17 +78,18 @@ def _load_cache(allow_stale: bool = False):
     return None
 
 
-def _save_cache(data):
+def _save_cache(data, cache_file: str | None = None):
     """Save odds data to cache. Never overwrites good data with empty data."""
     if not data:
         return
-    os.makedirs(CACHE_DIR, exist_ok=True)
+    path = cache_file or CACHE_FILE
+    os.makedirs(os.path.dirname(path) or CACHE_DIR, exist_ok=True)
     cache = {"timestamp": datetime.now().isoformat(), "data": data}
-    with open(CACHE_FILE, "w") as f:
+    with open(path, "w") as f:
         json.dump(cache, f, indent=2)
 
 
-def _fetch_market(market_key: str) -> list[dict]:
+def _fetch_market(market_key: str, sport: str | None = None) -> list[dict]:
     """Fetch a single market from The-Odds-API bulk endpoint.
 
     Args:
@@ -93,7 +98,7 @@ def _fetch_market(market_key: str) -> list[dict]:
     Returns:
         Raw JSON list of events, or empty list on failure.
     """
-    url = f"{BASE_URL}/sports/{SPORT}/odds/"
+    url = f"{BASE_URL}/sports/{sport or SPORT}/odds/"
     params = {
         "apiKey": API_KEY,
         "regions": "eu",
@@ -443,6 +448,8 @@ def fetch_btts_for_events(
 def fetch_epl_odds(
     force_refresh: bool = False,
     markets: tuple[str, ...] = ("totals", "btts"),
+    sport: str | None = None,
+    cache_file: str | None = None,
 ) -> list[dict]:
     """Fetch Over/Under 2.5 and BTTS odds for all upcoming EPL matches.
 
@@ -453,21 +460,34 @@ def fetch_epl_odds(
         force_refresh: Bypass cache TTL.
         markets: Which markets to fetch. ("totals", "btts") for full,
                  ("totals",) to skip BTTS and save API calls.
+        sport: Odds-API sport key. Defaults to the module's, which is the
+            Premier League's.
+        cache_file: Where to read and write this league's cache. Defaults to
+            the module's, which is the Premier League's.
+
+    Note:
+        Both are parameters rather than module state on purpose. They used to
+        be globals that callers swapped in place and restored in a `finally`,
+        which is not thread-safe — and Dash serves on Flask with
+        `threaded=True`, so two league tabs scan concurrently. On 2026-09-01
+        that put 24 Championship fixtures in the Premier League's cache and 20
+        Premier League fixtures in the Championship's, silently, for a week.
+        Pass them; do not reintroduce a swap.
 
     Returns:
         List of match dicts with odds from all bookmakers.
     """
     if not force_refresh:
-        cached = _load_cache()
+        cached = _load_cache(cache_file=cache_file)
         if cached is not None:
             return cached
 
     # Fetch totals via bulk endpoint
-    totals_raw = _fetch_market("totals")
+    totals_raw = _fetch_market("totals", sport=sport)
 
     if not totals_raw:
         # API failed (quota exhausted, network error) — use stale cache
-        return _load_cache(allow_stale=True) or []
+        return _load_cache(allow_stale=True, cache_file=cache_file) or []
 
     # Build match dict keyed by event ID
     matches_by_id: dict[str, dict] = {}
@@ -593,7 +613,7 @@ def fetch_epl_odds(
     matches = [m for m in matches_by_id.values()
                if m["bookmakers"] or m["btts_bookmakers"]]
 
-    _save_cache(matches)
+    _save_cache(matches, cache_file=cache_file)
     return matches
 
 

@@ -78,7 +78,15 @@ LEAGUES: dict[str, dict[str, Any]] = {
 
         # Historical seasons available (SeasonIndex range)
         "first_season_idx": 0,       # 2000/01
-        "current_season_idx": 25,    # 2025/26
+        # Bumped 2026-09-01, the day upstream published E0 2026/27 — eleven
+        # days after the EFL's equivalent bump, and the same lesson twice.
+        # `build_canonical_dataset` reads this as `last_season`, so while it
+        # said 25 the rebuild could not fetch the new season even once
+        # upstream had it. The Freshness Gate reported "missing 19 fixtures"
+        # throughout, which reads as an upstream problem and hides the local
+        # half. The PL could not price a single fixture for the whole of the
+        # opening month because of it.
+        "current_season_idx": 26,    # 2026/27
     },
 
     # ── English Championship ────────────────────────────────────────────────

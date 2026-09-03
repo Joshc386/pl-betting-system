@@ -305,19 +305,19 @@ def run_scan(league: str) -> str:
         from api.team_mapping import normalize
         import api.odds_api as odds_mod
 
-        # Temporarily override sport + cache for this league
-        original_sport = odds_mod.SPORT
-        original_cache = odds_mod.CACHE_FILE
-        odds_mod.SPORT = league_cfg.get("odds_api_sport", original_sport)
-        if league != "PL":
-            odds_mod.CACHE_FILE = original_cache.replace(
-                "odds_cache", f"odds_cache_{league.lower()}")
-
-        try:
-            matches = fetch_epl_odds(force_refresh=False)
-        finally:
-            odds_mod.SPORT = original_sport
-            odds_mod.CACHE_FILE = original_cache
+        # This league's sport key and cache, passed rather than swapped into
+        # module state. The swap-and-restore this replaces was not thread-safe
+        # — Dash serves on Flask with threaded=True, so two league tabs scan
+        # concurrently — and it put each league's fixtures in the other's cache
+        # file on 2026-09-01. The PL branch was the worst of it: it never set
+        # CACHE_FILE at all, so it inherited whatever another thread had left.
+        suffix = "" if league == "PL" else f"_{league.lower()}"
+        matches = fetch_epl_odds(
+            force_refresh=False,
+            sport=league_cfg.get("odds_api_sport", odds_mod.SPORT),
+            cache_file=os.path.join(
+                odds_mod.CACHE_DIR, f"odds_cache{suffix}.json"),
+        )
 
         # ── OddsPapi integration ──
         # Option β-tight: gated behind DASHBOARD_FETCH_ODDSPAPI (default False).

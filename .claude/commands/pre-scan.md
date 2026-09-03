@@ -56,6 +56,23 @@ Check for:
 
 Report age of each file. Flag as **WARNING** if older than 7 days (should be refreshed weekly by Sunday retrain).
 
+Also report whether each trained state carries **`seed_params`**, and the
+`n_events` behind it. Age does not answer this: a pickle written yesterday by
+pre-[ADR 0012](../../docs/adr/0012-division-movement-seed-for-the-premier-league.md)
+code has no such key, loads without complaint, and silently rates every
+arriving side from the hand-picked `PRIORS` bucket the measured priors exist to
+replace. The fallback is deliberate — an old pickle must not crash the
+predictor — which is exactly why nothing reports it on its own.
+
+Flag as **WARNING** when the key is absent, or when `n_events` is below 30
+(`division_movement._MIN_EVENTS`), since below that the seed falls back by
+design. Expected at full sample: PL 75 events, EFL 150.
+
+```
+[PASS] PL seed params present (75 events, 1 bucket: promoted)
+[WARN] EFL trained state has no seed_params - arrivals fall back to PRIORS
+```
+
 ### Output Format
 
 ```

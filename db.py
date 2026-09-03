@@ -131,6 +131,24 @@ def get_db(league: str = "PL") -> Generator[sqlite3.Connection, None, None]:
                 "ALTER TABLE match_analysis ADD COLUMN edge_source TEXT"
             )
 
+        # Migrate: outcomes for every evaluated market, not just the ones we
+        # liked. `predictions` stores a row only when edge_pct > 0 and
+        # `recommendations` only when the gate passed, so both are selected
+        # samples — and conditioning on the model's own positive edge inflates
+        # its apparent confidence by ~6.3 points whatever its real calibration
+        # (measured walk-forward over the OOF caches). Settling this table is
+        # what makes an unbiased calibration measurement possible at all.
+        for _col, _type in (("settled", "INTEGER DEFAULT 0"),
+                            ("won", "INTEGER"),
+                            ("actual_result", "TEXT"),
+                            ("settled_at", "TEXT")):
+            try:
+                conn.execute(f"SELECT {_col} FROM match_analysis LIMIT 1")
+            except sqlite3.OperationalError:
+                conn.execute(
+                    f"ALTER TABLE match_analysis ADD COLUMN {_col} {_type}"
+                )
+
         # ── predictions: every positive-edge prediction, settled automatically ──
         conn.execute("""
             CREATE TABLE IF NOT EXISTS predictions (
@@ -242,7 +260,8 @@ def save_match_analysis(rows: list[dict], league: str = "PL") -> int:
         try:
             cursor = conn.execute(
                 "SELECT home_team, away_team, market, side, "
-                "model_prob, edge_pct, confidence, per_model_json "
+                "model_prob, edge_pct, confidence, per_model_json, "
+                "settled, won, actual_result, settled_at "
                 "FROM match_analysis"
             )
             for row in cursor.fetchall():
@@ -252,6 +271,15 @@ def save_match_analysis(rows: list[dict], league: str = "PL") -> int:
                     "edge_pct": row[5],
                     "confidence": row[6],
                     "per_model_json": row[7],
+                    # A rescan must never unsettle a fixture. This function
+                    # deletes and re-inserts per fixture, so without carrying
+                    # the outcome forward a settled row would come back blank
+                    # — silently, and the calibration series would just get
+                    # shorter. Same reasoning as the model_prob rescue below.
+                    "settled": row[8],
+                    "won": row[9],
+                    "actual_result": row[10],
+                    "settled_at": row[11],
                 }
         except Exception:
             pass
@@ -266,6 +294,11 @@ def save_match_analysis(rows: list[dict], league: str = "PL") -> int:
 
         now = datetime.now().isoformat()
         for r in rows:
+            # Outcome carried forward for every row, unconditionally — the
+            # delete-and-reinsert above would otherwise blank a settled
+            # fixture without raising anything.
+            settled_prev = existing.get(
+                (r["home_team"], r["away_team"], r["market"], r["side"])) or {}
             model_p = r.get("model_prob")
             edge = r.get("edge_pct")
             conf = r.get("confidence")
@@ -335,8 +368,10 @@ def save_match_analysis(rows: list[dict], league: str = "PL") -> int:
                     market, side, best_odds, best_bookmaker,
                     model_prob, fair_odds, edge_pct, confidence,
                     n_books, per_model_json, bookmaker_odds_json,
-                    edge_source)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    edge_source,
+                    settled, won, actual_result, settled_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                           ?, ?, ?, ?)""",
                 (
                     now,
                     r["home_team"], r["away_team"],
@@ -349,6 +384,18 @@ def save_match_analysis(rows: list[dict], league: str = "PL") -> int:
                     json.dumps(per_model),
                     json.dumps(r.get("bookmaker_odds", {})),
                     r.get("edge_source"),
+                    # Settlement is never re-derived from a scan; it is only
+                    # ever carried forward. A fixture that has been settled
+                    # stays settled however many times it is rescanned.
+                    #
+                    # Looked up on its own rather than reusing `prev` above:
+                    # that name is bound only when the row arrives without a
+                    # model_prob, so reading it here works until the first
+                    # scan that carries one — which is the normal case.
+                    settled_prev.get("settled") or 0,
+                    settled_prev.get("won"),
+                    settled_prev.get("actual_result"),
+                    settled_prev.get("settled_at"),
                 ),
             )
         conn.commit()

@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+import plotly.io as pio
 from dash import (
     Dash, dcc, html, Input, Output, State, ALL, MATCH,
     dash_table, callback_context, no_update,
@@ -79,6 +80,68 @@ _COLOURS = {
     "accent": "#00d4aa",
     "warn": "#ffd43b",
 }
+
+# One chart style, registered once and inherited by every figure.
+#
+# Each figure used to restate its own background, font, margins and legend, and
+# none of them styled an axis at all — so all five rendered Plotly's default
+# grid over a dark card, which is most of what makes a chart look generated
+# rather than designed. The other half was the modebar, handled at the
+# `dcc.Graph` call sites via `_GRAPH_CONFIG`.
+#
+# A figure now sets its data and nothing else. Anything that should look the
+# same across charts belongs here, and changing it here changes all of them.
+_CHART_TEMPLATE = "betbot"
+
+pio.templates[_CHART_TEMPLATE] = go.layout.Template(
+    layout=go.Layout(
+        paper_bgcolor=_COLOURS["card"],
+        plot_bgcolor=_COLOURS["card"],
+        font={"family": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+              "size": 12, "color": _COLOURS["text"]},
+        # Titles live in the page's own headings, not inside the figure. Two
+        # renderings of one title, in two typefaces, was the most visible tell.
+        title={"text": ""},
+        margin={"l": 56, "r": 24, "t": 16, "b": 44},
+        hovermode="x unified",
+        hoverlabel={"bgcolor": _COLOURS["header"],
+                    "bordercolor": _COLOURS["muted"],
+                    "font": {"color": _COLOURS["text"], "size": 12}},
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.0,
+                "xanchor": "left", "x": 0, "bgcolor": "rgba(0,0,0,0)",
+                "font": {"size": 11, "color": _COLOURS["muted"]}},
+        colorway=[_COLOURS["accent"], "#4dabf7", _COLOURS["warn"],
+                  "#ff6b6b", "#69db7c", "#da77f2"],
+        xaxis={
+            # No vertical grid: it adds lines without adding information, and
+            # it is the single strongest "matplotlib default" signal.
+            "showgrid": False,
+            "zeroline": False,
+            "showline": True,
+            "linecolor": "rgba(136,152,170,0.25)",
+            "ticks": "outside",
+            "ticklen": 4,
+            "tickcolor": "rgba(136,152,170,0.25)",
+            "tickfont": {"size": 11, "color": _COLOURS["muted"]},
+            "title": {"font": {"size": 11, "color": _COLOURS["muted"]}},
+        },
+        yaxis={
+            # Horizontal grid stays — it is what makes a value readable off
+            # the axis — but faint enough to sit behind the data.
+            "showgrid": True,
+            "gridcolor": "rgba(136,152,170,0.12)",
+            "zeroline": False,
+            "showline": False,
+            "ticks": "",
+            "tickfont": {"size": 11, "color": _COLOURS["muted"]},
+            "title": {"font": {"size": 11, "color": _COLOURS["muted"]}},
+        },
+    )
+)
+
+# The Plotly modebar — camera, zoom, pan, "Produced with Plotly" — announces
+# the library on hover. Three of the five graphs showed it.
+_GRAPH_CONFIG = {"displayModeBar": False, "responsive": True}
 
 
 def _format_market(code: str) -> str:
@@ -1530,7 +1593,7 @@ def _build_performance(league: str) -> html.Div:
     return html.Div([
         dbc.Row([
             dbc.Col([
-                dcc.Graph(figure=_make_bankroll_chart(settled)),
+                dcc.Graph(figure=_make_bankroll_chart(settled), config=_GRAPH_CONFIG),
             ], md=12),
         ]),
         html.Hr(className="border-secondary"),
@@ -1737,17 +1800,9 @@ def _make_live_vs_sim_panel(league: str, settled: pd.DataFrame) -> html.Div:
 def _make_bankroll_chart(settled: pd.DataFrame) -> go.Figure:
     """Create bankroll / cumulative P&L chart."""
     fig = go.Figure()
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor=_COLOURS["bg"],
-        plot_bgcolor=_COLOURS["bg"],
-        hovermode="x unified",
-        legend=dict(x=0.02, y=0.98),
-        margin=dict(l=40, r=20, t=50, b=40),
-    )
+    fig.update_layout(template=_CHART_TEMPLATE)
 
     if settled.empty:
-        fig.update_layout(title="Cumulative P&L (no settled bets yet)")
         return fig
 
     df = settled.sort_values("settled_at").copy()
@@ -1780,11 +1835,7 @@ def _make_bankroll_chart(settled: pd.DataFrame) -> go.Figure:
             line=dict(color=color, width=1, dash="dot"),
         ))
 
-    fig.update_layout(
-        title="Cumulative P&L",
-        xaxis_title="Bet #",
-        yaxis_title="Profit (units)",
-    )
+    fig.update_layout(xaxis_title="Bet #", yaxis_title="Profit (units)")
     return fig
 
 
@@ -2510,15 +2561,10 @@ def _build_analytics(league: str) -> html.Div:
                         annotation_text="0%", annotation_position="right",
                     )
                     fig_cum.update_layout(
-                        title="Cumulative P/L Over Time (% of bankroll)",
+                        template=_CHART_TEMPLATE,
                         xaxis_title="Kickoff date",
                         yaxis_title="Cumulative P/L %",
-                        plot_bgcolor=_COLOURS["card"],
-                        paper_bgcolor=_COLOURS["card"],
-                        font={"color": _COLOURS["text"]},
-                        height=350,
-                        margin={"l": 50, "r": 30, "t": 50, "b": 50},
-                        legend={"orientation": "h", "y": -0.18},
+                        height=340,
                         annotations=[{
                             "x": 0.02, "y": 0.95, "xref": "paper", "yref": "paper",
                             "text": dd_label, "showarrow": False,
@@ -2540,7 +2586,7 @@ def _build_analytics(league: str) -> html.Div:
                             "Dotted line is the all-positive-edge counterfactual.",
                             className="text-muted small mb-2",
                         ),
-                        dcc.Graph(figure=fig_cum, config={"displayModeBar": False}),
+                        dcc.Graph(figure=fig_cum, config=_GRAPH_CONFIG),
                     ]))
 
             # ══════════════════════════════════════════════════════════════
@@ -2652,14 +2698,10 @@ def _build_analytics(league: str) -> html.Div:
                             textposition="outside",
                         ))
                     fig_pred.update_layout(
-                        title="Prediction Hit Rate by Edge Bucket",
+                        template=_CHART_TEMPLATE,
                         xaxis_title="Edge Bucket",
                         yaxis_title="Hit Rate %",
                         barmode="group",
-                        plot_bgcolor=_COLOURS["card"],
-                        paper_bgcolor=_COLOURS["bg"],
-                        font_color=_COLOURS["text"],
-                        legend=dict(orientation="h", y=1.1),
                         height=320,
                     )
                     for _, row in pred_bucket_df.iterrows():
@@ -2672,7 +2714,7 @@ def _build_analytics(league: str) -> html.Div:
                     sections.append(html.Div([
                         html.H6("Prediction Edge Analysis",
                                 className="text-light mt-3 mb-2"),
-                        dcc.Graph(figure=fig_pred),
+                        dcc.Graph(figure=fig_pred, config=_GRAPH_CONFIG),
                     ]))
 
                     # Table
@@ -2910,14 +2952,10 @@ def _build_analytics(league: str) -> html.Div:
             textposition="outside",
         ))
         fig_edge.update_layout(
-            title="Hit Rate & ROI by Edge Bucket",
+            template=_CHART_TEMPLATE,
             xaxis_title="Edge Bucket",
             yaxis_title="%",
             barmode="group",
-            plot_bgcolor=_COLOURS["card"],
-            paper_bgcolor=_COLOURS["bg"],
-            font_color=_COLOURS["text"],
-            legend=dict(orientation="h", y=1.1),
             height=350,
         )
         # Add sample size annotations
@@ -2932,7 +2970,7 @@ def _build_analytics(league: str) -> html.Div:
             html.H6("Edge Validation", className="text-light mt-3 mb-2"),
             html.P("Does higher model edge correspond to higher win rate?",
                     className="text-muted small"),
-            dcc.Graph(figure=fig_edge),
+            dcc.Graph(figure=fig_edge, config=_GRAPH_CONFIG),
         ]))
 
         # Edge bucket table
@@ -3009,12 +3047,9 @@ def _build_analytics(league: str) -> html.Div:
                   for _, r in cal_df.iterrows()],
         ))
         fig_cal.update_layout(
-            title="Calibration: Predicted vs Actual Win Rate",
+            template=_CHART_TEMPLATE,
             xaxis_title="Model Predicted Probability",
             yaxis_title="Actual Win Rate",
-            plot_bgcolor=_COLOURS["card"],
-            paper_bgcolor=_COLOURS["bg"],
-            font_color=_COLOURS["text"],
             height=350,
             xaxis=dict(range=[0.35, 1.0]),
             yaxis=dict(range=[0.35, 1.0]),
@@ -3025,7 +3060,7 @@ def _build_analytics(league: str) -> html.Div:
             html.P("Points on the dashed line = perfectly calibrated. "
                     "Above = model underestimates. Below = model overestimates.",
                     className="text-muted small"),
-            dcc.Graph(figure=fig_cal),
+            dcc.Graph(figure=fig_cal, config=_GRAPH_CONFIG),
         ]))
 
     # ── Confidence Level Breakdown ──

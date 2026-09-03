@@ -90,20 +90,34 @@ def _prior_season(season: int, teams: list[str]) -> list[dict]:
 
 
 def _arrival_season(season: int, arrival: str, others: list[str],
-                    home_matches: int) -> list[dict]:
-    """``home_matches`` played home fixtures for ``arrival``, all real form.
+                    home_matches: int,
+                    away_matches: int | None = None) -> list[dict]:
+    """Played fixtures for ``arrival``, at each venue, all real form.
 
     ``OPP`` is deliberately never hosted by, and never hosts, the arrival:
     the fixture under test has to be one that has not been played, or
     ``_fixture_feature_row`` returns the played row from its exact-fixture
     shortcut and no seeding code runs at all. Two of these tests passed that
     way on the first draft, against the very defect they were written for.
+
+    ``away_matches`` defaults to none played, which is what the per-venue
+    tests below need in order to show an away seed surviving a home record.
+    The *duration* tests pass it explicitly instead: a real fixture list
+    alternates venues, so a side fourteen matches into a season has played
+    roughly seven at each, never fourteen at one and none at the other. A
+    fixture that only ever plays at home cannot tell "past the window" from
+    "has not travelled yet".
     """
+    away_matches = 0 if away_matches is None else away_matches
     rows = []
     for n in range(home_matches):
         rows.append(_row(season, f"20{20 + season}-02-{n + 1:02d}",
                          arrival, others[n % len(others)],
                          home_promoted=1, value=_ACTUAL_VALUE))
+    for n in range(away_matches):
+        rows.append(_row(season, f"20{20 + season}-03-{n + 1:02d}",
+                         others[n % len(others)], arrival,
+                         away_promoted=1, value=_ACTUAL_VALUE))
     # Established fixtures, so the season is not just the arrival and both
     # OPP and others[0] carry rows at each venue.
     rows.append(_row(season, f"20{20 + season}-02-20", others[0], "OPP"))
@@ -263,28 +277,17 @@ class TestTheSeedWindowIsCountedPerVenue:
 class TestBothPipelinesStillUseTheseWeights:
     """The serving blend is only correct while training agrees with it.
 
-    Both pipelines declare the weights inline as a local. Matched line-wise
-    rather than by substring, because a substring check here would pass
-    against a dict that merely contains these pairs among others.
+    The weights themselves are no longer asserted here. Both pipelines now
+    call `seed_weight`, and
+    `test_seed_retires_per_venue.test_the_pipeline_blend_follows_the_shared_weights`
+    proves it behaviourally by changing the shared dict and requiring the
+    pipeline's output to move. The test that used to live here matched a
+    literal line of source, which passes for exactly as long as a private
+    copy happens to agree with the shared one — the failure mode it was
+    written to catch.
+
+    The cutoff stays, because it is a separate number and still a literal.
     """
-
-    @pytest.mark.parametrize("module,func", [
-        ("pipeline", "initialize_promoted_features"),
-        ("championship_pipeline", "initialize_promoted_features"),
-    ])
-    def test_the_inline_weights_match_the_shared_constant(self, module, func):
-        import importlib
-        import inspect
-        from division_movement import SEED_BLEND_WEIGHTS
-
-        source = inspect.getsource(
-            getattr(importlib.import_module(module), func))
-        expected = ("blend_weights = "
-                    "{1: 1.0, 2: 0.8, 3: 0.6, 4: 0.4, 5: 0.2}")
-
-        assert any(line.strip() == expected for line in source.splitlines()), (
-            f"{module}.{func} no longer blends on SEED_BLEND_WEIGHTS "
-            f"({SEED_BLEND_WEIGHTS}); serving and training have diverged")
 
     @pytest.mark.parametrize("module,func", [
         ("pipeline", "initialize_promoted_features"),
@@ -395,8 +398,9 @@ class TestTheDixonColesSeedRetires:
         def __init__(self):
             self.seeded: dict[str, str] = {}
 
-        def seed_arrivals(self, incoming, priors):
+        def seed_arrivals(self, incoming, priors, *, venues=None):
             self.seeded.update(incoming)
+            self.venues = venues
 
     @staticmethod
     def _predictor(matches_played: int):
@@ -404,9 +408,14 @@ class TestTheDixonColesSeedRetires:
         from division_movement import SeedParams
 
         others = ["T01", "T02", "T03", "T04", "T05"]
+        # Played at *both* venues. The seed window is per venue, so a side
+        # that had only ever played at home would keep its away seed however
+        # long the season ran — correctly, but that is the other tests' case,
+        # not this one. Duration is what these tests are about.
         df = pd.DataFrame(
             _prior_season(24, others + ["T06"])
-            + _arrival_season(25, "NEWCO", others, matches_played)
+            + _arrival_season(25, "NEWCO", others, matches_played,
+                              away_matches=matches_played)
         )
         predictor = ChampionshipPredictor.__new__(ChampionshipPredictor)
         predictor.verbose = False
